@@ -1,0 +1,19 @@
+{
+    "name": "Game.Smoke.Builders",
+    "rootNamespace": "Game.Smoke.Builders",
+    "references": [
+        "Harness.Runtime",
+        "Harness.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

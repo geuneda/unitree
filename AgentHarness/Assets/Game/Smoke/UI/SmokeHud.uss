@@ -1,0 +1,44 @@
+.hud {
+    position: absolute;
+    left: 32px;
+    top: 28px;
+    padding: 14px 22px 14px 18px;
+    background-color: rgba(6, 9, 20, 0.62);
+    border-radius: 10px;
+    border-left-width: 4px;
+    border-left-color: rgb(40, 220, 255);
+    min-width: 260px;
+}
+
+.hud__title {
+    font-size: 15px;
+    color: rgb(150, 215, 255);
+    -unity-font-style: bold;
+    letter-spacing: 3px;
+    margin-bottom: 6px;
+}
+
+.hud__row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.hud__key {
+    font-size: 18px;
+    color: rgb(170, 180, 200);
+    letter-spacing: 2px;
+}
+
+.hud__value {
+    font-size: 30px;
+    color: rgb(255, 255, 255);
+    -unity-font-style: bold;
+}
+
+.hud__hint {
+    margin-top: 6px;
+    font-size: 13px;
+    color: rgb(255, 120, 210);
+    letter-spacing: 1px;
+}

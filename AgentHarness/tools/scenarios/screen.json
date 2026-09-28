@@ -1,0 +1,12 @@
+{
+    "name": "screen",
+    "durationSec": 2.5,
+    "fixedDeltaTime": 0.0166667,
+    "events": [
+        { "t": 1.0, "type": "keyTap", "key": "Space" }
+    ],
+    "captures": [
+        { "t": 0.5, "preset": "main" },
+        { "t": 2.2, "preset": "screen", "name": "gameview_with_ui" }
+    ]
+}
