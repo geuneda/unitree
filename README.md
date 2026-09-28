@@ -81,17 +81,60 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1               # 씬이 �
 powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke
 ```
 
-### 여러 에이전트가 동시에 작업할 때
+## 여러 에이전트가 동시에 작업할 때 (worktree + submit)
 
-에디터는 한 폴더에 묶여 있어서, 여럿이 그 폴더를 직접 고치면 한 명의 컴파일 에러가 모두의 루프를 멈춥니다.
-그래서 에이전트마다 git worktree에서 작업하고, `submit.ps1`로 자기 모듈만 에디터 트리에 넣어 루프를 돌립니다.
-submit은 트랜잭션이라 컴파일·런타임이 빨가면 에디터 트리를 submit 전 상태로 되돌리므로 다른 에이전트의 루프는 막히지 않습니다.
+### 문제
+
+Unity 에디터는 프로젝트 폴더 하나(이하 **에디터 트리**)에만 붙어 있고, 어셈블리 하나라도 컴파일에 실패하면 도메인 리로드를 하지 않습니다.
+그래서 여러 에이전트가 에디터 트리를 직접 고치면, 한 명이 쓰다 만 코드 때문에 **모두의 루프가 `stage=compile`로 멈춥니다.**
+모듈별 asmdef는 다시 컴파일하는 범위만 줄여 줄 뿐 이 문제를 막지 못합니다.
+
+### 사용법
 
 ```powershell
-git worktree add ..\wt-foo -b agent/foo          # 에디터가 연 체크아웃에서, 에이전트당 1회
-cd ..\wt-foo\AgentHarness                       # Assets/Game/Foo/ 만 편집
-powershell -ExecutionPolicy Bypass -File tools/submit.ps1 -Module Foo
+git worktree add ..\wt-foo -b agent/foo          # 에디터가 연 체크아웃에서, 에이전트당 1회 (Library/ 없음 → 임포트 불필요)
+cd ..\wt-foo\AgentHarness                       # 이후 편집·명령은 모두 여기서. Assets/Game/Foo/ 만 고친다
+powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Foo   # 에디터 없이 ~0.5 s, 동시 실행 OK
+powershell -ExecutionPolicy Bypass -File tools/submit.ps1 -Module Foo         # 에디터 트리에서 루프 (트랜잭션)
 ```
+
+결과는 `loop.ps1`과 같은 report.json에 `submit` 필드가 붙어 worktree의 `HarnessOut/submit/`에 나옵니다. 종료코드 0 = 녹색이고 반영됨.
+
+### 작동 원리
+
+에이전트는 코드를 자기 worktree에만 씁니다. 에디터 트리에는 `submit.ps1`만 파일을 넣고, 넣은 결과가 빨가면 스스로 되돌립니다.
+그래서 에디터 트리는 항상 "마지막으로 녹색이었던 상태"로 남고, 다른 에이전트의 루프는 그 상태 위에서 돕니다.
+
+| 단계 | 어디서 | 하는 일 | 실패하면 |
+|---|---|---|---|
+| ① 사전 검사 | worktree, 락 없음 | worktree 소스를 에디터가 쓰는 컴파일러 설정(`Library/Bee/*.rsp`)과 DLL로 컴파일한다. 참조하는 `Game.Contracts`도 같이 컴파일해 연결하고, 에디터가 아직 모르는 새 모듈은 응답 파일을 합성한다 | `stage=compile`, 에디터 트리는 손대지 않음 (~1 s) |
+| ② 동기화 | 에디터 락 안 | 덮어쓰거나 지울 파일을 백업하고 저널(`Library/Harness/submit/pending.json`)을 쓴 뒤, `Assets/Game/<Module>/`를 그대로 미러링한다. `Contracts/`는 **새 파일만** 추가 | 기존 계약 파일을 바꿨으면 `stage=submit`으로 거부 |
+| ③ 루프 | 에디터 트리 | `loop.ps1`과 같은 루프 (컴파일 → 씬 빌드 → 플레이 → 콘솔·통계) | — |
+| ④ 판정 | 에디터 락 안 | 녹색이면 유지하고, Unity가 새로 만든 `.meta`를 worktree로 되복사한다(GUID를 커밋하도록) | 백업을 복원하고 다시 컴파일 → 에디터 트리는 submit 전 상태 |
+
+- **어느 에디터에 붙는가**: `Library/`가 없는 체크아웃은 `git worktree list`의 메인 worktree에서 같은 하위 경로를 에디터 트리로 씁니다
+  (복사본이면 `AGENTHARNESS_EDITOR_ROOT`). 락과 에디터 HTTP 연결은 항상 에디터 트리 기준이라, 어느 worktree에서 실행해도 같은 줄에 섭니다.
+- **되돌리는 기준**: 컴파일 실패는 항상 되돌립니다. 런타임·셰이더·lint·빈 화면 실패도 기본은 되돌리고, `-KeepOnFail`을 주면 남깁니다
+  (에디터 트리가 이미 남의 모듈 때문에 빨간 경우용; `submit.errorModules`로 판단).
+- **도중에 죽어도 안전**: submit이 타임아웃·kill로 죽으면 저널이 남습니다. 다음에 락을 잡는 `loop`/`uc`/`submit`이 그 저널로
+  자동으로 되돌리고 report에 `recoveredSubmit`을 남깁니다.
+- **실수 방지**: worktree에서 `loop.ps1`을 돌리면 거부됩니다(`stage=submit`). 에디터가 컴파일하는 건 worktree가 아니라 에디터 트리이기 때문입니다.
+
+### 검증 (측정)
+
+| 상황 | 결과 |
+|---|---|
+| A가 컴파일 에러가 있는 모듈을 submit | 사전 검사에서 0.96 s 만에 거부, 에디터 트리 변화 없음 |
+| A가 사전 검사를 건너뛰고 강제 submit, 0.5 s 뒤 B가 새 모듈 + 새 계약 submit | A: `stage=compile`(정확한 file/line) → 되돌림 + 복구 컴파일. B: 락 5.7 s 대기 후 **녹색** |
+| 런타임 예외가 나는 코드를 submit | `stage=runtime`(정확한 줄) → 되돌림 |
+| 파일 복사 직후 submit 프로세스를 kill | 깨진 코드가 남은 상태에서 다음 `loop.ps1`이 저널로 되돌리고 녹색 |
+
+### 한계
+
+- 한 모듈은 한 에이전트만 submit합니다(미러링이라 마지막 submit이 이깁니다).
+- 루프 자체는 여전히 한 번에 하나씩 돕니다(G5-1).
+- 브랜치 병합은 수동입니다(G5-5). submit한 파일은 메인 트리에 미커밋 사본으로 남아 `git merge`가 거부하므로, 그 브랜치 경로만 치우고 병합합니다:
+  `$p = git diff --name-only HEAD...agent/foo; git stash push -u -m land-foo -- $p; git merge agent/foo` → 확인 후 `git stash drop`.
 
 ## 구조
 
@@ -110,8 +153,7 @@ AgentHarness/
 
 `AgentHarness/CLAUDE.md`에 루프 사용법, report.json 해석, 규칙(YAML 직접 수정 금지, 텍스트 우선 형태, 모듈 폴더 밖 수정 금지,
 에디터 조작은 순서대로), 모듈·빌더 템플릿, 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`에서 항목을 고르세요.
-병렬 에이전트는 worktree + `submit.ps1`을 씁니다(한 에이전트의 컴파일 에러가 다른 에이전트의 루프를 막지 않음, G5-2).
-남은 병렬 과제는 루프 직렬화(G5-1)와 worktree 브랜치 병합 자동화(G5-5)입니다.
+병렬 에이전트는 위의 worktree + `submit.ps1` 흐름을 씁니다(G5-2). 남은 병렬 과제는 루프 직렬화(G5-1)와 브랜치 병합 자동화(G5-5)입니다.
 
 ## 라이선스
 
