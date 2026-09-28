@@ -23,7 +23,7 @@ Claude Code 같은 코딩 에이전트가 **Unity에서도 Three.js로 웹 3D를
 | 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크 |
 | 3. 눈으로 검증 | 캡처 PNG + 이미지 통계, 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로 |
 | 4. 에셋 없이 완성도 | 절차적 메시/노이즈/텍스처 베이크, 코드로 만든 URP 후처리, 스카이 반사 베이크 |
-| 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스 |
+| 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 worktree + 트랜잭션 submit |
 
 ## 루프 한 방
 
@@ -58,7 +58,7 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 - Windows 10/11 — 도구 스크립트는 Windows PowerShell 5.1 기준
 - Unity **6000.3.11f1** (Unity 6.3 LTS) + URP (프로젝트에 포함)
 - Unity CLI (`unity`, beta): `$env:UNITY_CLI_CHANNEL='beta'; irm https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.ps1 | iex`
-- 선택: Visual Studio 2022 MSBuild (`compile-check.ps1`의 msbuild 백엔드). `csc` 백엔드는 Unity 설치에 포함된 Roslyn만 쓴다.
+- 선택: Visual Studio 2022 MSBuild (`compile-check.ps1`의 msbuild 백엔드). 기본인 `csc` 백엔드는 Unity 설치에 포함된 Roslyn만 쓴다.
 - **짧은 경로에 클론할 것 (프로젝트 경로 60자 이하 권장).** Unity 패키지 내부 경로가 길어서(Library 아래 최장 200자 이상) 긴 경로에 두면
   Windows 260자 경로 제한에 걸려 Unity 자체가 패키지 파일을 못 읽는다. 확인: 49자·57자 경로 정상, 149자 경로에서 임포트 에러와 플레이 실패.
 
@@ -75,10 +75,22 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1               # 씬이 �
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)
 또는 `unity command harness_capture --preset all --format json`.
 
-에디터 없이 컴파일만 검사(병렬 에이전트용):
+에디터 없이 컴파일만 검사(에디터 내장 Roslyn, 모듈당 ~0.5 s):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke -Backend csc
+powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke
+```
+
+### 여러 에이전트가 동시에 작업할 때
+
+에디터는 한 폴더에 묶여 있어서, 여럿이 그 폴더를 직접 고치면 한 명의 컴파일 에러가 모두의 루프를 멈춥니다.
+그래서 에이전트마다 git worktree에서 작업하고, `submit.ps1`로 자기 모듈만 에디터 트리에 넣어 루프를 돌립니다.
+submit은 트랜잭션이라 컴파일·런타임이 빨가면 에디터 트리를 submit 전 상태로 되돌리므로 다른 에이전트의 루프는 막히지 않습니다.
+
+```powershell
+git worktree add ..\wt-foo -b agent/foo          # 에디터가 연 체크아웃에서, 에이전트당 1회
+cd ..\wt-foo\AgentHarness                       # Assets/Game/Foo/ 만 편집
+powershell -ExecutionPolicy Bypass -File tools/submit.ps1 -Module Foo
 ```
 
 ## 구조
@@ -91,14 +103,15 @@ AgentHarness/
   Assets/Harness/Runtime/Procedural/   MeshBuilder · Noise · TextureBaker · PMath
   Assets/Harness/Editor/    harness_* 에디터 커맨드, BuildContext / IBuildStep
   Assets/Game/<Module>/     모듈 런타임 코드 (+ Shaders/, UI/), Builders/ 에 씬 빌드 스텝
-  tools/                    loop.ps1 · uc.ps1 · compile-check.ps1 · scenarios/*.json
+  tools/                    loop.ps1 · submit.ps1 · uc.ps1 · compile-check.ps1 · scenarios/*.json
 ```
 
 ## 에이전트와 함께 쓰기
 
 `AgentHarness/CLAUDE.md`에 루프 사용법, report.json 해석, 규칙(YAML 직접 수정 금지, 텍스트 우선 형태, 모듈 폴더 밖 수정 금지,
 에디터 조작은 순서대로), 모듈·빌더 템플릿, 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`에서 항목을 고르세요.
-가장 큰 남은 과제는 병렬 에이전트가 작업 트리를 공유해야 해서, 한 에이전트의 컴파일 에러가 모두의 루프를 막는다는 점입니다(G5-2).
+병렬 에이전트는 worktree + `submit.ps1`을 씁니다(한 에이전트의 컴파일 에러가 다른 에이전트의 루프를 막지 않음, G5-2).
+남은 병렬 과제는 루프 직렬화(G5-1)와 worktree 브랜치 병합 자동화(G5-5)입니다.
 
 ## 라이선스
 
