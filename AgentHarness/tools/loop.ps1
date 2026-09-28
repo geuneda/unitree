@@ -170,6 +170,8 @@ $warningCount = 0
 if ($con.success) {
     $runtimeErrors = @($con.result.runtimeErrors | ForEach-Object { [ordered]@{ type = $_.type; msg = $_.message; file = $_.file; line = $_.line; module = $_.module; count = $_.count; stack = $_.stack } })
     $warningCount = [int]$con.result.counts.warning
+    # Errors from inside the Editor/packages (no Assets/ frame). Visible, but they do not fail the loop.
+    $report['editorErrors'] = @($con.result.editorErrors | ForEach-Object { [ordered]@{ type = $_.type; msg = ($_.message -split "`n")[0]; count = $_.count; stack = $_.stack } })
 }
 $report.runtimeErrors = $runtimeErrors
 $report['warningCount'] = $warningCount

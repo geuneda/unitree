@@ -191,7 +191,21 @@ namespace Harness.Editor
         {
             var m = new Material(shader);
             setup?.Invoke(m);
+            ValidateMaterial(m);
             return SaveAsset(m, name + ".mat");
+        }
+
+        /// <summary>
+        /// Run the shader's ShaderGUI.ValidateMaterial (what the Inspector does on every change). URP Lit derives
+        /// keywords, the RenderType tag, disabled passes and legacy _Color/_MainTex from its properties there.
+        /// Without it the first build (URP's import postprocessor validates new .mat files) and later in-place
+        /// overwrites (no postprocessor) produce different materials.
+        /// </summary>
+        public static void ValidateMaterial(Material m)
+        {
+            var editor = (MaterialEditor)UnityEditor.Editor.CreateEditor(m);
+            try { editor.customShaderGUI?.ValidateMaterial(m); }
+            finally { Object.DestroyImmediate(editor); }
         }
 
         public Mesh SaveMesh(Mesh mesh, string name) => SaveAsset(mesh, name + ".asset");

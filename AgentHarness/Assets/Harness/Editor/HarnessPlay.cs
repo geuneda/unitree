@@ -125,7 +125,9 @@ namespace Harness.Editor
             };
             st.Save();
             s_Watch.Restart();
-            EditorApplication.delayCall += () => EditorApplication.EnterPlaymode();
+            // Not delayCall: it runs "after inspectors update", which never happens in an unfocused Editor.
+            // Setting isPlaying is itself deferred to the end of the frame, so this reply still goes out first.
+            EditorApplication.isPlaying = true;
             return new { ok = true, id = st.id, state = st.state, outDir, scenario = source, poll = "harness_play_status" };
         }
 

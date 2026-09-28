@@ -229,6 +229,7 @@ namespace Harness.Editor
 
             var entries = ReadSince(since);
             var runtimeErrors = new List<LogEntry>();
+            var editorErrors = new List<LogEntry>();
             var warnings = new List<LogEntry>();
             var logs = new List<LogEntry>();
             int errorCount = 0, exceptionCount = 0, assertCount = 0, warningCount = 0, logCount = 0, infraCount = 0, shaderLogCount = 0;
@@ -246,7 +247,7 @@ namespace Harness.Editor
                     case "Warning": warningCount++; break;
                     default: logCount++; break;
                 }
-                var target = e.type == "Warning" ? warnings : e.type == "Log" ? (includeLogs ? logs : null) : runtimeErrors;
+                var target = e.type == "Warning" ? warnings : e.type == "Log" ? (includeLogs ? logs : null) : IsEditorInternal(e) ? editorErrors : runtimeErrors;
                 if (target == null) continue;
                 // Compiler errors are also logged as console errors; they are already reported above.
                 if (e.type == "Error" && s_CompilerPrefix.IsMatch(e.message ?? "")) continue;
@@ -264,10 +265,25 @@ namespace Harness.Editor
                 compileErrors,
                 compileWarningCount = compileWarnings,
                 runtimeErrors,
+                editorErrors,
                 warnings,
                 logs = includeLogs ? logs : null,
                 counts = new { error = errorCount, exception = exceptionCount, assert = assertCount, warning = warningCount, log = logCount, infra = infraCount, shaderLog = shaderLogCount },
             };
+        }
+
+        /// <summary>
+        /// Errors raised inside the Editor/packages themselves, e.g. UnityEditor.Search indexing on startup or a Burst
+        /// JIT cache DLL blocked by Windows application control. Reported as editorErrors; they do not fail a loop.
+        /// Anything that mentions Assets/ (message or stack) or has no stack and no Burst origin stays a runtime error.
+        /// </summary>
+        static bool IsEditorInternal(LogLine e)
+        {
+            var msg = e.message ?? "";
+            if (msg.Contains("Assets/")) return false;
+            if (!string.IsNullOrEmpty(e.stack))
+                return !e.stack.Contains("Assets/");
+            return msg.StartsWith("Unexpected error in Burst compilation", StringComparison.Ordinal);
         }
 
         static void Fold(List<LogEntry> list, LogLine e, int limit)

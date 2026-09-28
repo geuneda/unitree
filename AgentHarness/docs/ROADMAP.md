@@ -120,6 +120,18 @@
   - 할 일: 패키지를 업그레이드할 때마다 loop 검증 매트릭스(아래)를 다시 돌린다.
 - [ ] **O-2 스크립트가 Windows PowerShell 5.1 전용** (ASCII 제약, `C:\Program Files` 경로 가정). pwsh 7 / macOS 지원.
 - [ ] **O-3 하네스 자체의 자동 테스트가 없다.** 아래 매트릭스를 스크립트(`tools/selftest.ps1`)로 만든다.
+- [ ] **O-4 Pipeline `quit` 커맨드가 편집 모드에서 실패한다** (`PipelineQuitScheduler`가 DontDestroyOnLoad 호출).
+  에디터를 코드로 닫는 믿을 만한 방법이 없다. `EditorApplication.delayCall` 경유 `Exit`도 백그라운드 에디터에선 실행되지 않는다.
+  2026-09-29 클론 검증 중 메인 에디터가 정상 종료 절차로 꺼졌는데 원인을 로그로 특정하지 못했다.
+  확인된 우회: `eval`로 `EditorApplication.Exit(0)`를 **직접** 호출하면 백그라운드 에디터도 정상 종료된다 → `harness_quit`으로 만들 것.
+- [ ] **O-5 `%TEMP%` 아래 프로젝트에서 Burst JIT DLL 로드가 막힌다** (LoadLibrary error 4551 = Windows 애플리케이션 제어 정책).
+  editorErrors로만 보고된다. 프로젝트를 Temp에 두지 말 것.
+- [ ] **O-6 도메인 리로드 직후 Unity Search 인덱서 예외** (`UnityEditor.Search.SearchInit.IndexationOnStartup`, ArgumentOutOfRange).
+  에디터 내부 에러라 `editorErrors`로 분류(루프 실패 아님). Unity 쪽 수정 전까지 유지.
+- [ ] **O-7 에디터 두 개를 같이 띄웠을 때 전역 `Editor.log`가 1.4GB까지 커졌다** ("Access version should be odd when acquiring lock" 반복).
+  원인 미확인. 에디터마다 `-logFile`을 따로 주는 실행 스크립트로 막는다.
+- [ ] **O-8 새 클론 검증을 자동화한다.** 짧은 경로에 클론 → 에디터 실행 → `harness_setup` → loop 3회를 스크립트로(`tools/fresh-clone-test.ps1`).
+  사람이 수동으로 돌려서 아래 해결됨 항목들을 찾았다.
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
@@ -135,3 +147,21 @@
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **F-1 백그라운드 에디터에서 `harness_play`가 진입하지 않음** (2026-09-29)
+  - 원인: `EditorApplication.delayCall`은 "인스펙터 갱신 후" 호출되는데, 포커스 없는 에디터는 갱신이 없어 영원히 대기 → 73s 타임아웃.
+    포커스가 있던 원래 에디터에서는 드러나지 않았다.
+  - 수정: `EditorApplication.isPlaying = true` 직접 설정(자체적으로 프레임 끝까지 지연됨).
+  - 검증: 새 클론(57자 경로, `editorFocused=false`)에서 loop 3회 녹색, 약 4.3s/회.
+- [x] **F-2 새 프로젝트의 첫 빌드만 fingerprint가 다름** (2026-09-29)
+  - 원인: URP Lit `.mat`은 처음 생성될 때만 URP 임포트 후처리기가 검증(RenderType 태그, MOTIONVECTORS 패스 비활성,
+    `_BaseColor`→`_Color` 동기화)하고, 이후 제자리 덮어쓰기는 검증 없이 복사.
+  - 수정: `BuildContext.Material()`이 매번 `ShaderGUI.ValidateMaterial`을 호출(`BuildContext.ValidateMaterial`).
+  - 검증: 생성물·캐시 삭제 후 빌드 1회차와 2·3회차 fingerprint 동일(`e0a075e5…`).
+- [x] **F-3 에디터 내부 에러가 루프를 실패시킴** (2026-09-29)
+  - 수정: 스택과 메시지에 `Assets/`가 없는 에러는 `editorErrors`로 분리(보고는 하되 `ok`에 영향 없음).
+    런타임 예외·컴파일 에러는 그대로 실패로 잡히는 것을 재확인.
+- [x] **F-4 새 클론에서 에디터만 열어도 ProjectSettings가 modified** (2026-09-29)
+  - 원인: Unity는 LF로 쓰고 git `core.autocrlf`는 CRLF로 체크아웃. 수정: 저장소 루트 `.gitattributes`(`* text=auto eol=lf`).
+- [x] **F-5 긴 경로에 두면 Unity가 패키지 파일을 못 읽음** (2026-09-29)
+  - 149자 경로에서 `DirectoryNotFoundException` 대량 + 플레이 실패, 49·57자 경로 정상. README 요구사항에 "60자 이하" 명시.

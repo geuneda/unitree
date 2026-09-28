@@ -1,0 +1,16 @@
+# Unity writes its YAML/text assets with LF. Keep LF in the working tree too, so opening the project
+# does not show every ProjectSettings file as modified on Windows (core.autocrlf).
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.psd binary
+*.fbx binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.dll binary
+*.exe binary
+*.ttf binary
+*.otf binary
