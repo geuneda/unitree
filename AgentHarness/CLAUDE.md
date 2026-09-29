@@ -2,7 +2,9 @@
 
 이 문서만 읽고 바로 루프를 돌릴 수 있어야 한다. 게임은 아직 없다 — `Assets/Game/Stage`, `Assets/Game/Smoke`는
 하네스를 검증하는 스모크 씬이다(절차적 지형 + 커스텀 HLSL + 라이트 + Volume 후처리 + 회전 오브젝트 + UI Toolkit HUD).
-샘플 프로젝트는 Unity 6000.3.11f1로 고정돼 있고, 하네스(`Assets/Harness/`, `tools/`)는 Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전").
+샘플 프로젝트는 Unity 6000.3.11f1로 고정돼 있고, 하네스는 UPM 패키지 `Packages/com.geuneda.agentharness/`(이 프로젝트에 임베드)로
+Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **기존 Unity 프로젝트에 설치 스크립트로 붙일 수 있다**(아래 "기존 프로젝트에 붙이기").
+`tools/*.ps1`은 패키지 `Tools~/`의 같은 이름 스크립트를 부르는 얇은 진입점이다(모두 같은 파일). 도구를 고칠 때는 `Tools~/`를 고친다.
 
 ## 왜 이 하네스가 있나
 
@@ -87,7 +89,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 2. **텍스트로 쓸 수 있는 형태만.** 셰이더 = 손으로 쓴 HLSL `.shader`(Shader Graph 금지), UI = UI Toolkit UXML/USS(uGUI 프리팹 금지),
    머티리얼·파티클·Volume·라이팅·PanelSettings = 빌더 코드(`BuildContext`)로 생성. Animator/Timeline 같은 GUI 에셋이 필요하면 코드로 생성한다.
 3. **자기 모듈 폴더 밖 수정 금지.** 작업 범위는 `Assets/Game/<Module>/` 하나. 모듈 간 공유 이벤트 타입만
-   `Assets/Game/Contracts/`에 **추가**(기존 타입 수정 금지). `Assets/Harness/`, `tools/`는 하네스 작업일 때만 고친다.
+   `Assets/Game/Contracts/`에 **추가**(기존 타입 수정 금지). 하네스 패키지(`Packages/com.geuneda.agentharness/`)와 `tools/`는 하네스 작업일 때만 고친다.
 4. **에디터 조작은 한 번에 하나씩.** 에디터는 하나다. `tools/loop.ps1`과 `tools/uc.ps1`은 프로젝트별 시스템 뮤텍스를 잡으므로
    병렬 에이전트는 자동으로 줄을 선다(`timings.lockWaitSec`). recompile/build/play/capture를 `unity command`로 직접 호출해
    락을 우회하지 말 것. **병렬 에이전트는 각자 git worktree에서 코드를 쓰고 `tools/submit.ps1 -Module <M>`으로 에디터에 넣고,
@@ -103,11 +105,14 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 ## 폴더 구조
 
 ```
-Assets/Harness/Runtime/        런타임 계약: GameRoot, IGameModule, EventBus, HarnessProbe, ShotPreset, ScriptedInput,
-                               ScenarioRunner, HarnessCapture   (asmdef Harness.Runtime)
-Assets/Harness/Runtime/Procedural/  MeshBuilder, Noise(Perlin/fBm/Ridged/Worley/Rng), TextureBaker, PMath
-Assets/Harness/Editor/         [CliCommand] harness_* 와 BuildContext/IBuildStep     (asmdef Harness.Editor, Editor 전용)
-Assets/Harness/UI/             DefaultRuntimeTheme.tss (UI Toolkit 기본 테마, 텍스트)
+Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json: com.unity.pipeline 의존)
+  Runtime/                     런타임 계약: GameRoot, IGameModule, EventBus, HarnessProbe, HarnessConfig, ShotPreset, ScriptedInput,
+                               ScenarioRunner, HarnessCapture   (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
+  Runtime/Procedural/          MeshBuilder, Noise(Perlin/fBm/Ridged/Worley/Rng), TextureBaker, PMath
+  Editor/                      [CliCommand] harness_* 와 BuildContext/IBuildStep, HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
+  UI/                          DefaultRuntimeTheme.tss (UI Toolkit 기본 테마, 텍스트)
+  Tools~/                      도구 본체(.ps1, Harness.psm1) + templates/ (진입점, 기본 시나리오, 기존 프로젝트용 안내서)
+ProjectSettings/AgentHarness.json   하네스 설정: setup 모드, 모듈 루트/폴더, contracts, 생성물 경로, 빌드·플레이 씬
 Assets/Game/Contracts/         모듈 간 이벤트 타입 (Game.Contracts, 추가만)
 Assets/Game/<Module>/          런타임 코드 (Game.<Module>.asmdef) + Shaders/*.shader + UI/*.uxml|uss
 Assets/Game/<Module>/Builders/ IBuildStep 구현 (Game.<Module>.Builders.asmdef, Editor 전용)
@@ -118,6 +123,7 @@ tools/land.ps1                 worktree 브랜치 → 에디터 트리 브랜치
 tools/compile-check.ps1        에디터 없는 컴파일 검사  tools/Harness.psm1    HTTP 클라이언트·락·루프·submit/land 저널·git
 tools/open.ps1 / quit.ps1      에디터 열기(프로젝트별 로그, 준비 대기) / 정상 종료(락)
 tools/fresh-clone-test.ps1     새 클론 검증: 짧은 경로에 클론 → open → harness_setup → 루프 N회 → quit → 삭제
+tools/attach-test.ps1          기존 프로젝트 붙이기 검증: install → open → 루프 N회 → 출시 빌드 → quit → uninstall → git status
 tools/selftest.ps1             검증 매트릭스 1–8 자동 실행(에러 주입·동시 루프·worktree submit/land)
 tools/scenarios/*.json         플레이 시나리오        HarnessOut/           캡처·result.json·report.json (gitignore)
 AgentScripts/                  eval_file / run_script 용 임시 C# (gitignore)
@@ -188,8 +194,8 @@ public sealed class FooBuildStep : IBuildStep
 
 | 커맨드 | 하는 일 |
 |---|---|
-| `harness_build` | Builders의 IBuildStep을 Order 순으로 빈 씬에 실행 → `Main.unity` 저장. `{ok, fingerprint, steps[], cacheHits, deletedAssets}`. `dry_run`, `no_cache` |
-| `harness_capture` | `{"preset":"all"\|"<name>"\|"main","out":"HarnessOut/capture"}` 편집 모드 오프스크린 1280x720 PNG + `meanLuma/stdLuma/blank` |
+| `harness_build` | Builders의 IBuildStep을 Order 순으로 빈 씬에 실행 → `buildScene` 저장. `{ok, fingerprint, steps[], cacheHits, deletedAssets}`. `dry_run`, `no_cache`. 빌드 스텝이 없고 `playScene`이 build가 아니면(기존 프로젝트) 플레이 씬을 열고 에셋 기준 fingerprint만(`skipped`) |
+| `harness_capture` | `{"preset":"all"\|"<name>"\|"main","out":"HarnessOut/capture","scene":""}` 편집 모드 오프스크린 1280x720 PNG + `meanLuma/stdLuma/blank`. 플레이 씬을 먼저 연다(`"scene":"open"`이면 열린 씬 그대로) |
 | `harness_play` | `{"scenario":"tools/scenarios/default.json"\|"{...inline}","out":"HarnessOut/play"}` 즉시 반환 → `harness_play_status` 폴링 |
 | `harness_play_status` | `entering\|running\|exiting\|done\|failed` + 끝나면 `result`(result.json) |
 | `harness_console` | `{"since":<mark>}` 최신 컴파일 에러(file,line,msg,module) + mark 이후 런타임 에러/경고 수. 응답의 `mark`를 다음에 넘긴다 |
@@ -197,7 +203,7 @@ public sealed class FooBuildStep : IBuildStep
 | `harness_lint` | static-reset / module-asmdef / module-boundary 규칙 검사 |
 | `harness_shaders` | Assets/ 셰이더의 현재 컴파일 에러(file, line, msg, module). 셰이더 에러는 로그가 아니라 상태라 매 루프 조회 |
 | `harness_ping` | domainReloads, isCompiling, isPlaying, compileFailed, mark, unityVersion |
-| `harness_setup` | 프로젝트 설정 멱등 적용(Domain Reload off, runInBackground, Debug 코드 최적화, 템플릿 샘플 삭제) |
+| `harness_setup` | `setup: harness`면 프로젝트 설정 멱등 적용(Domain Reload off, runInBackground, 템플릿 샘플 삭제). `attach`면 아무것도 안 바꾸고 `recommendations`만(`{"apply":"domainReload"}`로 명시 적용). Debug 코드 최적화(세션 한정)는 둘 다 |
 | `harness_sync_csproj` | .sln/.csproj 생성(사용자 외부 에디터 설정은 복원) — compile-check msbuild 백엔드용 |
 | `harness_quit` | 응답 ~0.3s 뒤 `EditorApplication.Exit(0)`(저장 확인 없음). 직접 부르지 말고 `tools/quit.ps1`(락 + 종료 대기) |
 
@@ -211,7 +217,9 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
   "events": [ { "t": 1.0, "type": "keyTap", "key": "Space", "hold": 0.1 } ],
   "captures": [ { "t": 0.5, "preset": "auto" }, { "t": 1.5, "preset": "auto" }, { "t": 2.5, "preset": "auto" } ] }
 ```
+- `"scene"`(선택): 이 시나리오가 플레이할 씬. 비우면 설정의 `playScene`.
 - `t`는 HarnessProbe.Ready 이후 게임 시간(초). 입력은 Input System 가상 디바이스(`ScriptedInput`)로 들어가므로 InputAction·`Keyboard.current` 그대로 동작.
+- 캡처는 그 프레임의 모든 `LateUpdate` 뒤에 찍는다(LateUpdate에서 카메라를 움직이거나 `Graphics.DrawMesh*`로 그리는 게임도 그대로 찍힌다).
 - 이벤트: `keyDown/keyUp/keyTap`(Key 이름) · `mouseMove/mousePos/mouseDown/mouseUp/scroll`(`x`,`y`, `key`=Left/Right) · `stick`(`key`=left/right, `x`,`y`) · `padDown/padUp`(GamepadButton) · `releaseAll`.
 - 캡처 `preset`: ShotPreset 이름 · `"auto"`(이름순 다음 프리셋) · `"main"`(메인 카메라 그대로) · `"screen"`(Game 뷰 그대로 = **UI 오버레이 포함**, 해상도는 Game 뷰 크기, Game 뷰 탭이 보여야 함).
   나머지는 오프스크린 렌더라 **스크린 공간 UI가 안 찍힌다**. HUD 확인은 `"screen"`을 쓴다(`tools/scenarios/screen.json`).
@@ -249,7 +257,9 @@ worktree로 되복사(**커밋할 것**), 아니면 **백업으로 되돌리고 
   다른 살아 있는 worktree가 올린 미병합 변경이 에디터 트리에 남아 있는 모듈은 `stage=submit`으로 거부된다(`submit.owner`).
   그 작업이 버려졌을 때만 `-Takeover`. land가 그 브랜치의 모듈 소유를 해제한다.
 - 에디터 트리 브랜치에 그 모듈을 건드린 커밋이 있는데 worktree에 없으면 거부된다(미러링하면 병합된 작업을 되돌리게 된다) → `git merge master`.
-- 모듈 삭제·`Assets/Harness`·`tools/`는 submit 대상이 아니다(하네스 작업은 에디터 트리에서 직접). land로는 병합된다.
+- 모듈 삭제·하네스 패키지·`tools/`는 submit 대상이 아니다(하네스 작업은 에디터 트리에서 직접). land로는 병합된다.
+- 모듈은 `ProjectSettings/AgentHarness.json`에서 온다: `moduleRoots`의 하위 폴더(`Assets/Game/<Module>`)와 `modules[]`의 폴더(기존 코드).
+  submit/land/compile-check/에러의 `module`이 모두 이것을 쓴다.
 - 에디터 트리 찾기: `Library/`가 없는 체크아웃이면 `git worktree list`의 메인 worktree에서 같은 하위 경로.
   git worktree가 아닌 복사본이면 `$env:AGENTHARNESS_EDITOR_ROOT`에 에디터 트리 경로를 준다.
 
@@ -315,7 +325,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~3.5분
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 5887385e
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 977545a7
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
 - 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark 없음) + `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 ·
@@ -325,7 +335,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   병합 직후 kill → `recoveredLand`). 에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
 - 주입 위치는 샘플 모듈의 표식 줄: `SmokeModule.cs`의 `m_Time += dt;`(컴파일, 61행)·`EventBus.Publish(new SpinnerLap(laps));`(런타임, 68행),
   `SmokeIridescent.shader`의 `Frag` 첫 줄(87행). 이 줄들을 바꾸면 `selftest.ps1`의 표식도 바꾼다.
-- 7–8은 커밋된 `tools/`·`Assets/Harness/`·`Assets/Game/`을 쓰는 worktree 두 개를 저장소 옆(`<저장소>-st-a/-b`)에 만들고, `selftest/*` 브랜치·
+- 7–8은 커밋된 `tools/`·하네스 패키지·`Assets/Game/`·설정 파일을 쓰는 worktree 두 개를 저장소 옆(`<저장소>-st-a/-b`)에 만들고, `selftest/*` 브랜치·
   테스트 커밋(land의 병합 포함)을 만든 뒤 에디터 트리 브랜치를 시작 커밋으로 되돌린다(detached HEAD면 임시 브랜치를 썼다가 되돌린다).
   → 하네스를 고친 중이면 **임시 커밋 후** 돌린다. 도중에 에디터 트리 파일을 고치지 말 것(`git status`를 비교한다).
 - 첫 빨간 항목에서 멈추고, 바꾼 파일·worktree·브랜치·커밋을 되돌린 뒤 마지막 루프(`final`)로 녹색과 `git status` 원상을 확인한다.
@@ -341,17 +351,66 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
-  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `882e811b…` | 61 / 68 / 87 | 1–9 녹색, 샷은 6.3과 같은 밝기 |
-  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `5887385e…` | 61 / 68 / 87 | 1–9 녹색 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `4a3c5c8c…` | 61 / 68 / 87 | 2–8 녹색, **1 빨강**: 첫 플레이 뒤 조명이 검다(`dark`, ROADMAP P-4) |
+  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `d9a6d092…` | 61 / 68 / 87 | 1–9 녹색, 샷은 6.3과 같은 밝기 |
+  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `977545a7…` | 61 / 68 / 87 | 1–9 녹색 |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `0ba32228…` | 61 / 68 / 87 | 2–8 녹색, **1 빨강**: 첫 플레이 뒤 조명이 검다(`dark`, ROADMAP P-4) |
 
   fingerprint는 버전마다 다르다(URP가 만드는 머티리얼·에셋 직렬화가 다르다). 같은 버전 안에서만 매번 같아야 한다.
 - 다른 버전으로 열면 Unity가 다시 쓰는 파일(커밋하지 않는다): `Packages/packages-lock.json`, `Assets/Settings/*RPAsset.asset`·
   `UniversalRenderPipelineGlobalSettings.asset`, `ProjectSettings/*`(버전별 새 필드). URP·Core 같은 **코어 패키지는 manifest의 버전(17.3.0)과
   상관없이 에디터 내장 버전으로 해석된다**.
-- `Assets/Harness/`·`tools/`에는 버전 문자열을 쓰지 않는다. 에디터·컴파일러 경로는 실행 중인 에디터 프로세스 → `unity editors --installed`에서 얻고,
-  API 차이는 `Assets/Harness/Runtime/UnityCompat.cs` 한 곳에서 `#if UNITY_6000_4_OR_NEWER`처럼 가른다(예: 6.4부터 `FindObjectsSortMode` obsolete).
+- 하네스 패키지에는 버전 문자열을 쓰지 않는다. 에디터·컴파일러 경로는 실행 중인 에디터 프로세스 → `unity editors --installed`에서 얻고,
+  API 차이는 `Runtime/UnityCompat.cs` 한 곳에서 `#if UNITY_6000_4_OR_NEWER`처럼 가른다(예: 6.4부터 `FindObjectsSortMode` obsolete).
+  선택 패키지는 asmdef `versionDefines`로 가른다: `AGENTHARNESS_URP`(URP 카메라 데이터 복사), `AGENTHARNESS_RP_CORE`(`ctx.VolumeProfile`),
+  `AGENTHARNESS_INPUT_SYSTEM`(입력 재생). 없으면 그 기능만 빠지고 컴파일은 된다(Built-in·구 Input Manager 프로젝트).
   모듈 코드도 버전을 타는 API는 `UnityCompat`을 쓰거나 같은 방식으로 가른다.
+
+## 설정 (ProjectSettings/AgentHarness.json)
+
+하네스가 이 프로젝트를 어떻게 보는지. 에디터 커맨드(`Harness.HarnessConfig`, 파일이 바뀌면 다시 읽음)와 `tools/`(`Get-HarnessConfig`)가 같은 파일을 읽는다.
+파일이나 필드가 없으면 기본값 = 기존 프로젝트에 붙은 하네스(아무것도 안 바꾸고, Build Settings 첫 씬을 돈다). 이 샘플은:
+
+```jsonc
+{ "setup": "harness",                  // harness: 하네스 전용 프로젝트 | attach(기본): 기존 프로젝트, 설정·Build Settings·남의 씬을 건드리지 않음
+  "moduleRoots": ["Assets/Game"],      // 하위 폴더마다 모듈 (모듈 규칙·Builders/ 적용)
+  "modules": [],                       // [{ "name": "Gameplay", "path": "Assets/Scripts" }] 폴더 하나 = 모듈 (기존 코드)
+  "contracts": "Assets/Game/Contracts",
+  "generatedRoot": "Assets/Generated", "buildScene": "Assets/Scenes/Main.unity",
+  "playScene": "build" }               // build | first(Build Settings 첫 활성 씬) | 씬 경로
+```
+- `installAdded`: install.ps1이 하네스 때문에 더한 패키지(예: `com.unity.inputsystem`). uninstall이 제거하고 출시 빌드 필터가 뺀다.
+
+- `attach`에서 `harness_build`는 하네스가 만든 적 없는 씬·에셋(`AgentHarnessGenerated` 라벨 없음)을 덮어쓰거나 지우지 않고, Build Settings를 바꾸지 않는다.
+- 씬에 저장 안 한 변경이 있으면 play/capture/build는 씬을 바꾸지 않고 실패한다(`unsaved changes in ...`). 생성된 buildScene은 예외.
+- lint: `static-reset`은 Domain Reload가 실제로 꺼져 있을 때만, 모듈 asmdef 어셈블리 + `Harness.Runtime`만(`Assembly-CSharp`는 제외).
+  `module-asmdef`·`module-boundary`는 `moduleRoots` 모듈만.
+
+## 기존 프로젝트에 붙이기 (install / uninstall / attach-test)
+
+```powershell
+$pkg = 'C:/.../AgentHarness/Packages/com.geuneda.agentharness/Tools~'
+powershell -ExecutionPolicy Bypass -File $pkg/install.ps1 -Project C:/dev/MyGame -WhatIf
+powershell -ExecutionPolicy Bypass -File $pkg/install.ps1 -Project C:/dev/MyGame [-Scene Assets/X.unity] [-Module Name=Assets/Path,...] [-Source git|local|embed|<UPM 문자열>]
+powershell -ExecutionPolicy Bypass -File C:/dev/MyGame/tools/uninstall.ps1          # 에디터를 닫은 뒤
+powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클론> [-Scene ...] [-Module ...] [-Source ...]   # 매트릭스 10
+```
+- install이 더하는 것: `Packages/manifest.json` 한 줄(기본 `-Source git` = 이 저장소 git URL `?path=/AgentHarness/Packages/com.geuneda.agentharness#master`;
+  `local` = 이 패키지 폴더의 `file:` 경로, 하네스 개발용; `embed` = `Packages/`에 복사), `tools/` 진입점(open·quit·loop·uc·submit·land·
+  compile-check·uninstall), `tools/scenarios/default.json`, `tools/AgentHarness.md`(그 프로젝트의 에이전트용 안내서, `templates/AgentHarness.md`),
+  설정 파일, `CLAUDE.md`·`AGENTS.md`가 없으면 안내서를 가리키는 `CLAUDE.md`. 설치 전 manifest·lock은 `Library/AgentHarness/install.json`에 남긴다.
+- Active Input Handling이 New/Both인데 Input System 패키지가 없으면 `com.unity.inputsystem`도 더한다(`installAdded`): `com.unity.pipeline`
+  0.8.0-exp.1이 `ENABLE_INPUT_SYSTEM`만 보고 입력 코드를 컴파일해서 그 조합에서 컴파일이 깨진다(아래 "함정").
+- Build Settings가 비어 있으면 `-Scene`을 요구하고 후보 씬 목록(`scenes`)을 준다.
+- uninstall: 의존성 줄(+ `installAdded`) 제거, lock은 기록과 manifest가 맞으면 바이트 그대로 복원(아니면 하네스만 쓰던 항목 제거), 설치가 만든 파일
+  (내용이 그대로인 것만; `-Force`면 전부), `HarnessOut/`, `Library/Harness`·`Library/AgentHarness` 삭제. 에디터가 열려 있으면 거부.
+- 진입점은 패키지를 `Packages/<이름>`(임베드) → manifest의 `file:` → `Library/PackageCache/<이름>@*` 순으로 찾는다. worktree(Library 없음)는 에디터 트리의
+  패키지를 쓴다. git URL로 설치하고 아직 한 번도 안 연 체크아웃이면 `open.ps1` 진입점이 배치 모드로 한 번 임포트해(`Logs/Editor-bootstrap.log`) 패키지를 받는다.
+- 출시(비개발) 빌드: `Harness.Runtime`은 define 제약으로 빠지고, `HarnessReleaseBuild`(IFilterBuildAssemblies)가 하네스 때문에만 들어온
+  `Unity.Pipeline.Attributes`·`Newtonsoft.Json`·(`installAdded`의) `Unity.InputSystem*`을 뺀다(게임 코드가 실제로 참조하면 둔다). 하네스 모듈 위에
+  게임을 만든 프로젝트는 출시 빌드에 스크립팅 define `AGENTHARNESS_RUNTIME`이 필요하다.
+- attach-test 녹색 = install 성공, `harness_setup`이 아무것도 안 바꿈, install 뒤와 루프 뒤 `git status`가 install이 보고한 것 + lock뿐, 루프 N회 녹색·
+  fingerprint·events 동일, 출시 빌드에 `Harness.*` 없음, uninstall 뒤 `git status` 비어 있음. 빌드가 다시 쓴 프로젝트 설정(하네스와 무관하게 Unity가
+  빌드 중 쓰고 종료 때 저장)은 `buildRewrote`로 보고하고 에디터를 닫은 뒤 되돌린다.
 
 ## 함정 (겪은 것)
 
@@ -371,6 +430,20 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   그 버전이 쓰는 모양 그대로 저장해 커밋했다.
 - Game 뷰 크기 목록(`PlayModeWindow.SetCustomRenderingResolution`이 여기에 추가한다)과 에디터 기본 레이아웃은 **사용자 전역**이다
   (`%APPDATA%\Unity\Editor-5.x\Preferences\GameViewSizes.asset`, `Layouts\current\default-6000.dwlt`). 하네스·실험 코드에서 바꾸지 않는다.
+- **에디터에서 `ScriptableObject.CreateInstance<PanelSettings>()`를 하면 Unity가 `Assets/UI Toolkit/UnityThemes/UnityDefaultRuntimeTheme.tss`를 만든다**
+  (내부 훅 `PanelSettings.GetOrCreateDefaultTheme`; `Assets/`에 테마가 없을 때). 하네스 테마가 패키지로 옮겨진 뒤 빌드마다 새 파일이 생겼다
+  → `BuildContext.UIDocument`가 생성하는 동안만 훅을 하네스 테마로 바꾸고, 그래도 생기면 지운다.
+- **`com.unity.pipeline` 0.8.0-exp.1은 Active Input Handling이 New/Both이고 Input System 패키지가 없으면 컴파일되지 않는다**(`RuntimeInputCommand.cs`가
+  `#if ENABLE_INPUT_SYSTEM`만 본다). 에디터가 "Enter Safe Mode?"에서 멈춘다(`open.ps1`이 `dialog`로 보고). install.ps1이 이 조합이면 Input System을 더한다.
+- 프로젝트에 지원 종료 패키지(예: Unity 6의 `com.unity.ide.vscode`)가 있으면 Unity가 열 때마다 "This project contains one or more deprecated packages.
+  Do you want to open Package Manager?" 모달을 띄운다. `open.ps1`이 로그의 `... is deprecated` 줄로 `deprecatedPackages`를 보고한다 → 제거·교체할 것.
+- UPM이 git 패키지를 받을 때 저장소의 `.gitattributes`와 무관하게 이 머신의 줄바꿈(CRLF)으로 체크아웃한다 → 텍스트를 비교하는 도구는 줄바꿈을 정규화한다.
+- 플레이어 빌드는 `Library/Bee/artifacts/<hash>P*.dag/`에 `UNITY_EDITOR` 없는 응답 파일을 남긴다. compile-check가 "가장 최근" rsp를 쓰다가 그것을 골라
+  `#if UNITY_EDITOR` 안의 에러를 놓쳤다 → 에디터 컴파일의 rsp(`…EDbg.dag` > `…E.dag`)만 쓴다(최신 순은 믿지 않는다: Bee는 입력이 같으면 rsp를 다시 쓰지 않음).
+- 기존 씬은 편집 모드에서도 `[ExecuteAlways]` 스크립트가 값을 바꾼다(Cinemachine의 카메라 FOV, UI Toolkit의 숨은 `UIRenderer`). 로드된 씬을 해시하면
+  루프마다 fingerprint가 달라서, 빌드하지 않는 프로젝트는 씬 파일 + 의존 에셋의 `GetAssetDependencyHash`로 fingerprint를 낸다.
+- Unity는 플레이어를 빌드하면서 URP 에셋·`ProjectSettings.asset`(예: Input System이 `preloadedAssets`에 설정을 넣음)·`GraphicsSettings.asset`을
+  다시 쓰고, 에디터가 종료할 때 한 번 더 저장한다. 하네스 없이 한 대조 빌드도 같았다 → 에디터를 닫은 뒤 되돌려야 한다.
 - 에이전트의 Bash 도구(Git Bash)로 넘긴 명령은 작은따옴표·`<<'EOF'` 안에서도 `\\`가 `\`로 줄어든다(확인: `r"a\\b"`가 3글자).
   heredoc Python으로 `.ps1`을 고치다 정규식·경로가 조용히 깨진 적 있다 → 백슬래시가 든 편집은 Edit 도구로 한다.
 
@@ -384,7 +457,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 캡처 카메라는 메인 카메라 설정(후처리 포함)을 복사해 오프스크린 렌더한다. 메인 카메라가 없으면 캡처 실패.
 - 에디터 플레이 모드 FPS는 에디터 오버헤드·autotick 영향을 받는다. 절대값이 아니라 **변경 전후 비교**용이다(`editorFocused` 확인).
 - Code Optimization은 Debug(정확한 예외 줄 번호). Release면 throw 위치가 메서드 끝 줄로 보고되고, **절차적 메시·텍스처의 float 결과가 달라져
-  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `5887385e…`).
+  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `977545a7…`).
   `CompilationPipeline.codeOptimization`은 에디터 세션 동안만 유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다
   → `HarnessCodeOptimization`([InitializeOnLoad])이 도메인이 로드될 때마다 이 프로젝트만 Debug로 되돌린다(재컴파일 1회; 그래서 이 프로젝트에선
   Release가 유지되지 않는다). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다.

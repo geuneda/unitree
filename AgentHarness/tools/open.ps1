@@ -1,137 +1,85 @@
-<#
-.SYNOPSIS
-  Open this project's Editor and wait until the harness answers. Use it instead of 'unity open':
-  - the Editor writes its own log, <project>/Logs/Editor.log (the previous one becomes Editor-prev.log). Editors started
-    without -logFile all append to one user-wide Editor.log, which grew to 1.4 GB with two Editors open (O-7).
-  - it returns when harness_ping answers and the Editor is idle, i.e. after the first import and the Debug recompile.
-  If an Editor already has the project open, it only waits for it (its log is wherever that Editor was told).
-
-.EXAMPLE
-  powershell -ExecutionPolicy Bypass -File tools/open.ps1
-  powershell -ExecutionPolicy Bypass -File tools/open.ps1 -NoWait      # start it and return
-  powershell -ExecutionPolicy Bypass -File tools/open.ps1 -UnityVersion <installed 6.x>   # open in another Editor version
-
-  Prints one JSON object. Exit code 0 = ready. On failure: "error", "dialog" when a modal dialog blocks the Editor
-  (a person has to answer it), and "logTail" (end of the Editor log). From an agent worktree this opens the Editor tree.
-  Dialogs before the harness can answer (software terms of a newly installed version, Safe Mode, package errors) are
-  seen from outside: the log stops growing while the Editor window shows the dialog's title (-DialogSec).
-  -UnityVersion first writes that version to ProjectSettings/ProjectVersion.txt (what Unity itself does once you confirm
-  its "open in another version" dialog; without it that dialog blocks the start), so the change shows in git status.
-#>
-param(
-    [int]$TimeoutSec = 900,   # a fresh clone imports for minutes
-    [switch]$NoWait,
-    [string]$UnityVersion,    # default: ProjectSettings/ProjectVersion.txt
-    [int]$DialogSec = 60      # before the Pipeline server is up: log silent this long + a dialog title = blocked
-)
+# AgentHarness entry point: runs Tools~/<this file's name> of the com.geuneda.agentharness package that this project
+# uses, so the tools always match the installed package version. Every tools/*.ps1 entry point is this same file
+# (written by the package's install.ps1; do not edit - update the package instead).
+#   Package found in: Packages/com.geuneda.agentharness (embedded), a "file:" dependency in Packages/manifest.json, or
+#   Library/PackageCache (git/registry). An agent worktree without Library/ uses the package of the Editor tree.
+#   Before the first import there is no Library/PackageCache yet: open.ps1 then imports the project once in batch mode.
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'Harness.psm1') -Force
-$root = Get-HarnessProjectRoot
-$log = Join-Path $root 'Logs/Editor.log'
-$clock = [Diagnostics.Stopwatch]::StartNew()
-$result = [ordered]@{ ok = $false; project = $root.Replace('\', '/'); pid = $null; version = $null; launched = $false; logFile = $null; openSec = 0 }
+$AgentHarnessWork = Split-Path -Parent $PSScriptRoot
+$AgentHarnessTool = Split-Path -Leaf $PSCommandPath
 
-function Finish([int]$Code) {
-    $result.openSec = [math]::Round($clock.Elapsed.TotalSeconds, 2)
-    if ($Code -ne 0 -and $result.logFile) { $result['logTail'] = @(Read-HarnessLogTail $log 40) }
-    $result | ConvertTo-Json -Depth 10
-    exit $Code
+function Find-AgentHarnessTools([string]$Project) {
+    if (-not $Project) { return $null }
+    $pkg = 'com.geuneda.agentharness'
+    $candidates = @(Join-Path $Project "Packages/$pkg")
+    $manifest = Join-Path $Project 'Packages/manifest.json'
+    if (Test-Path -LiteralPath $manifest) {
+        $m = [regex]::Match([IO.File]::ReadAllText($manifest), '"com\.geuneda\.agentharness"\s*:\s*"file:([^"]+)"')
+        if ($m.Success) {
+            $p = $m.Groups[1].Value
+            if (-not [IO.Path]::IsPathRooted($p)) { $p = Join-Path (Join-Path $Project 'Packages') $p }
+            $candidates += $p
+        }
+    }
+    $candidates += @(Get-ChildItem -LiteralPath (Join-Path $Project 'Library/PackageCache') -Directory -Filter "$pkg@*" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | ForEach-Object { $_.FullName })
+    foreach ($c in $candidates) {
+        $t = Join-Path $c 'Tools~'
+        if (Test-Path -LiteralPath (Join-Path $t 'Harness.psm1')) { return $t }
+    }
+    $null
 }
 
-$editor = Get-HarnessEditorProcess
-$started = Get-HarnessLaunchedEditor   # an earlier open.ps1's Editor, maybe still before its lock file (a dialog)
-if ($editor -or $started -or (Test-HarnessProjectOpen)) {
-    $result['alreadyOpen'] = $true
-    if ($editor) { $result.pid = $editor.Id } elseif ($started) { $result.pid = $started.Id; $result.logFile = $log.Replace('\', '/') }
-} else {
-    $projectVersion = Get-HarnessProjectVersion
-    $result.version = if ($UnityVersion) { $UnityVersion } else { $projectVersion }
-    $exe = Find-HarnessEditorExe $result.version
-    if (-not $exe) {
-        $installed = @(Get-HarnessInstalledEditors | ForEach-Object { $_.version })
-        $result['error'] = "Unity $($result.version) $(if ($UnityVersion) { '' } else { '(ProjectSettings/ProjectVersion.txt) ' })is not installed: unity install $($result.version)" +
-            ", or open the project with an installed Unity 6 Editor: -UnityVersion <version> (installed: $($installed -join ', '))"
-        Finish 1
+# The checkout the Editor has open, for an agent worktree (the main worktree at the same sub-path).
+function Get-AgentHarnessEditorRoot([string]$Work) {
+    if ($env:AGENTHARNESS_EDITOR_ROOT) { return $env:AGENTHARNESS_EDITOR_ROOT }
+    try {
+        $main = @(& git -C $Work worktree list --porcelain 2>$null) | Select-Object -First 1
+        $prefix = & git -C $Work rev-parse --show-prefix 2>$null
+        if ($main -like 'worktree *') { return [IO.Path]::GetFullPath([IO.Path]::Combine($main.Substring(9), "$prefix")) }
+    } catch { }
+    $null
+}
+
+function Exit-AgentHarness([string]$Message) {
+    [ordered]@{ ok = $false; stage = 'editor'; error = $Message } | ConvertTo-Json
+    exit 1
+}
+
+$tools = Find-AgentHarnessTools $AgentHarnessWork
+if (-not $tools -and -not (Test-Path -LiteralPath (Join-Path $AgentHarnessWork 'Library'))) { $tools = Find-AgentHarnessTools (Get-AgentHarnessEditorRoot $AgentHarnessWork) }
+
+if (-not $tools -and $AgentHarnessTool -eq 'open.ps1') {
+    # First open of a checkout that uses the package from git: Unity has not downloaded it yet. Import once in batch
+    # mode (that resolves the packages), then run the package's open.ps1 as usual.
+    $version = $null
+    for ($i = 0; $i -lt $args.Count - 1; $i++) { if ("$($args[$i])" -ieq '-UnityVersion') { $version = "$($args[$i + 1])" } }
+    if (-not $version) {
+        $pv = [regex]::Match([IO.File]::ReadAllText((Join-Path $AgentHarnessWork 'ProjectSettings/ProjectVersion.txt')), 'm_EditorVersion:\s*(\S+)')
+        if ($pv.Success) { $version = $pv.Groups[1].Value }
     }
-    if ($result.version -ne $projectVersion) {
-        # Another version: Unity would ask in a modal dialog first. A project that names this version opens directly.
-        $f = Join-Path $root 'ProjectSettings/ProjectVersion.txt'
-        [IO.File]::WriteAllText($f, "m_EditorVersion: $($result.version)`n", (New-Object Text.UTF8Encoding($false)))
-        $result['projectVersion'] = $projectVersion
-    }
-    $logDir = Split-Path -Parent $log
-    New-Item -ItemType Directory -Force $logDir | Out-Null
-    if (Test-Path -LiteralPath $log) { Move-Item -LiteralPath $log -Destination (Join-Path $logDir 'Editor-prev.log') -Force }
-    $argLine = (@('-projectPath', $root, '-logFile', $log) | ForEach-Object { ConvertTo-HarnessArg $_ }) -join ' '
+    $exe = $null
+    try {
+        $installed = (& unity editors --installed --format json --no-banner 2>$null | Out-String | ConvertFrom-Json).data
+        $e = @($installed | Where-Object { $_.version -eq $version }) | Select-Object -First 1
+        if ($e) { $exe = if ("$($e.location)" -like '*.app') { Join-Path $e.location 'Contents/MacOS/Unity' } else { "$($e.location)" } }
+    } catch { }
+    if (-not $exe) { Exit-AgentHarness "the AgentHarness package is not downloaded yet and Unity $version is not installed ('unity editors --installed'): unity install $version, or open.ps1 -UnityVersion <installed 6.x>" }
+    $log = Join-Path $AgentHarnessWork 'Logs/Editor-bootstrap.log'
+    [void](New-Item -ItemType Directory -Force (Split-Path -Parent $log))
+    [Console]::Error.WriteLine("open.ps1: importing the project once in batch mode to download the AgentHarness package (log: $log)")
+    $argLine = (@('-batchmode', '-quit', '-projectPath', $AgentHarnessWork, '-logFile', $log) | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
     $p = Start-Process -FilePath $exe -ArgumentList $argLine -PassThru
-    Save-HarnessLaunchedEditor $p
-    $result.pid = $p.Id
-    $result.launched = $true
-    $result.logFile = $log.Replace('\', '/')
+    $null = $p.Handle   # keeps ExitCode readable after the process ends
+    if (-not $p.WaitForExit(1800 * 1000)) { try { $p.Kill() } catch { }; Exit-AgentHarness "the batch-mode import did not finish in 1800 s (log: $log)" }
+    $tools = Find-AgentHarnessTools $AgentHarnessWork
+    if (-not $tools) { Exit-AgentHarness "the batch-mode import (exit code $($p.ExitCode)) did not download com.geuneda.agentharness: see $log and Packages/manifest.json" }
 }
-if ($NoWait) { $result.ok = $true; Finish 0 }
+if (-not $tools) {
+    Exit-AgentHarness "the AgentHarness package (com.geuneda.agentharness) was not found for $AgentHarnessWork (Packages/, a file: dependency, or Library/PackageCache): run tools/open.ps1 once, or install it with the package's Tools~/install.ps1"
+}
 
-# Ready = harness_ping answers and the Editor stays idle for 3 s (a fresh session recompiles once for Debug code
-# optimization right after the first answer).
-$idleSince = $null
-$dialogSince = $null
-$logLength = -1
-$logSince = 0
-# Window titles of the Editor's own progress windows while it starts (not dialogs).
-$progressTitle = '^(Opening project|Hold on|Importing|Compiling|Loading|Initializing|Resolving|Refreshing|Updating)'
-while ($true) {
-    if ($clock.Elapsed.TotalSeconds -ge $TimeoutSec) {
-        $result['error'] = "The Editor was not ready within $TimeoutSec s"
-        if ($result.pid) { $result['windows'] = @(Get-HarnessWindowTitles $result.pid) }
-        break
-    }
-    if ($result.pid -and -not (Get-Process -Id $result.pid -ErrorAction SilentlyContinue)) {
-        $result['error'] = 'The Editor exited while starting (license, crash, or a startup dialog was closed): see logTail'
-        break
-    }
-    $editor = Get-HarnessEditorProcess
-    if ($editor) {
-        $result.pid = $editor.Id
-        $ping = Invoke-UnityCommand -Name 'harness_ping' -TimeoutSec 10
-        if ($ping.success) {
-            $dialogSince = $null
-            if (-not $ping.result.isCompiling -and -not $ping.result.isUpdating) {
-                if ($null -eq $idleSince) { $idleSince = $clock.Elapsed.TotalSeconds }
-                elseif ($clock.Elapsed.TotalSeconds - $idleSince -ge 3) {
-                    $result.ok = $true
-                    $result['compileFailed'] = [bool]$ping.result.compileFailed
-                    $result['domainReloads'] = [int]$ping.result.domainReloads
-                    break
-                }
-            } else { $idleSince = $null }
-        } else {
-            $idleSince = $null
-            if ($ping.PSObject.Properties.Name -contains 'busyReason' -and $ping.busyReason -eq 'blocked_by_dialog') {
-                if ($ping.PSObject.Properties.Name -contains 'dialogs') { $result['dialog'] = $ping.dialogs }
-                if ($null -eq $dialogSince) { $dialogSince = $clock.Elapsed.TotalSeconds }
-                elseif ($clock.Elapsed.TotalSeconds - $dialogSince -ge 20) {
-                    $result['error'] = 'A modal dialog blocks the Editor (see "dialog"); a person has to answer it'
-                    break
-                }
-            } elseif (-not $ping.unreachable -and -not ($ping.PSObject.Properties.Name -contains 'busy')) {
-                $result['lastError'] = $ping.error   # e.g. harness_ping unknown: Harness.Editor did not compile
-            }
-        }
-    } elseif ($result.pid -and $result.logFile) {
-        # No Pipeline server yet, so no harness_ping to ask. A dialog shown this early stops the log, and the Editor
-        # process then has a window with the dialog's title ("Unity Editor Software Terms", "Enter Safe Mode?", ...).
-        $len = if (Test-Path -LiteralPath $log) { (Get-Item -LiteralPath $log).Length } else { 0 }
-        if ($len -ne $logLength) { $logLength = $len; $logSince = $clock.Elapsed.TotalSeconds }
-        elseif ($clock.Elapsed.TotalSeconds - $logSince -ge $DialogSec) {
-            $titles = @(Get-HarnessWindowTitles $result.pid | Where-Object { $_ -notmatch $progressTitle })
-            if ($titles.Count -gt 0) {
-                $result['dialog'] = [ordered]@{ title = $titles[0]; windows = $titles; logSilentSec = [math]::Round($clock.Elapsed.TotalSeconds - $logSince) }
-                $result['error'] = "The Editor shows '$($titles[0])' and has logged nothing for $($result.dialog.logSilentSec) s: a dialog that a person has to answer. It stays open; run open.ps1 again afterwards (it waits for that Editor)."
-                break
-            }
-        }
-    }
-    Start-Sleep -Milliseconds 500
-}
-if ($result.logFile -and (Test-Path -LiteralPath $log)) { $result['logMB'] = [math]::Round((Get-Item -LiteralPath $log).Length / 1MB, 2) }
-Finish $(if ($result.ok) { 0 } else { 1 })
+# The real scripts find this checkout (the work root) here; Harness.psm1 derives the Editor tree from it.
+$env:AGENTHARNESS_WORK_ROOT = $AgentHarnessWork
+& (Join-Path $tools $AgentHarnessTool) @args
+exit $LASTEXITCODE

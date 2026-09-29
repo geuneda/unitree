@@ -5,8 +5,9 @@
 > screenshots + console errors + frame stats as JSON.
 
 Claude Code 같은 코딩 에이전트가 **Unity에서도 Three.js로 웹 3D를 만들 때와 같은 완성도**를 내도록 만드는 작업 환경입니다.
-게임은 아직 없고, 하네스를 검증하는 스모크 씬(절차적 지형 + 손으로 쓴 HLSL + 라이트 + URP 후처리 + 회전 오브젝트 + UI Toolkit HUD)만 들어 있습니다.
-씬 파일도 에셋도 커밋돼 있지 않습니다 — 전부 코드에서 생성됩니다.
+하네스는 UPM 패키지(`com.geuneda.agentharness`)이고, **이미 있는 Unity 프로젝트에 설치 스크립트 한 번으로 붙였다 뗄 수 있습니다**(아래 "기존 프로젝트에 붙이기").
+이 저장소의 `AgentHarness/`는 그 패키지를 쓰는 샘플 프로젝트로, 하네스를 검증하는 스모크 씬(절차적 지형 + 손으로 쓴 HLSL + 라이트 + URP 후처리 +
+회전 오브젝트 + UI Toolkit HUD)만 들어 있습니다. 씬 파일도 에셋도 커밋돼 있지 않습니다 — 전부 코드에서 생성됩니다.
 
 | 오프스크린 캡처 (`harness_capture`) | Game 뷰 캡처 (UI 포함) |
 |---|---|
@@ -53,12 +54,46 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 | 모듈 C# 1줄 수정 | ~9 s (Unity 컴파일 + 도메인 리로드 ~4 s 포함) |
 | C# 컴파일 에러 보고 | ~1 s |
 
+## 기존 프로젝트에 붙이기
+
+```powershell
+git clone https://github.com/geuneda/unitree C:\dev\unitree
+$install = 'C:\dev\unitree\AgentHarness\Packages\com.geuneda.agentharness\Tools~\install.ps1'
+powershell -ExecutionPolicy Bypass -File $install -Project C:\dev\MyGame -WhatIf     # 바꿀 목록만 본다
+powershell -ExecutionPolicy Bypass -File $install -Project C:\dev\MyGame             # Build Settings의 첫 씬을 돈다
+#   -Scene Assets/Scenes/Level1.unity   플레이할 씬(Build Settings가 비어 있으면 필수)
+#   -Module Gameplay=Assets/Scripts      기존 코드 폴더를 모듈로(에러의 module, worktree submit/land 단위)
+cd C:\dev\MyGame
+powershell -ExecutionPolicy Bypass -File tools/open.ps1     # 처음이면 패키지를 받으려고 배치 모드로 한 번 임포트한 뒤 연다
+powershell -ExecutionPolicy Bypass -File tools/loop.ps1     # 기존 씬으로 재컴파일 → 플레이 → 캡처·콘솔·FPS
+powershell -ExecutionPolicy Bypass -File tools/quit.ps1
+powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더한 것만 지워 git status를 원래대로
+```
+
+- **바꾸는 것**: `Packages/manifest.json`에 패키지 한 줄(기본은 이 저장소의 git URL, `-Source local|embed`도 가능)과 새 파일
+  (`tools/*.ps1` 진입점, `tools/scenarios/default.json`, 에이전트용 안내 `tools/AgentHarness.md`, 설정 `ProjectSettings/AgentHarness.json`,
+  `CLAUDE.md`/`AGENTS.md`가 없을 때만 `CLAUDE.md`)뿐입니다. `Assets/`와 `ProjectSettings/*.asset`은 건드리지 않고, 어떤 파일도 지우지 않습니다.
+  Unity가 새 의존성을 풀면서 `Packages/packages-lock.json`을 갱신합니다(uninstall이 설치 전 내용으로 되돌림).
+- **프로젝트 설정은 그대로**: `harness_setup`은 권장 사항(예: Domain Reload 끄기)만 보여 주고, `{"apply":"domainReload"}`처럼 명시할 때만 바꿉니다.
+  Domain Reload가 켜진 프로젝트에서도 루프가 돌고, 늘어난 시간은 `timings.playEnterSec`으로 보입니다.
+- **출시 빌드에는 하네스가 없습니다**: 하네스 런타임은 `UNITY_EDITOR || DEVELOPMENT_BUILD`에서만 컴파일되고, 하네스 때문에 들어온
+  `com.unity.pipeline`의 런타임 DLL·Newtonsoft.Json(·설치가 추가한 Input System)은 출시 빌드에서 빠집니다. 개발 빌드에는 들어갑니다.
+- URP·Built-in 둘 다, Input System 유무와 상관없이 컴파일됩니다(입력 재생은 Input System을 쓰는 게임만).
+- 검증: 하네스를 모르는 공개 프로젝트 2개 — [BagelGame](https://github.com/Unity-Technologies/BagelGame)(URP, Unity 6.3, 기존 씬 `Main.unity`)과
+  [SebLague/Fluid-Sim](https://github.com/SebLague/Fluid-Sim)(Built-in, 2022.3 → 6.0, 컴퓨트 셰이더). 설치 → 기존 씬으로 루프 3회 녹색 →
+  출시 빌드의 `Managed/` DLL 목록이 하네스 없는 대조 빌드와 같음 → 제거 후 `git status` 깨끗. 절차 전체는 `tools/attach-test.ps1` 한 번(34–54 s).
+
+| BagelGame (URP) 메인 메뉴 | Fluid-Sim (Built-in) 입자 시뮬레이션 |
+|---|---|
+| ![bagel](docs/images/attach-bagel.jpg) | ![fluid](docs/images/attach-fluid.jpg) |
+
 ## 요구 사항
 
 - Windows 10/11 — 도구 스크립트는 Windows PowerShell 5.1 기준
 - Unity **6.0 LTS 이상** + URP. 샘플 프로젝트는 **6000.3.11f1**(Unity 6.3 LTS)로 고정돼 있고, 새 클론에서 6000.0.84f1·6000.3.11f1은 검증 매트릭스 전부,
   6000.6.3f1은 렌더링 한 가지(소프트 그림자, ROADMAP P-4)를 빼고 녹색이다. 다른 설치 버전으로 열 때는 `tools/open.ps1 -UnityVersion <버전>`.
 - Unity CLI (`unity`, beta): `$env:UNITY_CLI_CHANNEL='beta'; irm https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.ps1 | iex`
+- 하네스가 에디터에 붙는 통로는 Unity의 실험 패키지 `com.unity.pipeline`(0.8.0-exp.1)이다. 하네스 패키지의 의존성으로 함께 설치된다.
 - 선택: Visual Studio 2022 MSBuild (`compile-check.ps1`의 msbuild 백엔드). 기본인 `csc` 백엔드는 Unity 설치에 포함된 Roslyn만 쓴다.
 - **짧은 경로에 클론할 것 (프로젝트 경로 60자 이하 권장).** Unity 패키지 내부 경로가 길어서(Library 아래 최장 200자 이상) 긴 경로에 두면
   Windows 260자 경로 제한에 걸려 Unity 자체가 패키지 파일을 못 읽는다. 확인: 49자·57자 경로 정상, 149자 경로에서 임포트 에러와 플레이 실패.
@@ -172,15 +207,17 @@ submit한 파일은 에디터 트리에 미커밋 사본으로 남아 있어서,
 ## 구조
 
 ```
-AgentHarness/
-  CLAUDE.md                 에이전트용 사용법·규칙 (먼저 읽을 것)
-  docs/ROADMAP.md           아직 남은 격차 (성질 1~5 + 이식성: 버전·기존 프로젝트·macOS) + 검증 매트릭스
-  Assets/Harness/Runtime/   GameRoot · IGameModule · EventBus · HarnessProbe · ShotPreset · ScriptedInput · ScenarioRunner
-  Assets/Harness/Runtime/Procedural/   MeshBuilder · Noise · TextureBaker · PMath
-  Assets/Harness/Editor/    harness_* 에디터 커맨드, BuildContext / IBuildStep
-  Assets/Game/<Module>/     모듈 런타임 코드 (+ Shaders/, UI/), Builders/ 에 씬 빌드 스텝
-  tools/                    loop.ps1 · submit.ps1 · land.ps1 · uc.ps1 · compile-check.ps1 · scenarios/*.json
-                            open.ps1 · quit.ps1 (에디터 열기·닫기) · fresh-clone-test.ps1 (새 클론 검증) · selftest.ps1 (검증 매트릭스)
+AgentHarness/                              샘플 프로젝트 (하네스 패키지를 임베드해서 씀)
+  CLAUDE.md                                에이전트용 사용법·규칙 (먼저 읽을 것)
+  docs/ROADMAP.md                          아직 남은 격차 (성질 1~5 + 이식성: 버전·기존 프로젝트·macOS) + 검증 매트릭스
+  Packages/com.geuneda.agentharness/       하네스 = UPM 패키지 (git URL: ...unitree.git?path=/AgentHarness/Packages/com.geuneda.agentharness)
+    Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioRunner · Procedural/
+    Editor/                                harness_* 에디터 커맨드, BuildContext / IBuildStep, 출시 빌드 필터
+    Tools~/                                loop · submit · land · uc · compile-check · open · quit · install · uninstall · attach-test ·
+                                           fresh-clone-test · selftest (.ps1) + templates/ (Unity는 ~ 폴더를 임포트하지 않는다)
+  ProjectSettings/AgentHarness.json        하네스 설정: 모듈 폴더, 플레이할 씬, setup 모드
+  Assets/Game/<Module>/                    모듈 런타임 코드 (+ Shaders/, UI/), Builders/ 에 씬 빌드 스텝
+  tools/*.ps1                              패키지 Tools~의 같은 이름 스크립트를 부르는 얇은 진입점 (모두 같은 파일) · scenarios/*.json
 ```
 
 ## 에이전트와 함께 쓰기

@@ -1,0 +1,22 @@
+{
+  "name": "com.geuneda.agentharness",
+  "version": "0.1.0",
+  "displayName": "AgentHarness",
+  "description": "Gives coding agents a Three.js-style loop in Unity: one command recompiles, builds or opens the scene, plays a scripted scenario and returns screenshots, console errors (file/line/module) and frame stats as JSON. Tools live in Tools~ (tools/*.ps1 in the project are thin entry points). Attach it to an existing project with Tools~/install.ps1.",
+  "unity": "6000.0",
+  "license": "MIT",
+  "author": {
+    "name": "geuneda",
+    "url": "https://github.com/geuneda/unitree"
+  },
+  "documentationUrl": "https://github.com/geuneda/unitree/tree/master/AgentHarness",
+  "keywords": [
+    "agent",
+    "automation",
+    "harness",
+    "testing"
+  ],
+  "dependencies": {
+    "com.unity.pipeline": "0.8.0-exp.1"
+  }
+}

@@ -1,5 +1,13 @@
 {
   "dependencies": {
+    "com.geuneda.agentharness": {
+      "version": "file:com.geuneda.agentharness",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {
+        "com.unity.pipeline": "0.8.0-exp.1"
+      }
+    },
     "com.unity.ai.navigation": {
       "version": "2.0.11",
       "depth": 0,

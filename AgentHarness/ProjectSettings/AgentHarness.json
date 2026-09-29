@@ -1,0 +1,9 @@
+{
+  "setup": "harness",
+  "moduleRoots": ["Assets/Game"],
+  "modules": [],
+  "contracts": "Assets/Game/Contracts",
+  "generatedRoot": "Assets/Generated",
+  "buildScene": "Assets/Scenes/Main.unity",
+  "playScene": "build"
+}

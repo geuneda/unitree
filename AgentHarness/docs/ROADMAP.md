@@ -6,7 +6,8 @@
 - 표기: `[ ]` 미해결 · `[~]` 부분 해결 · `[x]` 해결(아래 "해결됨"으로 옮김)
 - 기준: 각 항목은 "Three.js 환경의 어떤 성질을 복원하는가"로 판단한다.
 - 측정 기준 머신/상태: Unity 6000.3.11f1, URP 17.3, Code Optimization=Debug, 에디터 GUI 1개. 버전별 기대값은 CLAUDE.md "Unity 버전".
-- 하네스를 고친 뒤에는 아래 "검증 매트릭스"를 돌린다: 1–8 = `tools/selftest.ps1`, 9 = `tools/fresh-clone-test.ps1 -SelfTest`(버전별 `-UnityVersion`).
+- 하네스를 고친 뒤에는 아래 "검증 매트릭스"를 돌린다: 1–8 = `tools/selftest.ps1`, 9 = `tools/fresh-clone-test.ps1 -SelfTest`(버전별 `-UnityVersion`),
+  10 = `tools/attach-test.ps1`(기존 프로젝트 클론별).
 
 ## 1차 버전 기준선 (비교용)
 
@@ -124,13 +125,27 @@
 ## 이식성 — `npm install three`처럼 어디에나 붙는다
 
 Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고, 버전 범위(semver)로 의존하며, OS를 가리지 않는다.
-이 하네스는 지금 **"이 저장소를 클론해서 그 안에서 시작"하는 방식만** 된다. Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부,
-6000.6.3f1에서 렌더링 한 가지를 빼고 녹색 — P-1, P-4), OS는 Windows 하나에서만 검증했다.
+이 하네스는 이제 UPM 패키지(`com.geuneda.agentharness`, git URL `?path=`)이고 **설치 스크립트 한 번으로 기존 프로젝트에 붙였다 뗄 수 있다**(P-2).
+Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000.6.3f1에서 렌더링 한 가지를 빼고 녹색 — P-1, P-4), OS는 Windows 하나에서만 검증했다.
 
-순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트) → P-3(macOS, 나중)**. 기존 프로젝트는 저마다 다른 6.x 버전을 쓰므로 P-2는 P-1이 먼저 필요했다.
-모두 `tools/fresh-clone-test.ps1 -SelfTest`(O-8·O-3)를 버전(`-UnityVersion`)·OS·대상 프로젝트별로 돌려서 검증한다.
+순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트, 2026-09-29 해결) → P-3(macOS, 나중)**.
+버전은 `tools/fresh-clone-test.ps1 -SelfTest -UnityVersion <v>`, 기존 프로젝트는 `tools/attach-test.ps1 -Project <클론>`으로 검증한다.
 
 - **P-1 Unity 버전이 6000.3.11f1로 고정돼 있다** → 2026-09-29 해결(아래 "해결됨"). 6.6에서 남은 렌더링 문제는 P-4.
+- **P-2 기존 Unity 프로젝트에 붙일 수 없다** → 2026-09-29 해결(아래 "해결됨"). 붙인 뒤에도 남은 것은 P-5.
+
+- [ ] **P-5 기존 프로젝트에 붙였을 때 아직 안 되는 것** (2026-09-29, P-2에서 정리)
+  - 입력 재생은 Input System 게임만: 구 Input Manager(`Input.GetKey`)는 네이티브라 가상 장치로 흉내 낼 수 없다. 시나리오에 입력이 있으면 에러로 보고한다.
+    방향: 이런 게임용으로 시나리오 이벤트를 게임 쪽 훅(예: `[HarnessInput]` 정적 메서드 호출)으로 보내는 경로.
+  - compile-check는 asmdef 어셈블리만 검사한다. asmdef 없는 폴더(`Assembly-CSharp`)를 `modules[]`로 등록하면 에러 귀속·submit/land는 되지만
+    submit의 사전 검사는 건너뛰고 에디터 루프에서야 잡힌다. 방향: `Assembly-CSharp` 응답 파일에 worktree 소스를 다시 glob해서 넣기(`Editor/`·`Plugins/` 특수 폴더 규칙 포함).
+  - 씬 흐름: 시나리오 하나 = 씬 하나(`playScene`/`"scene"`)이고 t=0은 첫 씬 로드 직후다. 부트 씬 → 메뉴 → 레벨처럼 비동기로 넘어가는 게임은
+    "특정 씬이 로드되면 시작" 같은 대기 조건이 없다. 캡처 프리셋도 없어 메인 카메라(`auto` → `main`)만 찍는다.
+  - 기존 씬의 fingerprint는 씬 파일과 의존 에셋의 임포트 해시다(로드된 씬은 `[ExecuteAlways]` 스크립트가 편집 모드에서도 바꿔서 쓸 수 없다).
+    코드가 만드는 씬처럼 "같은 코드 = 같은 결과"를 보장하지는 않는다.
+  - 설치 기록(`Library/AgentHarness/install.json`)은 그 머신에만 있다. 설치를 커밋한 뒤 다른 머신에서 uninstall하면 lock은 바이트 복원 대신
+    "하네스만 쓰던 항목 제거"로 되돌리고, 설치 때 바뀐 다른 항목(예: 의존 깊이)은 Unity가 다시 열 때 고친다.
+  - 실제 사내 프로젝트(대형, Addressables·다중 씬·IL2CPP)에서는 아직 안 돌려 봤다. 검증은 공개 프로젝트 2개(아래 "해결됨").
 
 - [ ] **P-4 Unity 6.6(URP 17.6)에서 샘플 씬의 조명이 검게 나온다** (2026-09-29, P-1 검증 중 발견)
   - 현상: 6000.6.3f1로 연 새 클론에서 에디터 세션의 **첫 플레이만** 정상이고(overview meanLuma 48.3, 6.3은 50.3), 그 뒤의 플레이와
@@ -146,40 +161,6 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
     최소 재현 프로젝트로 신고하고, 그 전까지 6.6에서는 소프트 그림자 캐스케이드를 쓰지 않는 설정을 샘플에 둘지 정한다.
     6000.6.x 새 패치가 나오면 `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`로 다시 본다.
   - 완료 기준: 6.6에서 새 클론 selftest 1–8 녹색(샷에 `dark` 없음, 6.3과 육안 동일).
-
-- [ ] **P-2 기존 Unity 프로젝트에 붙일 수 없다**
-  - 현상: 하네스는 "이 저장소 = 프로젝트"를 전제한다. `Assets/Harness/`와 `tools/`를 기존 프로젝트에 복사하는 방법은 검증하지 않았고, 그대로 복사하면 다음과 부딪친다.
-    - 배포 형태: 소스 폴더를 복사하는 것뿐이다. 하네스 버전을 추적하거나 업데이트할 경로가 없다.
-    - 필수 의존: `com.unity.pipeline`(실험판), URP, Input System. `Harness.Runtime`이 URP(`HarnessCapture`의 `UniversalAdditionalCameraData`)와
-      Input System(`ScriptedInput`)을 직접 참조하므로 Built-in·HDRP 프로젝트나 구 Input Manager만 쓰는 프로젝트에서는 컴파일되지 않는다.
-    - **`harness_setup`이 파괴적이고 전역 설정을 바꾼다.** URP 템플릿 샘플(`Assets/Scenes/SampleScene.unity`, `Assets/Readme.asset`,
-      `Assets/TutorialInfo`, `Assets/Settings/SampleSceneProfile.asset`)을 지우는데, 기존 프로젝트에 같은 경로가 있으면 사용자 파일이 지워진다.
-      `PlayerSettings.runInBackground`·`enableFrameTimingStats`는 출시 빌드 설정까지 바꾼다. Domain Reload off는 프로젝트 전체에 적용되므로,
-      static을 초기화하지 않는 기존 코드가 두 번째 플레이부터 오동작한다(규칙 5를 기존 코드는 지키지 않는다).
-    - 런타임 주입: `Harness.Runtime`은 모든 플랫폼에 포함되고, `GameRoot.Boot`가 `AfterSceneLoad`에서 무조건 `[GameRoot]`를 만든다.
-      기존 게임의 모든 씬과 출시 빌드에도 들어간다.
-    - 씬: `harness_play`·`harness_capture`는 빌더가 만든 `Assets/Scenes/Main.unity`만 연다. 손으로 만든 씬, 여러 씬, 부트 씬부터 시작하는 흐름은 돌릴 수 없다.
-    - 경로·모듈 규약이 하드코딩돼 있다: `HarnessPaths`(`Assets/Game`, `Assets/Generated`, `Main.unity`), `HarnessLogParse.ModuleOf`(에러의 `module`),
-      `HarnessBuild`(빌더는 `Assets/Game/*/Builders/`만 찾음), lint·submit·land 모두 `Assets/Game/<Module>/` 기준.
-      기존 코드(대개 `Assembly-CSharp`)는 에러에 `module`이 빈 값으로 나오고 submit할 수 없다.
-    - 규칙: "YAML 직접 수정 금지"와 "uGUI 프리팹 금지"를 그대로 두면 기존 프로젝트의 씬·프리팹·uGUI를 다룰 수 없다.
-      기존 자산은 에디터 API로만 고친다는 식의 규칙과 기존 프로젝트용 CLAUDE.md 템플릿이 필요하다.
-    - Windows 경로 60자 제한(F-5) 때문에 긴 경로에 있는 기존 프로젝트는 위치를 옮기라고 요구하게 된다.
-  - 방향:
-    - `Assets/Harness/`를 UPM 패키지로 분리한다(예: `com.geuneda.agentharness`, git URL `?path=`). 이 저장소의 샘플 프로젝트도 그 패키지를 쓴다(도그푸딩).
-      도구 스크립트는 패키지의 `Tools~/`에 넣어 패키지 버전과 함께 움직이게 하고, 프로젝트에는 얇은 진입점만 둔다.
-    - 설치 스크립트(`install.ps1 -Project <경로>`)가 패키지 추가, 진입점, `.gitignore` 항목(`HarnessOut/`, 생성물), 설정 파일을 만든다.
-      `-WhatIf`로 바꿀 목록부터 보여 주고, 제거 스크립트로 원상 복구할 수 있게 한다.
-    - 텍스트 설정 파일(예: `ProjectSettings/AgentHarness.json`)에 모듈 루트, 생성물 경로, 플레이할 씬(빌드 씬 / 기존 씬 경로 / 빌드 설정의 첫 씬),
-      Domain Reload 정책을 둔다. `HarnessPaths` 상수를 이 설정으로 바꾼다.
-    - `harness_setup`을 둘로 나눈다. 새 프로젝트용은 지금처럼 동작하고, 붙이기용은 아무것도 지우지 않으며 전역 설정은 보고만 하고 동의할 때만 바꾼다.
-      Domain Reload가 켜진 상태에서도 루프가 돌게 하고, 느려진 만큼은 `timings`로 보고한다.
-    - URP·Input System 의존은 `versionDefines`로 선택 사항으로 만든다. 없으면 해당 기능(카메라 데이터 복사, 입력 재생)만 꺼지고 컴파일은 된다.
-    - 런타임 주입을 막는다. `GameRoot`는 등록된 모듈이 있을 때만 만들고, 출시 빌드에서는 하네스가 빠지게 한다(Editor·Development 빌드 한정 또는 define).
-    - 모듈 개념을 "설정한 폴더 = 모듈"로 일반화해서 기존 코드 폴더도 에러 `module` 귀속, lint, submit/land 대상이 되게 한다.
-  - 완료 기준: 하네스를 모르는 기존 프로젝트 2개(템플릿이 아닌 URP 게임 1개 + Built-in 프로젝트 1개)에 설치 스크립트를 한 번 실행한다.
-    기존 파일 삭제·변경이 없어야 하고(`git status`에 설치가 추가한 파일만), 기존 씬으로 루프가 녹색이어야 한다(캡처·콘솔·FPS).
-    출시 빌드에 `Harness.*` 어셈블리가 없어야 하고, 제거 스크립트를 돌리면 `git status`가 깨끗해야 한다.
 
 - [ ] **P-3 Windows에서만 동작한다 (macOS 지원은 나중)** — 기존 O-2를 옮겨 왔다.
   - 작업 방식: P-1·P-2를 Windows에서 끝낸 뒤 실제 Mac에서 진행한다. 그 전까지 Windows 작업에서는 새 코드에
@@ -212,6 +193,10 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
 
 - [ ] **O-1 Pipeline 패키지 0.8.0-exp.1(실험판) 의존**
   - 현상: `recompile` 상태 레이스(직전 실패 후 옛 실패 보고 / `triggered` 고착)를 `Invoke-HarnessRecompile`의 컴파일 세대 번호 + idle 판정으로 우회 중.
+  - 2026-09-29(P-2): Active Input Handling이 New/Both이고 Input System 패키지가 없는 프로젝트에서 Pipeline 런타임(`RuntimeInputCommand.cs`)이
+    컴파일되지 않는다(`#if ENABLE_INPUT_SYSTEM`만 보고, 자기 asmdef의 `PIPELINE_HAS_INPUT_SYSTEM_PACKAGE`는 다른 곳에만 씀) → 에디터가 Safe Mode 대화상자에서 멈춤.
+    install.ps1이 그 조합이면 `com.unity.inputsystem`을 더해 우회. 출시 빌드에 `Unity.Pipeline.Attributes`·`Newtonsoft.Json`을 넣는 것도
+    `HarnessReleaseBuild`로 우회 중. 둘 다 Pipeline 쪽에 신고할 것(최신 0.8.0-exp.1, 레지스트리 확인).
   - 할 일: 패키지를 업그레이드할 때마다 loop 검증 매트릭스(아래)를 다시 돌린다.
 - **O-2 스크립트가 Windows PowerShell 5.1 전용** → P-3으로 옮겼다(2026-09-29).
 - **O-3 하네스 자체의 자동 테스트가 없다** → 2026-09-29 해결(`tools/selftest.ps1`, 아래 "해결됨"). PNG 눈 확인만 사람·에이전트 몫으로 남았다.
@@ -225,7 +210,8 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
 **1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~3.5분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
-(새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~5분). 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
+(새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~5분), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
+아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
 
 1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark 샷 없음 + `compile-check -IncludeHarness`)
 2. C# 컴파일 에러 주입 → `stage=compile`, file/line/module 정확 → 원복 후 녹색
@@ -243,12 +229,76 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
 9. 새 클론(O-8): `tools/`·`ProjectSettings/`·`Packages/`·`.gitignore`·에디터 시작 코드를 바꿨으면 임시 커밋 후
    `tools/fresh-clone-test.ps1 -SelfTest -ExpectFingerprint <1의 fingerprint>` 녹색(클론이 메인 트리와 같은 fingerprint), `shots/`를 Read로 확인.
    지원 버전(CLAUDE.md "Unity 버전")마다 `-UnityVersion <v>`로도 돌린다(fingerprint는 그 버전의 값)
+10. 기존 프로젝트(P-2): 하네스 패키지·설치/제거 스크립트·런타임을 바꿨으면, 기준선 커밋이 있는 테스트 클론마다
+   `tools/attach-test.ps1 -Project <클론> [-Scene ...] [-Module ...]` 녹색 — install → 설치분만 바뀜 → 기존 씬으로 루프 3회 녹색(fingerprint·events 동일)
+   → 출시 빌드에 `Harness.*` 없음 → uninstall 뒤 `git status` 비어 있음. `shots/`를 Read로 확인. 지금 쓰는 클론(`../ah-p2`, 기준선 커밋 포함):
+   BagelGame(`-Module Game=Assets/Game,UI=Assets/UI`), Fluid-Sim(`-Scene "Assets/Scenes/Fluid Particles.unity"`). 배포 경로를 바꿨으면
+   `-Source git+file:///<저장소>?path=/AgentHarness/Packages/com.geuneda.agentharness#<브랜치>`(커밋된 것, 부트스트랩 포함)로도.
 
 ---
 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **P-2 기존 Unity 프로젝트에 붙일 수 없다** (2026-09-29)
+  - 방법:
+    - **UPM 패키지**: `Assets/Harness/` → `Packages/com.geuneda.agentharness/`(Runtime·Editor·UI + `Tools~/`, `package.json`은 `com.unity.pipeline` 의존).
+      샘플은 임베드 패키지로 같은 코드를 쓴다(도그푸딩). `.meta`(GUID)를 그대로 옮겨 생성 에셋 참조가 유지된다. 기존 프로젝트는 git URL
+      `https://github.com/geuneda/unitree.git?path=/AgentHarness/Packages/com.geuneda.agentharness#<ref>`로 받는다.
+    - **얇은 진입점**: 모든 `tools/*.ps1`이 같은 파일(`Tools~/templates/entry.ps1`)이다. 패키지를 임베드 → manifest의 `file:` → `Library/PackageCache`
+      순으로 찾아 `Tools~/<같은 이름>`을 부르고, 작업 루트를 `AGENTHARNESS_WORK_ROOT`로 넘긴다(`Harness.psm1`은 더 이상 자기 위치로 프로젝트를 정하지 않음).
+      worktree는 에디터 트리의 패키지를 쓴다. git으로 설치하고 한 번도 안 연 체크아웃은 `open.ps1` 진입점이 배치 모드로 한 번 임포트해 패키지를 받는다.
+    - **설정 파일** `ProjectSettings/AgentHarness.json`(`Harness.HarnessConfig`, `Get-HarnessConfig`): `setup`(harness|attach), `moduleRoots`, `modules[]`,
+      `contracts`, `generatedRoot`, `buildScene`, `playScene`(build|first|경로), `installAdded`. `HarnessPaths` 상수·`ModuleOf`·빌더 탐색·lint·compile-check·
+      submit·land가 모두 이 설정을 쓴다. 없으면 기존 프로젝트 기본값(아무것도 소유하지 않음, Build Settings 첫 씬).
+    - **attach 모드**: `harness_setup`은 아무것도 바꾸지 않고 `recommendations`만(`{"apply":"domainReload,..."}`로 명시 적용). 템플릿 샘플 삭제·
+      Build Settings 변경·폴더 생성은 `setup: harness`에서만. `harness_build`는 빌드 스텝이 없으면 플레이 씬을 열고 에셋 기준 fingerprint만 낸다(`skipped`).
+      하네스가 만든 적 없는 buildScene·생성 에셋(`AgentHarnessGenerated` 라벨)은 덮어쓰거나 지우지 않는다. 씬에 저장 안 한 변경이 있으면 씬을 바꾸지 않는다.
+      Domain Reload가 켜진 프로젝트도 루프가 돌고 비용은 `timings.playEnterSec`(플레이 요청 → 러너 시작)으로 보고. 그때 lint `static-reset`은 건너뛴다.
+    - **선택 의존**: asmdef `versionDefines`(`AGENTHARNESS_URP`·`_RP_CORE`·`_INPUT_SYSTEM`)로 URP 카메라 데이터 복사·`ctx.VolumeProfile`·입력 재생만 빠지고
+      Built-in·구 Input Manager 프로젝트에서도 컴파일된다. 없는 asmdef 이름 참조는 Unity가 무시한다(확인).
+    - **런타임 주입 없음**: `GameRoot`는 모듈이 등록됐을 때만 만들고(없으면 바로 `HarnessProbe.Ready`), `Harness.Runtime`은 define 제약
+      `UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME`. `HarnessReleaseBuild`(IFilterBuildAssemblies)가 출시 빌드에서 하네스 때문에만 들어온
+      `Unity.Pipeline.Attributes`·`Newtonsoft.Json`·(`installAdded`의) `Unity.InputSystem`·`.ForUI`를 뺀다: 패키지가 lock에서 하네스 경유로만 닿고,
+      빌드의 다른 DLL이 메타데이터에서 실제로 참조하지 않을 때만(엔진 모듈·.NET은 `InternalsVisibleTo`로만 이름을 적으므로 제외; 후보끼리는 고정점).
+    - **install.ps1 / uninstall.ps1**(`Tools~`): 위 README·CLAUDE.md "기존 프로젝트에 붙이기". manifest는 Unity 형식을 유지하는 텍스트 편집(정렬 위치에 한 줄),
+      lock은 설치 전 바이트를 `Library/AgentHarness/install.json`에 남겨 uninstall이 그대로 복원. `-WhatIf`. 에이전트용 안내서 `tools/AgentHarness.md`.
+    - **attach-test.ps1**: 매트릭스 10(위).
+    - 모듈 일반화: `modules[]`의 폴더(기존 asmdef 폴더 포함)가 에러 `module`, compile-check 대상, submit/land 단위가 된다. `module-asmdef`·`module-boundary`
+      lint는 `moduleRoots` 모듈에만(기존 코드 구조를 실패로 치지 않음).
+  - 만들다 드러난 하네스 버그·함정(모든 프로젝트 공통, 고침):
+    - 테마를 패키지로 옮기자 빌드마다 Unity가 `Assets/UI Toolkit/UnityThemes/UnityDefaultRuntimeTheme.tss`를 새로 만들었다(`PanelSettings.GetOrCreateDefaultTheme`)
+      → 생성 중에만 훅을 하네스 테마로 바꾸고, 그래도 생기면 지운다.
+    - 오프스크린 캡처가 러너의 `LateUpdate`(실행 순서 -2000)에서 찍혀, `LateUpdate`에서 `Graphics.DrawMeshInstancedIndirect`로 그리는 Fluid-Sim이 검은 화면(`blank`)
+      → 캡처를 실행 순서 32000인 `ScenarioCaptureDriver.LateUpdate`로 옮김(Cinemachine처럼 LateUpdate에서 카메라를 움직이는 게임도 맞는 포즈). 샘플 샷 통계 불변.
+    - 투명 색으로 지우는 카메라의 PNG가 투명(뷰어에서 흰색)이었다 → RGB24로 저장.
+    - compile-check가 "가장 최근" 응답 파일을 써서, 플레이어 빌드 뒤에는 `UNITY_EDITOR` 없는 rsp로 검사해 `#if UNITY_EDITOR` 안의 에러를 놓쳤다
+      (BagelGame의 `Bakery.cs` 전체가 그 안) → 에디터 컴파일의 rsp(`…EDbg.dag` > `…E.dag`)만 쓴다.
+    - UPM이 git 패키지를 CRLF로 체크아웃해 uninstall의 "템플릿과 같으면 지움" 비교가 틀렸다 → 줄바꿈 정규화.
+    - 지원 종료 패키지가 있으면 Unity가 열 때마다 모달을 띄운다(Fluid-Sim의 `com.unity.ide.vscode`) → `open.ps1`이 `deprecatedPackages`로 보고, 대화상자로
+      막히면 원인을 에러에 붙인다. Pipeline의 입력 컴파일 버그는 O-1.
+  - 검증(이 머신, 샘플 에디터 1개 동시 실행; 테스트 클론은 `../ah-p2`, Unity 업그레이드 변경은 먼저 "기준선" 커밋):
+    - **BagelGame**(Unity-Technologies, URP 17.3, Input System, Cinemachine, asmdef 5개, 기존 `Assets/Scenes/Main.unity`·`Assets/Game/` — 하네스 기본 경로와 겹침;
+      6000.3.9f1 → 6000.3.11f1): `attach-test -Module Game=Assets/Game,UI=Assets/UI` 녹색 53.6 s(install 0.5 / open 23.6 / 루프 3.7–3.8 s ×3 / 출시 빌드 11.9 /
+      quit 2.1 / uninstall 0.4). fingerprint `619be553…` 3회 동일, 메인 메뉴 샷 meanLuma 65.5(육안 확인), FPS ~120, Domain Reload는 원래 꺼져 있어
+      playEnterSec 0.4–0.6 s. install 뒤 `git status` = manifest 한 줄 + lock + 새 파일 12개. 출시 빌드 `Managed/` 132개 = 하네스 없는 대조 빌드(`unity build`)
+      132개와 목록 동일. uninstall 뒤 `git status` 비어 있음. 기존 코드에 넣은 컴파일 에러·런타임 예외가 `Assets/Game/Bakery/Bakery.cs:137`, `module: Game`으로
+      정확히 보고. Input System 입력 재생 5개 적용. worktree에서 `submit -Module Game`(compile-check `BagelGame: ok`) → 녹색 유지, 커밋 → `land` fast-forward 6.5 s
+      (`releasedOwners: Game`), 컴파일 에러 submit은 게이트에서 0.96 s 거부(에디터 트리 무변경). 개발 빌드에는 `Harness.Runtime`·Pipeline 런타임이 들어간다(의도).
+      빌드는 하네스와 무관하게 URP 에셋·`ProjectSettings.asset`·`GraphicsSettings.asset`·`TimeManager.asset`을 다시 쓴다(대조 빌드도 같음) → attach-test가 `buildRewrote`로 보고·복원.
+    - **SebLague/Fluid-Sim**(Built-in, Input System 없음, `Assembly-CSharp`만, 컴퓨트 셰이더, Build Settings 비어 있음, Active Input Handling=Both;
+      2022.3.46f1 → 6000.0.84f1, 지원 종료 `com.unity.ide.vscode`는 기준선에서 제거): `-Scene` 없이 설치하면 후보 씬 목록과 함께 거부.
+      `attach-test -Scene "Assets/Scenes/Fluid Particles.unity"` 녹색 34.2 s(open 18.6 / 루프 1.7–2.0 s ×3 / 빌드 6.0). fingerprint `54880f05…` 3회 동일,
+      입자 샷 23.0/14.9/22.2(GPU 시뮬레이션이라 ±0.1 흔들림), FPS ~220. install이 `com.unity.inputsystem`을 더함(`installAdded`) → 출시 빌드에서 빠짐,
+      `Managed/` 103개 = 대조 빌드 103개와 동일. uninstall이 Input System 줄까지 지워 `git status` 비어 있음.
+      Domain Reload를 잠시 켠 상태: 루프 3회 녹색, playEnterSec 2.1–2.3 s(끈 상태 0.13 s), 루프 4.0–4.3 s(1.7 s), `harness_setup`이 `domainReload` 권장, lint는 static 검사 생략.
+    - **git URL 배포 경로**: `-Source git+file:///…/unitree?path=/AgentHarness/Packages/com.geuneda.agentharness#master`(커밋된 패키지)로 Fluid-Sim
+      attach-test 녹색 38.4 s — 패키지가 아직 없을 때 `open.ps1` 진입점의 배치 임포트(부트스트랩) 포함 open 22.7 s.
+    - 샘플: 매트릭스 1–8 녹색 199 s(fingerprint `977545a7…` — 스크립트·테마 경로가 `Packages/…`로 바뀐 것만 다름, 샷 통계 65.1/60.5/50.3 동일, 줄 61/68/87).
+      9(`fresh-clone-test -SelfTest -UnityVersion`, 새 클론 = 임베드 패키지): 6000.3.11f1 녹색 306 s(`977545a7…` = 메인 트리, 종료 뒤 `git status` 깨끗),
+      6000.0.84f1 녹색 299 s(`d9a6d092…`; `git status`는 P-1과 같은 버전 전환 파일만), 6000.6.3f1 2–8 녹색·1 빨강 311 s(`0ba32228…`, P-4의 `dark` 샷
+      25.0/15.6/0.5 그대로). 세 버전 모두 줄 61/68/87. fingerprint는 스크립트·테마 경로(`Assets/Harness` → `Packages/…`)만큼 바뀌었다.
 
 - [x] **P-1 Unity 버전이 6000.3.11f1로 고정돼 있다** (2026-09-29)
   - 지원 범위: **Unity 6.0 LTS 이상**(하한 = `com.unity.pipeline` 0.8.0-exp.1의 `"unity": "6000.0"`). 검증 목록: 6000.0.84f1(6.0 LTS 최신),

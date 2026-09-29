@@ -1,0 +1,13 @@
+{
+    "name": "default",
+    "durationSec": 3.0,
+    "fixedDeltaTime": 0.0166667,
+    "warmupSec": 0.25,
+    "readyTimeoutSec": 10,
+    "events": [],
+    "captures": [
+        { "t": 0.5, "preset": "auto" },
+        { "t": 1.5, "preset": "auto" },
+        { "t": 2.5, "preset": "auto" }
+    ]
+}

@@ -1,288 +1,85 @@
-﻿<#
-.SYNOPSIS
-  Submit module folders from an agent worktree to the shared Editor, as a transaction (G5-2).
-
-  1. compile-check (csc, no Editor, no lock) of the modules and the in-project assemblies they reference, from the
-     worktree's sources. Errors -> stage=compile, submit.phase=check, nothing is copied.
-  2. Take the Editor lock. Mirror Assets/Game/<Module>/ (+ its folder .meta) of the worktree into the Editor tree and
-     add new Assets/Game/Contracts/ files (add-only: a changed existing contract is refused). Every file it
-     overwrites or deletes is backed up first, under a journal (Library/Harness/submit/pending.json).
-  3. The normal loop (recompile, build, play, console) on the Editor tree.
-  4. Green -> keep, and copy the .meta files Unity generated back into the worktree (commit them).
-     Otherwise -> restore the backup and recompile, so the Editor tree is back where it was. -KeepOnFail keeps the
-     files for non-compile failures; a compile failure is always reverted. If the submit dies half-way, the next lock
-     holder (loop.ps1 / uc.ps1 / submit.ps1) rolls it back from the journal.
-  So one agent's broken code never stays in the Editor tree and never blocks another agent's loop.
-
-  Refused under the lock (stage=submit), before anything is copied (G5-5):
-  - the Editor tree's branch has commits touching the module that this worktree lacks (the mirror would revert
-    landed work): git merge <that branch> in the worktree first;
-  - the module's Editor-tree copy has un-landed changes submitted from another live worktree (one module = one
-    agent; Library/Harness/submit/owners.json). -Takeover overrides. tools/land.ps1 releases a branch's modules.
-
-.EXAMPLE
-  git worktree add ..\wt-foo -b agent/foo            # once per agent, from the checkout the Editor has open
-  # work only in ..\wt-foo\AgentHarness\Assets\Game\Foo\, then from ..\wt-foo\AgentHarness:
-  powershell -ExecutionPolicy Bypass -File tools/submit.ps1 -Module Foo
-  -> the loop's report.json + "submit": {...} in HarnessOut/submit/ of the worktree. Exit 0 = green and kept.
-#>
-param(
-    [Parameter(Mandatory)][string[]]$Module,
-    [string]$Scenario = 'tools/scenarios/default.json',
-    [string]$Out = 'HarnessOut/submit',
-    [switch]$NoPlay,
-    [switch]$KeepOnFail,
-    [switch]$SkipCheck,   # skip step 1 (the transaction still protects the Editor tree; only for testing that)
-    [switch]$Takeover,    # submit over another worktree's un-landed changes to the module
-    [int]$TimeoutSec = 180
-)
+# AgentHarness entry point: runs Tools~/<this file's name> of the com.geuneda.agentharness package that this project
+# uses, so the tools always match the installed package version. Every tools/*.ps1 entry point is this same file
+# (written by the package's install.ps1; do not edit - update the package instead).
+#   Package found in: Packages/com.geuneda.agentharness (embedded), a "file:" dependency in Packages/manifest.json, or
+#   Library/PackageCache (git/registry). An agent worktree without Library/ uses the package of the Editor tree.
+#   Before the first import there is no Library/PackageCache yet: open.ps1 then imports the project once in batch mode.
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'Harness.psm1') -Force
-$clock = [Diagnostics.Stopwatch]::StartNew()
-$work = Get-HarnessWorkRoot
-$root = Get-HarnessProjectRoot
-# `powershell -File ... -Module A,B` passes "A,B" as one string.
-$Module = @($Module | ForEach-Object { "$_" -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-$outAbs = if ([IO.Path]::IsPathRooted($Out)) { $Out } else { Join-Path $work $Out }
-# The Editor reads the scenario: pass this checkout's file by absolute path (inline JSON as is).
-$scenarioArg = $Scenario
-if (-not $Scenario.TrimStart().StartsWith('{') -and -not [IO.Path]::IsPathRooted($Scenario)) {
-    $local = Join-Path $work $Scenario
-    if (Test-Path -LiteralPath $local) { $scenarioArg = $local.Replace('\', '/') }
-}
-$runId = (Get-Date).ToString('yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 6)
-$timings = [ordered]@{}
-$sub = [ordered]@{ runId = $runId; modules = $Module; workRoot = $work.Replace('\', '/'); editorRoot = $root.Replace('\', '/')
-    phase = 'check'; synced = $false; kept = $false; reverted = $false; written = @(); deleted = @(); contractsAdded = @(); metaWrittenBack = @() }
+$AgentHarnessWork = Split-Path -Parent $PSScriptRoot
+$AgentHarnessTool = Split-Path -Leaf $PSCommandPath
 
-function New-FailReport([string]$stage, [string]$message, [object[]]$compileErrors = @()) {
-    [ordered]@{ ok = $false; stage = $stage; compileErrors = @($compileErrors); runtimeErrors = @(); fps = $null; shots = @(); durationSec = 0
-        report = (Join-Path $outAbs 'report.json').Replace('\', '/'); error = $message }
-}
-
-function Complete-Submit([System.Collections.IDictionary]$report) {
-    $report['submit'] = $sub
-    Save-HarnessReport $report $outAbs $clock $timings
-    exit $(if ($report.ok) { 0 } else { 1 })
-}
-
-# Project-relative files (forward slashes) under <base>/<rel>. Hidden files are ignored, as Unity does.
-function Get-RelFiles([string]$base, [string]$rel) {
-    $dir = [IO.Path]::Combine($base, $rel)
-    if (-not [IO.Directory]::Exists($dir)) { return @() }
-    @(Get-ChildItem -LiteralPath $dir -Recurse -File | ForEach-Object { $_.FullName.Substring($base.Length + 1).Replace('\', '/') })
-}
-
-# <rel> itself plus every folder below it, project-relative.
-function Get-RelDirs([string]$base, [string]$rel) {
-    $dir = [IO.Path]::Combine($base, $rel)
-    if (-not [IO.Directory]::Exists($dir)) { return @() }
-    @($rel) + @(Get-ChildItem -LiteralPath $dir -Recurse -Directory | ForEach-Object { $_.FullName.Substring($base.Length + 1).Replace('\', '/') })
-}
-
-function Test-SameFile([string]$a, [string]$b) {
-    $fa = New-Object IO.FileInfo $a; $fb = New-Object IO.FileInfo $b
-    if (-not $fb.Exists -or $fa.Length -ne $fb.Length) { return $false }
-    [Convert]::ToBase64String([IO.File]::ReadAllBytes($a)) -eq [Convert]::ToBase64String([IO.File]::ReadAllBytes($b))
-}
-
-# Folders that do not exist in the Editor tree yet, topmost only (removing one on revert removes what is below it).
-function Get-CreatedDirs([string[]]$dirs) {
-    @($dirs | Where-Object { -not [IO.Directory]::Exists([IO.Path]::Combine($root, $_)) -and [IO.Directory]::Exists([IO.Path]::Combine($root, $_.Substring(0, $_.LastIndexOf('/')))) })
-}
-
-# ---- 0. Arguments ------------------------------------------------------------------------------------
-if (-not (Test-HarnessWorktree)) {
-    Complete-Submit (New-FailReport 'submit' "submit.ps1 runs from an agent worktree (a checkout without Library/, e.g. 'git worktree add'). This is the Editor tree itself ($root): edit here and run tools/loop.ps1.")
-}
-if ($Module.Count -eq 0) { Complete-Submit (New-FailReport 'submit' '-Module is required') }
-foreach ($m in $Module) {
-    if ($m -notmatch '^[A-Za-z0-9_.-]+$' -or $m -eq 'Contracts') {
-        Complete-Submit (New-FailReport 'submit' "invalid module '$m': a folder name under Assets/Game (new Contracts files are submitted automatically with a module)")
-    }
-    if (-not [IO.Directory]::Exists((Join-Path $work "Assets\Game\$m"))) { Complete-Submit (New-FailReport 'submit' "no folder Assets/Game/$m in this worktree ($work)") }
-}
-
-# ---- 1. Compile-check in the worktree (no Editor, no lock) ----------------------------------------------
-if (-not $SkipCheck) {
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    $ccText = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'compile-check.ps1') -Module ($Module -join ',') -Backend csc | Out-String
-    $timings['checkSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
-    $cc = $null
-    try { $cc = $ccText | ConvertFrom-Json } catch { }
-    if ($null -eq $cc) { Complete-Submit (New-FailReport 'compile' "compile-check did not return JSON: $ccText") }
-    $sub['check'] = [ordered]@{ ok = $cc.ok; targets = @($cc.targets | ForEach-Object { "$($_.assembly): $(if ($_.ok) { 'ok' } else { 'FAILED' })" }) }
-    if (-not $cc.ok) {
-        $errs = @($cc.compileErrors | ForEach-Object { [ordered]@{ file = $_.file; line = $_.line; msg = $_.msg; module = $_.module } })
-        Complete-Submit (New-FailReport 'compile' 'compile-check failed in the worktree; nothing was copied to the Editor tree' $errs)
-    }
-}
-
-# The worktree's commit and branch (none for a plain copy of the project: the checks that need them are skipped).
-$wtHead = $null; $wtBranch = $null
-$g = Invoke-HarnessGit $work @('rev-parse', 'HEAD')
-if ($g.code -eq 0) {
-    $wtHead = $g.out.Trim()
-    $g = Invoke-HarnessGit $work @('symbolic-ref', '-q', '--short', 'HEAD')
-    if ($g.code -eq 0) { $wtBranch = $g.out.Trim() }
-}
-
-# ---- 2-4. Under the Editor lock: sync, loop, keep or revert ----------------------------------------------
-$timings['lockWaitSec'] = Enter-HarnessLock
-$report = $null
-$journal = $null
-try {
-    $recovered = Get-HarnessLastRecovery
-    if ($recovered) { $sub['recoveredSubmit'] = $recovered }
-    $recovered = Get-HarnessLastLandRecovery
-    if ($recovered) { $sub['recoveredLand'] = $recovered }
-
-    # Never mirror over landed work this worktree lacks, nor over another live worktree's un-landed submit.
-    $refusal = $null
-    $editorHead = Invoke-HarnessGit $root @('rev-parse', 'HEAD')
-    $into = (Invoke-HarnessGit $root @('symbolic-ref', '-q', '--short', 'HEAD')).out.Trim()
-    $owners = Get-HarnessOwners
-    foreach ($m in $Module) {
-        if ($wtHead -and $editorHead.code -eq 0) {
-            $lg = Invoke-HarnessGit $root @('log', '--format=%h %s', '-n', '5', "$wtHead..$($editorHead.out.Trim())", '--', "Assets/Game/$m", "Assets/Game/$m.meta") -Check
-            $behind = @($lg.out -split "`n" | Where-Object { $_.Trim() })
-            if ($behind.Count -gt 0) {
-                $refusal = "the Editor tree's branch ($into) has commits touching Assets/Game/$m that this worktree does not have: $($behind -join ' | '). Submitting would revert them in the Editor tree. Run 'git merge $into' here first."
-                break
-            }
-        }
-        $o = $owners[$m]
-        if ($o -and -not (Test-HarnessSamePath $o.workRoot $work) -and (Test-Path -LiteralPath $o.workRoot)) {
-            $pending = @(Get-HarnessModuleChanges $m)
-            if ($pending.Count -gt 0) {
-                $info = [ordered]@{ module = $m; workRoot = $o.workRoot; branch = $o.branch; at = $o.at; pendingFiles = $pending.Count }
-                if ($Takeover) { $sub['takeover'] = $info; continue }
-                $sub['owner'] = $info
-                $refusal = "Assets/Game/$m has un-landed changes ($($pending.Count) files) submitted from another worktree: $($o.workRoot) (branch $($o.branch), $($o.at)). One module = one agent: leave it to that agent (it lands with tools/land.ps1), or pass -Takeover if that work is abandoned."
-                break
-            }
+function Find-AgentHarnessTools([string]$Project) {
+    if (-not $Project) { return $null }
+    $pkg = 'com.geuneda.agentharness'
+    $candidates = @(Join-Path $Project "Packages/$pkg")
+    $manifest = Join-Path $Project 'Packages/manifest.json'
+    if (Test-Path -LiteralPath $manifest) {
+        $m = [regex]::Match([IO.File]::ReadAllText($manifest), '"com\.geuneda\.agentharness"\s*:\s*"file:([^"]+)"')
+        if ($m.Success) {
+            $p = $m.Groups[1].Value
+            if (-not [IO.Path]::IsPathRooted($p)) { $p = Join-Path (Join-Path $Project 'Packages') $p }
+            $candidates += $p
         }
     }
-
-    # Plan against the Editor tree as it is now (other submits may have landed while we waited).
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    $writes = New-Object System.Collections.ArrayList    # @{ rel; src }
-    $deletes = New-Object System.Collections.ArrayList
-    $created = New-Object System.Collections.ArrayList
-    $staleDirs = New-Object System.Collections.ArrayList # Editor-tree folders the worktree no longer has
-    foreach ($m in $Module) {
-        $rel = "Assets/Game/$m"
-        $srcFiles = @(Get-RelFiles $work $rel)
-        if ([IO.File]::Exists([IO.Path]::Combine($work, "$rel.meta"))) { $srcFiles += "$rel.meta" }
-        $srcDirs = @(Get-RelDirs $work $rel)
-        $srcSet = @{}; foreach ($p in @($srcFiles) + @($srcDirs)) { $srcSet[$p] = $true }
-        foreach ($f in $srcFiles) {
-            $src = [IO.Path]::Combine($work, $f)
-            if (-not (Test-SameFile $src ([IO.Path]::Combine($root, $f)))) { [void]$writes.Add(@{ rel = $f; src = $src }) }
-        }
-        $dstFiles = @(Get-RelFiles $root $rel)
-        if ([IO.File]::Exists([IO.Path]::Combine($root, "$rel.meta"))) { $dstFiles += "$rel.meta" }
-        foreach ($f in $dstFiles) {
-            if ($srcSet.ContainsKey($f)) { continue }
-            # A .meta that Unity generated here for a file the worktree has: keep it (copied back to the worktree when kept).
-            if ($f.EndsWith('.meta') -and $srcSet.ContainsKey($f.Substring(0, $f.Length - 5))) { continue }
-            [void]$deletes.Add($f)
-        }
-        foreach ($d in @(Get-CreatedDirs $srcDirs)) { [void]$created.Add($d) }
-        foreach ($d in @(Get-RelDirs $root $rel)) { if (-not $srcSet.ContainsKey($d)) { [void]$staleDirs.Add($d) } }
+    $candidates += @(Get-ChildItem -LiteralPath (Join-Path $Project 'Library/PackageCache') -Directory -Filter "$pkg@*" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | ForEach-Object { $_.FullName })
+    foreach ($c in $candidates) {
+        $t = Join-Path $c 'Tools~'
+        if (Test-Path -LiteralPath (Join-Path $t 'Harness.psm1')) { return $t }
     }
-    # Contracts are add-only: new files are copied, a changed existing file is refused.
-    $conflicts = @()
-    foreach ($f in @(Get-RelFiles $work 'Assets/Game/Contracts')) {
-        $src = [IO.Path]::Combine($work, $f); $dst = [IO.Path]::Combine($root, $f)
-        if (-not [IO.File]::Exists($dst)) { [void]$writes.Add(@{ rel = $f; src = $src }); $sub.contractsAdded += $f }
-        elseif (-not (Test-SameFile $src $dst)) { $conflicts += $f }
-    }
-    foreach ($d in @(Get-CreatedDirs @(Get-RelDirs $work 'Assets/Game/Contracts'))) { [void]$created.Add($d) }
+    $null
+}
 
-    if ($refusal) {
-        $sub.contractsAdded = @()
-        $report = New-FailReport 'submit' $refusal
-    } elseif ($conflicts.Count -gt 0) {
-        $sub.contractsAdded = @()
-        $report = New-FailReport 'submit' "Assets/Game/Contracts is add-only, but these files differ from the Editor tree: $($conflicts -join ', '). Add a new file instead of changing one, or update the worktree (git merge master)."
-    } else {
-        if ($writes.Count + $deletes.Count -gt 0) {
-            $journal = Start-HarnessSubmit -RunId $runId -WorkRoot $work -Modules $Module -Writes $writes.ToArray() -Deletes @($deletes) -CreatedDirs @($created)
-            foreach ($w in $writes) {
-                $dst = [IO.Path]::Combine($root, $w.rel)
-                [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($dst))
-                [IO.File]::Copy($w.src, $dst, $true)
-                [IO.File]::SetLastWriteTimeUtc($dst, [DateTime]::UtcNow)   # never older than what Unity imported last
-            }
-            foreach ($f in $deletes) { [IO.File]::Delete([IO.Path]::Combine($root, $f)) }
-            foreach ($d in @($staleDirs | Sort-Object Length -Descending)) {
-                $abs = [IO.Path]::Combine($root, $d)
-                if ([IO.Directory]::Exists($abs) -and @([IO.Directory]::GetFileSystemEntries($abs)).Count -eq 0) { [IO.Directory]::Delete($abs) }
-            }
-            $sub.synced = $true
-            $sub.written = @($writes | ForEach-Object { $_.rel })
-            $sub.deleted = @($deletes)
-        }
-        $timings['syncSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+# The checkout the Editor has open, for an agent worktree (the main worktree at the same sub-path).
+function Get-AgentHarnessEditorRoot([string]$Work) {
+    if ($env:AGENTHARNESS_EDITOR_ROOT) { return $env:AGENTHARNESS_EDITOR_ROOT }
+    try {
+        $main = @(& git -C $Work worktree list --porcelain 2>$null) | Select-Object -First 1
+        $prefix = & git -C $Work rev-parse --show-prefix 2>$null
+        if ($main -like 'worktree *') { return [IO.Path]::GetFullPath([IO.Path]::Combine($main.Substring(9), "$prefix")) }
+    } catch { }
+    $null
+}
 
-        $sub.phase = 'loop'
-        $report = Invoke-HarnessLoop -Scenario $scenarioArg -OutDir $outAbs -NoPlay:$NoPlay -TimeoutSec $TimeoutSec -Timings $timings
-        $mods = @()
-        foreach ($e in @($report.compileErrors) + @($report.runtimeErrors) + @($report['lint'])) {
-            if ($e -is [System.Collections.IDictionary] -and $e.module) { $mods += $e.module }
-        }
-        if ($report['build'] -and $report['build'].steps) { foreach ($s in @($report['build'].steps)) { if ($s.error -and $s.module) { $mods += $s.module } } }
-        $sub['errorModules'] = @($mods | Sort-Object -Unique)
+function Exit-AgentHarness([string]$Message) {
+    [ordered]@{ ok = $false; stage = 'editor'; error = $Message } | ConvertTo-Json
+    exit 1
+}
 
-        $sub.phase = 'done'
-        if ($null -eq $journal) {
-            $sub['note'] = 'no changes: the Editor tree already has these files'
-            $sub.kept = [bool]$report.ok
-        } elseif ($report.ok -or ($KeepOnFail -and $report.stage -notin @('compile', 'editor'))) {
-            Complete-HarnessSubmit $journal
-            $journal = $null
-            $sub.kept = $true
-            # This worktree now owns the modules' un-landed Editor-tree copies (released by tools/land.ps1).
-            $owners = Get-HarnessOwners
-            foreach ($m in $Module) { $owners[$m] = [ordered]@{ workRoot = $work.Replace('\', '/'); branch = $wtBranch; runId = $runId; at = (Get-Date).ToString('o') } }
-            Save-HarnessOwners $owners
-            # Copy the .meta files Unity generated for new files/folders back, so the agent commits stable GUIDs.
-            $back = @()
-            $cands = @($sub.contractsAdded | ForEach-Object { "$_.meta" }) + @($created | ForEach-Object { "$_.meta" })
-            foreach ($m in $Module) { $cands += @(Get-RelFiles $root "Assets/Game/$m" | Where-Object { $_.EndsWith('.meta') }) + @("Assets/Game/$m.meta") }
-            foreach ($f in @($cands | Sort-Object -Unique)) {
-                $src = [IO.Path]::Combine($root, $f); $dst = [IO.Path]::Combine($work, $f)
-                if ([IO.File]::Exists($src) -and -not [IO.File]::Exists($dst)) {
-                    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($dst))
-                    [IO.File]::Copy($src, $dst)
-                    $back += $f
-                }
-            }
-            $sub.metaWrittenBack = $back
-        } else {
-            $sw = [Diagnostics.Stopwatch]::StartNew()
-            Undo-HarnessSubmit $journal
-            $journal = $null
-            $sub.reverted = $true
-            if ($report.stage -ne 'editor') {
-                $rc = Invoke-HarnessRecompile -TimeoutSec $TimeoutSec
-                $sub['restore'] = [ordered]@{ ok = $rc.ok; status = $rc.status; errors = @($rc.errors) }
-            }
-            $timings['restoreSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
-        }
+$tools = Find-AgentHarnessTools $AgentHarnessWork
+if (-not $tools -and -not (Test-Path -LiteralPath (Join-Path $AgentHarnessWork 'Library'))) { $tools = Find-AgentHarnessTools (Get-AgentHarnessEditorRoot $AgentHarnessWork) }
+
+if (-not $tools -and $AgentHarnessTool -eq 'open.ps1') {
+    # First open of a checkout that uses the package from git: Unity has not downloaded it yet. Import once in batch
+    # mode (that resolves the packages), then run the package's open.ps1 as usual.
+    $version = $null
+    for ($i = 0; $i -lt $args.Count - 1; $i++) { if ("$($args[$i])" -ieq '-UnityVersion') { $version = "$($args[$i + 1])" } }
+    if (-not $version) {
+        $pv = [regex]::Match([IO.File]::ReadAllText((Join-Path $AgentHarnessWork 'ProjectSettings/ProjectVersion.txt')), 'm_EditorVersion:\s*(\S+)')
+        if ($pv.Success) { $version = $pv.Groups[1].Value }
     }
-} catch {
-    $msg = "submit failed in phase '$($sub.phase)': $($_.Exception.Message)"
-    if ($null -ne $journal) {
-        try {
-            Undo-HarnessSubmit $journal
-            $sub.reverted = $true
-            $rc = Invoke-HarnessRecompile -TimeoutSec $TimeoutSec
-            $sub['restore'] = [ordered]@{ ok = $rc.ok; status = $rc.status; errors = @($rc.errors) }
-        } catch { $msg += " | revert failed: $($_.Exception.Message) (the next loop.ps1/submit.ps1 retries it from the journal)" }
-    }
-    # Keep the loop's findings (compile errors, shots, ...) if it got that far.
-    if ($null -eq $report) { $report = New-FailReport 'submit' $msg } else { $report['submitError'] = $msg }
-} finally { Exit-HarnessLock }
-Complete-Submit $report
+    $exe = $null
+    try {
+        $installed = (& unity editors --installed --format json --no-banner 2>$null | Out-String | ConvertFrom-Json).data
+        $e = @($installed | Where-Object { $_.version -eq $version }) | Select-Object -First 1
+        if ($e) { $exe = if ("$($e.location)" -like '*.app') { Join-Path $e.location 'Contents/MacOS/Unity' } else { "$($e.location)" } }
+    } catch { }
+    if (-not $exe) { Exit-AgentHarness "the AgentHarness package is not downloaded yet and Unity $version is not installed ('unity editors --installed'): unity install $version, or open.ps1 -UnityVersion <installed 6.x>" }
+    $log = Join-Path $AgentHarnessWork 'Logs/Editor-bootstrap.log'
+    [void](New-Item -ItemType Directory -Force (Split-Path -Parent $log))
+    [Console]::Error.WriteLine("open.ps1: importing the project once in batch mode to download the AgentHarness package (log: $log)")
+    $argLine = (@('-batchmode', '-quit', '-projectPath', $AgentHarnessWork, '-logFile', $log) | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
+    $p = Start-Process -FilePath $exe -ArgumentList $argLine -PassThru
+    $null = $p.Handle   # keeps ExitCode readable after the process ends
+    if (-not $p.WaitForExit(1800 * 1000)) { try { $p.Kill() } catch { }; Exit-AgentHarness "the batch-mode import did not finish in 1800 s (log: $log)" }
+    $tools = Find-AgentHarnessTools $AgentHarnessWork
+    if (-not $tools) { Exit-AgentHarness "the batch-mode import (exit code $($p.ExitCode)) did not download com.geuneda.agentharness: see $log and Packages/manifest.json" }
+}
+if (-not $tools) {
+    Exit-AgentHarness "the AgentHarness package (com.geuneda.agentharness) was not found for $AgentHarnessWork (Packages/, a file: dependency, or Library/PackageCache): run tools/open.ps1 once, or install it with the package's Tools~/install.ps1"
+}
+
+# The real scripts find this checkout (the work root) here; Harness.psm1 derives the Editor tree from it.
+$env:AGENTHARNESS_WORK_ROOT = $AgentHarnessWork
+& (Join-Path $tools $AgentHarnessTool) @args
+exit $LASTEXITCODE
