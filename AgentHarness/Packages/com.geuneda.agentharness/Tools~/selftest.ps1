@@ -17,7 +17,11 @@
     everything put back; a play-mode fixture: a capture sequence (G3-3, contact sheet, motion) with an overlay canvas
     and a stack camera made during the play; real input (G3-6): Space pressed on the real keyboard during a loop leaves
     play.events as they were, and the real devices, disabled while a scenario plays, are enabled again after it, after
-    a failed play and after a stopped one
+    a failed play and after a stopped one; render settings as code (W4): the pipeline assets are generated and not
+    rewritten by loops 2-3, deleted they come back with one loop (same fingerprint, pixels and git status); the reflection
+    cubemap holds the sky (P-4), the ambient is its SH through the scene's lighting data (G4-2), AmbientProbe maps a
+    uniform environment to Flat ambient and refuses garbage; ctx.Material reports a misspelled / obsolete property and an
+    emission color without its toggle, ctx.LitMaterial turns emission and alpha clipping on (G4-3)
   2 C# compile error in Smoke -> stage=compile at the injected file/line, module Smoke; reverted -> green
   3 runtime exception in Smoke -> stage=runtime at the injected line; reverted -> green
   4 HLSL error in the Smoke shader -> stage=shader at the injected line, again in the next loop (no reimport);
@@ -662,12 +666,91 @@ foreach (var d in UnityEngine.InputSystem.InputSystem.devices)
     native.Add(d.name);
     if (!d.enabled) disabled.Add(d.name);
 }
-return new Dictionary<string, object> { { "injected", UnityEditor.SessionState.GetInt("AgentHarness.selftest.realInput", -1) }, { "native", native }, { "disabled", disabled } };
+return new Dictionary<string, object> { { "injected", UnityEditor.SessionState.GetInt("AgentHarness.selftest.realInput", -1) }, { "native", native }, { "disabled", disabled }, { "focused", UnityEditorInternal.InternalEditorUtility.isApplicationActive } };
 '@
 
 # A play that fails (waitTarget times out) and one that is stopped in the middle.
 $RealInputFailText = '{ "name": "selftest-fail", "durationSec": 1, "events": [ { "t": 0.1, "type": "waitTarget", "target": "SelftestNoSuchTarget", "timeoutSec": 0.5 } ] }'
 $RealInputLongText = '{ "name": "selftest-long", "durationSec": 30, "events": [ { "t": 0.5, "type": "keyTap", "key": "Space" } ] }'
+
+# Item 1's render settings checks (W4). Deletes the generated settings assets (__PATHS__); the next loop makes them again.
+$SettingsDeleteText = @'
+var failed = new System.Collections.Generic.List<string>();
+UnityEditor.AssetDatabase.DeleteAssets(new[] { __PATHS__ }, failed);
+var rp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+return new System.Collections.Generic.Dictionary<string, object> { { "failed", failed }, { "pipeline", rp == null ? "none" : rp.name } };
+'@
+
+# The sky lighting of the built scene (P-4, G4-2) and material setup (G4-3), in edit mode; materials go to a scratch folder.
+$RenderCheckText = @'
+var r = new System.Collections.Generic.Dictionary<string, object>();
+var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+// P-4: the reflection cubemap holds the sky - finite, non-negative radiance, its brightest texel where the Sun light comes from.
+var cube = UnityEngine.RenderSettings.customReflectionTexture as UnityEngine.Cubemap;
+r["cube"] = cube == null ? "none" : UnityEditor.AssetDatabase.GetAssetPath(cube);
+if (cube != null)
+{
+    var size = cube.width; var best = -1f; var bestDir = UnityEngine.Vector3.zero; var bad = 0;
+    for (var f = 0; f < 6; f++)
+    {
+        var px = cube.GetPixels((UnityEngine.CubemapFace)f, 0);
+        for (var y = 0; y < size; y++)
+            for (var x = 0; x < size; x++)
+            {
+                var c = px[y * size + x];
+                if (!(c.r >= 0f && c.g >= 0f && c.b >= 0f) || float.IsInfinity(c.r) || float.IsInfinity(c.g) || float.IsInfinity(c.b)) { bad++; continue; }
+                if (c.r + c.g + c.b <= best) continue;
+                best = c.r + c.g + c.b;
+                bestDir = Harness.Procedural.AmbientProbe.Direction((UnityEngine.CubemapFace)f, 2.0 * (x + 0.5) / size - 1, 2.0 * (y + 0.5) / size - 1).normalized;
+            }
+    }
+    var sun = UnityEngine.RenderSettings.sun;
+    r["badTexels"] = bad;
+    r["sunTexel"] = best;
+    r["sunAngle"] = sun == null ? 999f : UnityEngine.Vector3.Angle(bestDir, -sun.transform.forward);
+    // G4-2: the ambient is the cubemap's SH, through the scene's lighting data (ambient mode Skybox).
+    var sh = Harness.Procedural.AmbientProbe.FromCubemap(cube);
+    var probe = UnityEngine.RenderSettings.ambientProbe;
+    var diff = 0.0;
+    for (var ch = 0; ch < 3; ch++) for (var i = 0; i < 9; i++) diff = System.Math.Max(diff, System.Math.Abs(probe[ch, i] - sh[ch, i]));
+    var lda = UnityEditor.Lightmapping.GetLightingDataAssetForScene(scene);
+    r["ambientMode"] = UnityEngine.RenderSettings.ambientMode.ToString();
+    r["lightingData"] = lda == null ? "none" : UnityEditor.AssetDatabase.GetAssetPath(lda);
+    r["probeDiff"] = diff;
+    r["ambientUp"] = sh[0, 0] + sh[0, 1] - sh[0, 6];
+}
+// AmbientProbe: a uniform environment of radiance c is Flat ambient c in every direction.
+var u = new UnityEngine.Cubemap(8, UnityEngine.TextureFormat.RGBAHalf, false);
+var col = new UnityEngine.Color(0.3f, 0.5f, 0.7f, 1f);
+var fill = new UnityEngine.Color[64];
+for (var i = 0; i < 64; i++) fill[i] = col;
+for (var f = 0; f < 6; f++) u.SetPixels(fill, (UnityEngine.CubemapFace)f);
+u.Apply();
+var ev = new UnityEngine.Color[3];
+Harness.Procedural.AmbientProbe.FromCubemap(u).Evaluate(new[] { UnityEngine.Vector3.up, UnityEngine.Vector3.left, new UnityEngine.Vector3(1f, -2f, 3f).normalized }, ev);
+var ud = 0.0;
+foreach (var e in ev) ud = System.Math.Max(ud, System.Math.Max(System.Math.Abs(e.r - col.r), System.Math.Max(System.Math.Abs(e.g - col.g), System.Math.Abs(e.b - col.b))));
+r["uniformDiff"] = ud;
+// ... and an unfilled cubemap (garbage or negative radiance, P-4) is refused instead of lighting the scene black.
+fill[5] = new UnityEngine.Color(-23.2f, -23.2f, -23.2f, 1f);
+u.SetPixels(fill, UnityEngine.CubemapFace.NegativeY);
+u.Apply();
+try { Harness.Procedural.AmbientProbe.FromCubemap(u); r["garbageRefused"] = false; } catch (System.InvalidOperationException) { r["garbageRefused"] = true; }
+UnityEngine.Object.DestroyImmediate(u);
+// G4-3: ctx.Material reports what does nothing; ctx.LitMaterial sets emission and alpha clipping through their toggles.
+var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+var ctx = (Harness.Editor.BuildContext)System.Activator.CreateInstance(typeof(Harness.Editor.BuildContext), flags, null, new object[] { scene, false }, null);
+typeof(Harness.Editor.BuildContext).GetProperty("Module").SetValue(ctx, "_SelftestMaterials");
+ctx.Material("Typos", "Universal Render Pipeline/Lit", m => { m.SetFloat("_Smoothnes", 0.3f); m.SetFloat("_Glossiness", 0.8f); });
+var byHand = ctx.Material("EmissionByHand", "Universal Render Pipeline/Lit", m => { m.SetColor("_EmissionColor", UnityEngine.Color.red); m.EnableKeyword("_EMISSION"); });
+var lit = ctx.LitMaterial("EmissionLit", m => { m.Emission = UnityEngine.Color.red; m.AlphaClip = 0.3f; });
+r["byHandEmission"] = byHand.IsKeywordEnabled("_EMISSION");
+r["litKeywords"] = string.Join(",", lit.shaderKeywords);
+r["litQueue"] = lit.renderQueue;
+r["warnings"] = typeof(Harness.Editor.BuildContext).GetField("Warnings", flags).GetValue(ctx);
+UnityEditor.AssetDatabase.DeleteAsset(Harness.Editor.HarnessPaths.GeneratedRoot + "/_SelftestMaterials");
+return r;
+'@
 
 # ---- matrix 1-6: the Editor tree -----------------------------------------------------------------------------------
 # eval_file under the Editor lock: the body's return value.
@@ -802,35 +885,79 @@ function Invoke-Item1 {
         Write-TextFile $files[$kv.Key] $kv.Value[1]
     }
     $before = Invoke-Eval $files.state
-    [void](Invoke-Eval $files.arm)
-    $r = Invoke-Loop '1-real-input'
-    $s = Invoke-Eval $files.state
+    # The isolation is only exercised with the Editor in the foreground: in the background the Input System has turned the real
+    # devices off itself (nothing to isolate; nothing reaches the game either). Someone using another window makes a try
+    # unfocused - try again, up to three times (realInputTries).
+    for ($try = 1; $try -le 3; $try++) {
+        [void](Invoke-Eval $files.arm)
+        $r = Invoke-Loop "1-real-input$(if ($try -gt 1) { "-$try" })"
+        $s = Invoke-Eval $files.state
+        if ($null -eq $r.fps -or $r.fps.editorFocused -ne $false) { break }
+    }
+    $state.item['realInputTries'] = [math]::Min($try, 3)
     $injected = $s.injected
     $presses = [int](@($r.play.isolatedDevices | ForEach-Object { [int]$_.presses }) | Measure-Object -Sum).Sum
     $isolated = @($r.play.isolatedDevices | ForEach-Object { "$($_.name)=$($_.presses)" }) -join ','
     Test-Check 'real input: loop green' ([bool]$r.ok) (Get-Summary $r)
     Test-Check 'real input: Space queued on the real keyboard during the play' ([int]$s.injected -gt 0) "injected=$($s.injected) native=$(@($s.native) -join ',')"
     Test-Check 'real input: same play.events' ((Get-Events $r) -eq $evs[0]) (Get-Events $r)
-    Test-Check 'real input: its presses kept out (play.isolatedDevices)' ($presses -gt 0) $isolated
+    Test-Check 'real input: its presses kept out (play.isolatedDevices)' ($presses -gt 0) "$isolated focused=$($r.fps.editorFocused) tries=$($state.item['realInputTries'])"
     Test-Check 'real input: real devices enabled again' ((Get-DisabledDevices $s) -eq (Get-DisabledDevices $before)) "before [$(Get-DisabledDevices $before)] after [$(Get-DisabledDevices $s)]"
     $r = Invoke-Tool $root 'loop.ps1' '1-real-input-fail' @('-Scenario', $files.fail)
     $s = Invoke-Eval $files.state
     Test-Check 'failed play: stage=play, real devices enabled again' ($r.stage -eq 'play' -and (Get-DisabledDevices $s) -eq (Get-DisabledDevices $before)) "$(Get-Summary $r) disabled [$(Get-DisabledDevices $s)]"
-    $dir = Get-OutDir '1-real-input-stop'
-    $t = Start-Tool $root 'loop.ps1' @('-Scenario', $files.long, '-Out', $dir)
-    $during = $null
-    $running = Wait-Until { $p = Invoke-UnityCommand -Name 'harness_play_status' -TimeoutSec 5; $p.success -and $p.result.state -eq 'running' } 120 $t
-    if ($running) {
-        Start-Sleep -Milliseconds 1000
-        $p = Invoke-UnityCommand -Name 'eval_file' -Params @{ file = $files.state } -TimeoutSec 30   # the loop holds the lock
-        if ($p.success -and $p.result.success) { $during = $p.result.result }
-        [void](Invoke-UnityCommand -Name 'editor_stop' -TimeoutSec 30)
+    for ($try = 1; $try -le 3; $try++) {   # same as above: only a focused try exercises the isolation
+        $dir = Get-OutDir "1-real-input-stop$(if ($try -gt 1) { "-$try" })"
+        $t = Start-Tool $root 'loop.ps1' @('-Scenario', $files.long, '-Out', $dir)
+        $during = $null
+        $running = Wait-Until { $p = Invoke-UnityCommand -Name 'harness_play_status' -TimeoutSec 5; $p.success -and $p.result.state -eq 'running' } 120 $t
+        if ($running) {
+            Start-Sleep -Milliseconds 1000
+            $p = Invoke-UnityCommand -Name 'eval_file' -Params @{ file = $files.state } -TimeoutSec 30   # the loop holds the lock
+            if ($p.success -and $p.result.success) { $during = $p.result.result }
+            [void](Invoke-UnityCommand -Name 'editor_stop' -TimeoutSec 30)
+        }
+        $r = Read-ToolReport $dir (Wait-Tool $t 180)
+        $s = Invoke-Eval $files.state
+        if ($null -eq $during -or $during.focused -ne $false) { break }
     }
-    $r = Read-ToolReport $dir (Wait-Tool $t 180)
-    $s = Invoke-Eval $files.state
-    Test-Check 'stopped play: real devices disabled while it ran' ($running -and $during -and @($during.disabled).Count -gt 0 -and @($during.disabled).Count -eq @($during.native).Count) "running=$running disabled [$(if ($during) { Get-DisabledDevices $during })]"
+    $state.item['realInputStopTries'] = [math]::Min($try, 3)
+    Test-Check 'stopped play: real devices disabled while it ran' ($running -and $during -and @($during.disabled).Count -gt 0 -and @($during.disabled).Count -eq @($during.native).Count) "running=$running disabled [$(if ($during) { Get-DisabledDevices $during })] focused=$(if ($during) { $during.focused }) tries=$($state.item['realInputStopTries'])"
     Test-Check 'stopped play: stage=play, real devices enabled again' ($r.stage -eq 'play' -and (Get-DisabledDevices $s) -eq (Get-DisabledDevices $before)) "$(Get-Summary $r) $($r.play.error) disabled [$(Get-DisabledDevices $s)]"
     $state.item['realInput'] = [ordered]@{ injected = $injected; isolated = $isolated; native = @($s.native) }
+
+    # Render settings as code (G1-1): the pipeline assets are generated, rewritten only when the code changes them; deleted,
+    # one loop makes them again (same path GUIDs: the ProjectSettings that reference them do not change) with the same
+    # fingerprint and pixels.
+    $settings = $runs[0].build.settings
+    $assets = @($settings.assets)
+    $rewritten = @($runs[1..2] | ForEach-Object { @($_.build.settings.written) })
+    Test-Check 'settings: pipeline assets generated and active, nothing rewritten in loops 2-3' ($assets.Count -gt 0 -and $assets -contains $settings.pipeline -and $rewritten.Count -eq 0) "pipeline=$($settings.pipeline) assets=$($assets.Count) rewritten=[$($rewritten -join ',')]"
+    if ($assets.Count -gt 0) {
+        $status = Get-EditorStatus
+        $del = (Join-Path $outAbs 'settings-delete.cs').Replace('\', '/')
+        Write-TextFile $del $SettingsDeleteText.Replace('__PATHS__', ((@($assets | ForEach-Object { '"' + $_ + '"' })) -join ', '))
+        $d = Invoke-Eval $del
+        $r = Invoke-Loop '1-settings-regenerate' @('-Golden', $gold)
+        Test-Check 'settings: deleted (Built-in meanwhile), made again by one loop, which waited for the domain reload of the switch' ($d.pipeline -eq 'none' -and [bool]$r.ok -and @($r.build.settings.written).Count -eq $assets.Count -and $r.build.settings.pipeline -eq $settings.pipeline -and "$($r.build.settings.switched)" -like 'none -> *' -and [double]$r.timings.reloadSec -gt 0) "during=$($d.pipeline) failed=[$(@($d.failed) -join ',')] $(Get-Summary $r) written=$(@($r.build.settings.written).Count)/$($assets.Count) switched=$($r.build.settings.switched) reloadSec=$($r.timings.reloadSec)"
+        $regenGolden = @(Get-Golden $r | Where-Object { $_ -notlike '*:same' })
+        Test-Check 'settings: same fingerprint, same pixels (golden), same git status' ($r.build.fingerprint -eq $fps[0] -and $regenGolden.Count -eq 0 -and (Get-EditorStatus) -eq $status) "fp=$($r.build.fingerprint) golden=[$((Get-Golden $r) -join ',')] status same=$((Get-EditorStatus) -eq $status)"
+        $state.item['settings'] = [ordered]@{ assets = $assets; pipeline = $settings.pipeline; settingsMs = @($runs | ForEach-Object { @($_.build.steps | Where-Object { $_.type -like '*Settings*' } | ForEach-Object { $_.ms }) }) }
+    }
+
+    # Sky lighting (P-4, G4-2) and materials (G4-3) of the built scene, in edit mode.
+    $rc = (Join-Path $outAbs 'render-check.cs').Replace('\', '/')
+    Write-TextFile $rc $RenderCheckText
+    $k = Invoke-Eval $rc
+    Test-Check 'reflection cubemap holds the sky: no invalid texels, the sun where the Sun light comes from' ("$($k.cube)" -like 'Assets/*' -and [int]$k.badTexels -eq 0 -and [double]$k.sunAngle -lt 2 -and [double]$k.sunTexel -gt 1) "cube=$($k.cube) bad=$($k.badTexels) sunAngle=$($k.sunAngle) sunTexel=$($k.sunTexel)"
+    Test-Check 'sky ambient: ambient mode Skybox from the generated lighting data = the cubemap SH' ($k.ambientMode -eq 'Skybox' -and "$($k.lightingData)" -like 'Assets/*' -and [double]$k.probeDiff -lt 1e-4) "mode=$($k.ambientMode) data=$($k.lightingData) diff=$($k.probeDiff)"
+    Test-Check 'AmbientProbe: uniform radiance c -> c in every direction; garbage texels refused' ([double]$k.uniformDiff -lt 0.005 -and [bool]$k.garbageRefused) "diff=$($k.uniformDiff) refused=$($k.garbageRefused)"
+    $warnings = @($k.warnings)
+    $expected = @("*'Typos': shader 'Universal Render Pipeline/Lit' has no property '_Smoothnes' (similar: _Smoothness*", "*'Typos': '_Glossiness' is an obsolete URP property*'_Smoothness'*", "*'EmissionByHand': _EmissionColor is set but emission is off*")
+    $missing = @($expected | Where-Object { $p = $_; @($warnings | Where-Object { $_ -like $p }).Count -eq 0 })
+    Test-Check 'materials: a misspelled, an obsolete and an emission color without its toggle are reported' ($missing.Count -eq 0 -and $warnings.Count -eq $expected.Count) (@($warnings) -join ' | ')
+    Test-Check 'materials: LitMaterial turns emission and alpha clipping on (hand-set _EMISSION stays off)' ("$($k.litKeywords)" -like '*_ALPHATEST_ON*' -and "$($k.litKeywords)" -like '*_EMISSION*' -and [int]$k.litQueue -eq 2450 -and -not [bool]$k.byHandEmission) "lit=[$($k.litKeywords)] queue=$($k.litQueue) byHand=$($k.byHandEmission)"
+    $state.item['renderCheck'] = [ordered]@{ sunAngle = $k.sunAngle; sunTexel = $k.sunTexel; ambientUp = $k.ambientUp; uniformDiff = $k.uniformDiff }
 
     $cc = Invoke-HarnessProcess $ps @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'tools/compile-check.ps1'), '-IncludeHarness') -Environment $childEnv -TimeoutSec 300
     $j = $null; try { $j = $cc.out | ConvertFrom-Json } catch { }

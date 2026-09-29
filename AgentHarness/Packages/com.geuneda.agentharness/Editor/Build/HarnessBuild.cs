@@ -19,6 +19,7 @@ namespace Harness.Editor
             public string type;
             public string module;
             public string assembly;
+            public string phase;   // "settings" for an ISettingsStep, null for a build step
             public int order;
             public double ms;
             public string error;
@@ -27,7 +28,10 @@ namespace Harness.Editor
         }
 
         /// <summary>Build steps in &lt;module folder&gt;/Builders/ assemblies, sorted. Steps elsewhere are reported in <paramref name="ignored"/>.</summary>
-        public static List<(IBuildStep step, StepInfo info)> DiscoverSteps(List<string> ignored)
+        public static List<(IBuildStep step, StepInfo info)> DiscoverSteps(List<string> ignored) => DiscoverSteps<IBuildStep>(s => s.Order, ignored);
+
+        /// <summary>Implementations of <typeparamref name="T"/> in &lt;module folder&gt;/Builders/ assemblies, sorted by order, module, type.</summary>
+        public static List<(T step, StepInfo info)> DiscoverSteps<T>(Func<T, int> order, List<string> ignored) where T : class
         {
             // Assemblies whose sources live in a module's Builders/ folder (modules: ProjectSettings/AgentHarness.json).
             var config = HarnessPaths.Config;
@@ -44,8 +48,8 @@ namespace Harness.Editor
                 }
             }
 
-            var result = new List<(IBuildStep, StepInfo)>();
-            foreach (var type in TypeCache.GetTypesDerivedFrom<IBuildStep>())
+            var result = new List<(T, StepInfo)>();
+            foreach (var type in TypeCache.GetTypesDerivedFrom<T>())
             {
                 if (type.IsAbstract || type.IsInterface) continue;
                 var asmName = type.Assembly.GetName().Name;
@@ -54,10 +58,10 @@ namespace Harness.Editor
                     ignored?.Add($"{type.FullName} (assembly {asmName}) is not in a module's Builders/ folder - ignored");
                     continue;
                 }
-                IBuildStep step;
-                try { step = (IBuildStep)Activator.CreateInstance(type); }
+                T step;
+                try { step = (T)Activator.CreateInstance(type); }
                 catch (Exception e) { ignored?.Add($"{type.FullName}: cannot construct ({e.GetBaseException().Message})"); continue; }
-                result.Add((step, new StepInfo { type = type.FullName, module = module, assembly = asmName, order = step.Order }));
+                result.Add((step, new StepInfo { type = type.FullName, module = module, assembly = asmName, order = order(step) }));
             }
             result.Sort((a, b) =>
             {
@@ -70,10 +74,11 @@ namespace Harness.Editor
         }
 
         [CliCommand("harness_build",
-            "Regenerate buildScene from code: run every IBuildStep in <module>/Builders/ in Order on an empty scene, " +
+            "Regenerate buildScene from code: run every ISettingsStep (render pipeline assets and assignments; harness projects only), " +
+            "then every IBuildStep in <module>/Builders/ in Order on an empty scene, " +
             "write generated assets to <generatedRoot>/<Module>/ (in place, stable GUIDs), delete stale generated assets, save. " +
-            "Idempotent: same code -> same 'fingerprint'. Without build steps and a playScene other than 'build' (an attached " +
-            "project) nothing is built: it opens the play scene and fingerprints it ('skipped'). Returns JSON {ok, steps, fingerprint, ...}.",
+            "Idempotent: same code -> same 'fingerprint' (scene, generated assets and render settings). Without build steps and a playScene other than 'build' (an attached " +
+            "project) nothing is built: it opens the play scene and fingerprints it ('skipped'). Returns JSON {ok, steps, fingerprint, settings, ...}.",
             Tags = new[] { "harness", "scenes" })]
         public static object Build(
             [CliArg("dry_run", "List the steps that would run without building.")] bool dryRun = false,
@@ -89,12 +94,18 @@ namespace Harness.Editor
             var ignored = new List<string>();
             var steps = DiscoverSteps(ignored);
             if (dryRun)
-                return new { ok = true, dryRun = true, steps = steps.Select(s => s.info).ToArray(), ignored };
+            {
+                var settingsSteps = DiscoverSteps<ISettingsStep>(s => s.Order, ignored);
+                foreach (var (_, info) in settingsSteps) info.phase = "settings";
+                return new { ok = true, dryRun = true, steps = settingsSteps.Select(s => s.info).Concat(steps.Select(s => s.info)).ToArray(), ignored };
+            }
             var settingsIssues = HarnessSetup.Check();
             if (steps.Count == 0)
             {
                 if (string.Equals(config.playScene, "build", StringComparison.OrdinalIgnoreCase))
                     return new { ok = false, error = "No IBuildStep found in a module's Builders/ folder (playScene is 'build').", ignored };
+                var only = SettingsContext.Run(ignored);
+                if (only.failed) return SettingsFailed(only, ignored, sw);
                 // Nothing generates a scene here: the loop plays an existing one. Fingerprint its assets, so a change shows.
                 var playScene = HarnessPaths.ResolvePlayScene(null, out var sceneError);
                 if (playScene == null) return new { ok = false, error = sceneError, ignored };
@@ -109,9 +120,9 @@ namespace Harness.Editor
                     fingerprintOf = "scene file + dependencies (import hashes)",
                     gameObjects = sfp.gameObjects,
                     assets = sfp.assets,
-                    steps = Array.Empty<StepInfo>(),
+                    steps = only.steps.Select(s => s.info).ToArray(),
                     ignored,
-                    warnings = settingsIssues.ToArray(),
+                    warnings = only.ctx.Warnings.Concat(settingsIssues).ToArray(),
                     durationMs = Math.Round(sw.Elapsed.TotalMilliseconds),
                 };
             }
@@ -123,8 +134,14 @@ namespace Harness.Editor
             if (!config.IsHarnessProject && File.Exists(HarnessPaths.BuildScene) && !IsGenerated(HarnessPaths.BuildScene))
                 return new { ok = false, error = $"{HarnessPaths.BuildScene} exists and was not generated by harness_build; set another buildScene in {HarnessConfig.FileName}", ignored };
 
+            // Render settings first: build steps render with the pipeline they set (BakeSkyReflection).
+            var settings = SettingsContext.Run(ignored);
+            if (settings.failed) return SettingsFailed(settings, ignored, sw);
+            var allSteps = settings.steps.Select(s => s.info).Concat(steps.Select(s => s.info)).ToArray();
+
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             var ctx = new BuildContext(scene, useCache: !noCache);
+            foreach (var p in settings.ctx.Assets) ctx.TouchedAssets.Add(p);
             var failed = false;
             foreach (var (step, info) in steps)
             {
@@ -138,13 +155,7 @@ namespace Harness.Editor
                 catch (Exception e)
                 {
                     failed = true;
-                    var entry = new LogEntry { type = "Exception", message = e.GetType().Name + ": " + e.Message, stack = HarnessLogParse.TrimStack(e.StackTrace) };
-                    HarnessLogParse.FillLocation(entry);
-                    if (string.IsNullOrEmpty(entry.file)) FillFromExceptionStack(entry, e);
-                    info.error = entry.message;
-                    info.file = entry.file;
-                    info.line = entry.line;
-                    Debug.LogException(e);
+                    FillError(info, e);
                 }
                 info.ms = Math.Round(st.Elapsed.TotalMilliseconds, 1);
             }
@@ -157,9 +168,9 @@ namespace Harness.Editor
                 {
                     ok = false,
                     error = "build step failed - " + HarnessPaths.BuildScene + " not written",
-                    steps = steps.Select(s => s.info).ToArray(),
+                    steps = allSteps,
                     ignored,
-                    warnings = ctx.Warnings,
+                    warnings = settings.ctx.Warnings.Concat(ctx.Warnings).ToArray(),
                     durationMs = Math.Round(sw.Elapsed.TotalMilliseconds),
                 };
             }
@@ -185,11 +196,15 @@ namespace Harness.Editor
             BuildContext.EnsureFolder(Path.GetDirectoryName(HarnessPaths.BuildScene));
             if (!EditorSceneManager.SaveScene(scene, HarnessPaths.BuildScene))
                 return new { ok = false, error = "SaveScene failed for " + HarnessPaths.BuildScene };
+            // Lighting data belongs to a saved scene (ctx.SkyAmbient); the scene then references it.
+            if (ctx.SaveLightingData() && !EditorSceneManager.SaveScene(scene))
+                return new { ok = false, error = "SaveScene failed for " + HarnessPaths.BuildScene + " (lighting data)" };
             // The Build Settings belong to an attached project; only a harness project starts with the generated scene.
             if (config.IsHarnessProject) EnsureInBuildSettings(HarnessPaths.BuildScene);
             else MarkGenerated(HarnessPaths.BuildScene);
 
-            var fp = SceneFingerprint.Compute(scene);
+            var applied = settings.steps.Count > 0 && !settings.skipped;
+            var fp = SceneFingerprint.Compute(scene, applied ? settings.ctx.Fingerprint() : null);
             return new
             {
                 ok = true,
@@ -200,11 +215,49 @@ namespace Harness.Editor
                 generatedAssets = ctx.TouchedAssets.Count,
                 cacheHits = ctx.CacheHits,
                 deletedAssets = deleted,
-                steps = steps.Select(s => s.info).ToArray(),
+                settings = applied ? SettingsSummary(settings) : null,
+                steps = allSteps,
                 ignored,
-                warnings = ctx.Warnings.Concat(settingsIssues).ToArray(),
+                warnings = settings.ctx.Warnings.Concat(ctx.Warnings).Concat(settingsIssues).ToArray(),
                 durationMs = Math.Round(sw.Elapsed.TotalMilliseconds),
             };
+        }
+
+        static object SettingsFailed(SettingsContext.RunResult r, List<string> ignored, Stopwatch sw) => new
+        {
+            ok = false,
+            error = "settings step failed - nothing built",
+            steps = r.steps.Select(s => s.info).ToArray(),
+            ignored,
+            warnings = r.ctx.Warnings,
+            durationMs = Math.Round(sw.Elapsed.TotalMilliseconds),
+        };
+
+        /// <summary>
+        /// What the settings steps produced: their assets, what this run wrote or reassigned, and the active pipeline. When the
+        /// active pipeline changed, a domain reload was requested: wait until domainReloads passes the reported value.
+        /// </summary>
+        internal static object SettingsSummary(SettingsContext.RunResult r) => new
+        {
+            assets = r.ctx.Assets,
+            written = r.ctx.Written,
+            assigned = r.ctx.Assigned,
+            pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline == null ? "none (Built-in)" : AssetDatabase.GetAssetPath(UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline),
+            switched = r.switched,
+            reloadRequested = r.switched != null,
+            domainReloads = HarnessConsole.DomainReloads,
+        };
+
+        /// <summary>Report a step's exception at the step's own line (not the harness frame that called it).</summary>
+        internal static void FillError(StepInfo info, Exception e)
+        {
+            var entry = new LogEntry { type = "Exception", message = e.GetType().Name + ": " + e.Message, stack = HarnessLogParse.TrimStack(e.StackTrace) };
+            HarnessLogParse.FillLocation(entry);
+            if (string.IsNullOrEmpty(entry.file)) FillFromExceptionStack(entry, e);
+            info.error = entry.message;
+            info.file = entry.file;
+            info.line = entry.line;
+            Debug.LogException(e);
         }
 
         static bool IsGenerated(string assetPath)
@@ -213,7 +266,7 @@ namespace Harness.Editor
             return a != null && Array.IndexOf(AssetDatabase.GetLabels(a), HarnessConfig.GeneratedLabel) >= 0;
         }
 
-        static void MarkGenerated(string assetPath)
+        internal static void MarkGenerated(string assetPath)
         {
             var a = AssetDatabase.LoadMainAssetAtPath(assetPath);
             if (a == null) return;

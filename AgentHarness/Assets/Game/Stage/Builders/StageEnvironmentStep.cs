@@ -65,12 +65,9 @@ namespace Game.Stage.Builders
             });
             RenderSettings.skybox = sky;
             RenderSettings.sun = sun;
-            ctx.BakeSkyReflection();
-            // Trilight ambient needs no baking (skybox ambient would require a lighting bake per build).
-            RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.52f, 0.62f, 0.8f);
-            RenderSettings.ambientEquatorColor = new Color(0.42f, 0.42f, 0.45f);
-            RenderSettings.ambientGroundColor = new Color(0.16f, 0.13f, 0.1f);
+            // Reflections and ambient light both come from the sky, with no lighting bake.
+            var skyCube = ctx.BakeSkyReflection();
+            ctx.SkyAmbient(skyCube);
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;
             RenderSettings.fogColor = new Color(0.66f, 0.72f, 0.8f);

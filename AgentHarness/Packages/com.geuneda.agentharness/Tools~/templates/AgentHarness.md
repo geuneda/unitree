@@ -124,6 +124,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   "captureSize": [ 720, 1560 ],            // 크기를 주지 않은 캡처의 크기(없으면 세로 게임 720x1280, 그 외 1280x720)
   "goldenRoot": "golden",                  // 기준 이미지 폴더(프로젝트 루트 기준)
   "generatedRoot": "Assets/AgentHarness/Generated", "buildScene": "Assets/AgentHarness/Main.unity",   // 코드 빌더(IBuildStep)를 쓸 때
+                                           // (렌더 설정 코드 ISettingsStep은 "setup": "harness"에서만 적용 - 이 프로젝트의 RP 에셋은 그대로)
   "installAdded": [], "installReplaced": []   // 설치가 더한/올린 의존성(uninstall이 되돌림) - 손대지 않는다
 }
 ```

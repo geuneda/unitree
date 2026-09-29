@@ -20,10 +20,10 @@ Claude Code 같은 코딩 에이전트가 **Unity에서도 Three.js로 웹 3D를
 
 | Three.js 환경의 성질 | 이 하네스의 복원 방법 |
 |---|---|
-| 1. 모든 게 텍스트 | 씬은 `IBuildStep` 빌더 코드가 생성(YAML 직접 수정 금지). HLSL `.shader`, UI Toolkit UXML/USS, 머티리얼·Volume·라이팅도 코드 |
+| 1. 모든 게 텍스트 | 씬은 `IBuildStep` 빌더 코드가 생성(YAML 직접 수정 금지), URP·Renderer 에셋과 품질 레벨별 파이프라인은 `ISettingsStep` 코드가 생성. HLSL `.shader`, UI Toolkit UXML/USS, 머티리얼·Volume·라이팅도 코드 |
 | 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크 |
 | 3. 눈으로 검증 | 캡처 PNG(화면의 카메라 스택·미니맵 + 스크린 공간 UI) + 이미지 통계, 연속 캡처 시트, 기준 이미지와의 diff 점수·바뀐 곳 PNG, 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로 |
-| 4. 에셋 없이 완성도 | 절차적 메시/노이즈/텍스처 베이크, 코드로 만든 URP 후처리, 스카이 반사 베이크 |
+| 4. 에셋 없이 완성도 | 절차적 메시/노이즈/텍스처 베이크, 코드로 만든 URP 후처리, 라이팅 베이크 없는 스카이 반사·앰비언트, 키워드를 알아서 맞추는 `LitMaterial` |
 | 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 worktree + 트랜잭션 submit / land |
 
 ## 루프 한 방
@@ -228,12 +228,12 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
   Packages/com.geuneda.agentharness/       하네스 = UPM 패키지 (git URL: ...unitree.git?path=/AgentHarness/Packages/com.geuneda.agentharness)
     Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioInput · ScenarioRunner ·
                                            HarnessCapture(+CaptureCameras · CaptureUi · ContactSheet) · Procedural/
-    Editor/                                harness_* 에디터 커맨드, BuildContext / IBuildStep, 출시 빌드 필터
+    Editor/                                harness_* 에디터 커맨드, BuildContext / IBuildStep, SettingsContext / ISettingsStep, 출시 빌드 필터
     Tools~/                                loop · submit · land · uc · compile-check · open · quit · install · uninstall · attach-test ·
                                            fresh-clone-test · selftest (.ps1) + templates/ (Unity는 ~ 폴더를 임포트하지 않는다)
   ProjectSettings/AgentHarness.json        하네스 설정: 모듈 폴더, 플레이할 씬, setup 모드
   golden/<Unity 버전>/<시나리오>/           기준 이미지 (루프 샷과 비교, loop.ps1 -UpdateGolden이 씀)
-  Assets/Game/<Module>/                    모듈 런타임 코드 (+ Shaders/, UI/), Builders/ 에 씬 빌드 스텝
+  Assets/Game/<Module>/                    모듈 런타임 코드 (+ Shaders/, UI/), Builders/ 에 씬 빌드 스텝·렌더 설정 스텝
   tools/*.ps1                              패키지 Tools~의 같은 이름 스크립트를 부르는 얇은 진입점 (모두 같은 파일) · scenarios/*.json
 ```
 

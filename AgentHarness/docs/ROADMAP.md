@@ -23,12 +23,14 @@
 | W1 | 시나리오 입력 격리 | G3-6 | S | — | 완료 (2026-09-29) |
 | W2 | 캡처가 화면 전체를 본다 | G3-1, G3-5 | M | W1 | 완료 (2026-09-29) |
 | W3 | 시각 회귀와 움직임 | G3-4, G3-3, G3-7 | L | W1, W2 | 완료 (2026-09-30) |
-| W4 | 렌더 설정을 코드로 | G1-1, P-4, G4-3, G4-2 | L | W3 | 대기 |
+| W4 | 렌더 설정을 코드로 | G1-1, P-4, G4-3, G4-2 | L | W3 | 완료 (2026-09-30) |
 | W5 | 루프 속도 | G2-3, G2-1 | L | — | 대기 |
 | W6 | 콘텐츠 헬퍼(a/b/c로 나눠 진행) | G1-3, G1-4, G4-1, G4-4 | L | W3, W4 (W6b는 W2) | 대기 |
 | W7 | 에디터 밖·여러 에디터 | G2-2, G1-2, G5-1 | L | — | 대기 |
 | W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 | L | W1 | 대기 |
 | W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 대기 |
+| W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 대기 |
+| W11 | 백그라운드 에디터의 실제 입력 격리 | G3-9 | S | — | 대기 |
 | 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, P-4 신고 | S | 새 버전이 나올 때 | — |
 | 마지막 | macOS | P-3 | L | 실제 Mac | 대기 |
 
@@ -63,7 +65,7 @@
   연속 캡처에도 합성되는지 본다.
 - W4 전에 하는 이유: W4는 렌더 설정을 통째로 코드로 옮긴다. "옮기기 전과 같게 나오는지"를 이걸로 확인한다.
 
-### W4 렌더 설정을 코드로 (G1-1 → P-4 → G4-3 → G4-2)
+### W4 렌더 설정을 코드로 (G1-1 → P-4 → G4-3 → G4-2) — 완료 (2026-09-30, 아래 "해결됨")
 - 순서: G1-1(`ISettingsStep`: RP·Renderer 에셋을 코드로 생성, 설정값을 fingerprint에) → P-4(프레임 디버거로 6.3과 주광 그림자 패스 비교,
   우회가 필요하면 그 설정을 G1-1 코드에 버전 조건으로 둔다) → G4-3(`ctx.LitMaterial`이 키워드 자동 설정) →
   G4-2(반사 큐브맵 → SH → `RenderSettings.ambientProbe`, Trilight 우회 제거).
@@ -113,9 +115,20 @@
 - 추가 검증: 매트릭스 7·8에 "두 worktree가 같은 이벤트 이름을 추가 → 두 번째 submit/land 거부"를 더한다.
 - 에이전트 여럿을 붙여 쓰기 시작하면 앞당긴다.
 
+### W10 렌더 밖의 프로젝트 설정도 코드로 (G1-5)
+- W4의 `ISettingsStep`/`SettingsContext`를 넓힌다: 품질 레벨 목록과 레벨별 값, Player Settings(색 공간·방향), Physics·Time, Tags/Layers.
+- 고치는 곳: `Editor/Build/SettingsContext.cs`(헬퍼), `Editor/HarnessSetup.cs`(harness 프로젝트에서 매번 적용·드리프트 보고), 샘플 `Assets/Game/Stage/Builders/`.
+- 주의: ProjectSettings는 생성물로 둘 수 없다(에디터 시작에 필요). attach 프로젝트는 W4처럼 건드리지 않는다.
+- 추가 검증: ProjectSettings YAML을 손으로 바꾼 뒤 루프 → 코드 값으로 돌아오고 보고됨. 새 클론 `git status` 깨끗(매트릭스 9).
+
+### W11 백그라운드 에디터의 실제 입력 격리 (G3-9)
+- 재현부터: 루프 도중 다른 창을 눌러 에디터 포커스를 뺏고(`fps.editorFocused=false`) 실제 키보드에 스페이스를 넣는 selftest 1번 절차를 돌린다. 이어서 플레이
+  도중 포커스를 되돌렸을 때 켜지는 장치가 `OnDeviceChange`로 잡히는지(누름이 `isolatedDevices`에 세어지고 `play.events`가 같은지) 본다.
+- 고치는 곳: `Runtime/ScriptedInput.cs`(`RealInputIsolation`), `Tools~/selftest.ps1`(지금은 포커스 없는 시도를 3번까지 다시 한다).
+
 ### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, P-4 신고)
-- 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존), Unity에 P-4 최소 재현(W4 조사 결과로),
-  O-6 Unity Search 예외.
+- 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존), Unity에 P-4의 원인
+  (`Camera.RenderToCubemap(Cubemap)`: 6.6은 CPU 픽셀을 안 채우고 6.3은 sRGB로 인코딩 — 빈 씬 + 스카이박스 + half 큐브맵 한 개로 재현), O-6 Unity Search 예외.
 - 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
   install의 Input System 추가, `HarnessReleaseBuild`)를 걷어낼 수 있는지 본다. O-9: 새 버전에서 selftest 1번의 HUD 검사(`uiError` 없음)를 보고,
   UI Toolkit에 패널을 지금 그리는 공개 API가 생기면 리플렉션을 걷어낸다.
@@ -139,10 +152,7 @@
 
 ## 성질 1 — 모든 게 텍스트
 
-- [ ] **G1-1 프로젝트 설정과 URP 에셋이 여전히 YAML**
-  - 현상: `ProjectSettings/*.asset`, `Assets/Settings/PC_RPAsset.asset`, `PC_Renderer.asset`(그림자 거리·캐스케이드, MSAA, HDR, SSAO 같은 Renderer Feature, 품질 레벨)은 템플릿 그대로다. 바꾸려면 GUI나 일회성 eval이 필요하다.
-  - 방향: 프로젝트 설정용 코드 빌더(예: `ISettingsStep`)를 두고 `harness_setup`/`harness_build`가 RP·Renderer 에셋을 코드로 생성·덮어쓰기. 설정값을 fingerprint에 포함.
-  - 완료 기준: RP/Renderer 에셋을 지워도 루프 한 번으로 동일하게 재생성되고, 설정 변경이 코드 diff로만 나타난다.
+- **G1-1 프로젝트 설정과 URP 에셋이 여전히 YAML** → 2026-09-30 해결(W4, 아래 "해결됨"). RP 밖의 프로젝트 설정은 G1-5.
 
 - [ ] **G1-2 빌더가 에디터 안에서만 실행된다**
   - 현상: 빌더 결과(씬·생성 에셋)를 보려면 반드시 떠 있는 에디터와 루프가 필요하다. 에디터 없이 가능한 건 컴파일 체크까지다.
@@ -156,6 +166,14 @@
 - [~] **G1-4 UI Toolkit 경로는 있지만 얇다**
   - 현상: UXML/USS + `ctx.UIDocument()` + 기본 테마(.tss)는 동작한다. 재사용 컴포넌트, 폰트, 바인딩 예제가 없다.
   - 방향: `Assets/Harness/UI/`에 공용 USS 변수·컴포넌트(버튼, 게이지, 토스트) 추가.
+
+- [ ] **G1-5 렌더 파이프라인 밖의 프로젝트 설정은 여전히 YAML** (2026-09-30, W4에서 남은 것)
+  - 현상: W4로 URP·Renderer 에셋과 품질 레벨별 파이프라인 배정은 `ISettingsStep` 코드가 됐다. 품질 레벨 자체(목록·이름·레벨별 그림자·LOD·vSync),
+    Player Settings(색 공간·해상도·방향), Physics·Time·Tags/Layers, URP 전역 설정(`UniversalRenderPipelineGlobalSettings`)은 여전히 커밋된 YAML이고,
+    하네스가 코드로 만지는 것은 `harness_setup`의 몇 가지(Domain Reload, runInBackground, 동기 셰이더 컴파일)뿐이다.
+  - 방향: `SettingsContext`에 품질 레벨·Player·Physics·Tags/Layers 헬퍼(에디터 API, 없으면 `SettingsContext.Set`처럼 SerializedObject). ProjectSettings는
+    Unity가 시작할 때 필요해서 생성물로 둘 수 없으니 "코드가 매번 같은 값으로 쓴다 + 코드와 다르면 경고" 쪽이다.
+  - 완료 기준: 샘플의 품질 레벨·레이어·색 공간이 코드에만 있고, ProjectSettings YAML을 손으로 바꾸면 다음 루프가 코드 값으로 되돌리며 보고한다.
 
 ## 성질 2 — 루프가 초 단위
 
@@ -204,18 +222,22 @@
     에디터 캡처는 빠른 루프용으로 두고 플레이어 캡처와의 차이를 보고한다.
   - 완료 기준: 사내 프로젝트 A 로비를 플레이어 720x1280 창으로 찍은 것과 에디터 `"auto"`가 같은 배치(다르면 원인이 report에 나옴).
 
+- [ ] **G3-9 에디터가 백그라운드일 때 실제 입력 격리가 검증되지 않는다** (2026-09-30, W4 매트릭스에서 발견)
+  - 현상: 새 클론 selftest 1번(6.3·6.6)의 실제 입력 단계에서 그 루프만 `fps.editorFocused=false`였고(누군가 다른 창을 씀) `isolatedDevices`가 비었으며, 중간에 멈춘
+    플레이 동안 실제 장치가 켜진 채였다(`disabled []`). 넣은 스페이스 60번은 게임에 닿지 않았다(`play.events` 같음). 격리는 켜져 있는 장치만 끈다(백그라운드라
+    Input System이 끈 장치는 두고, 포커스 복귀로 켜지면 그때 끈다 — W1 설계). 포커스 없이 켜져 있던 장치를 왜 못 껐는지, 포커스 복귀 경로가 맞게 도는지는 확인하지 않았다.
+  - 지금: selftest가 포커스 없는 시도를 3번까지 다시 한다(`realInputTries`, `realInputStopTries`). 포커스가 계속 없으면 여전히 빨갛다.
+  - 완료 기준: 에디터가 백그라운드인 채로도, 도중에 포커스가 돌아와도 실제 누름이 게임에 닿지 않고 `isolatedDevices`에 보고된다(selftest에서 포커스를 조작해 확인).
+
 ## 성질 4 — 에셋 없이도 완성도
 
 - [ ] **G4-1 CPU(C#) 텍스처 베이크가 느리다**
   - 현상: 512² 지형 베이크 ~1초(Debug). 빌드 캐시로 가렸지만 해상도를 올리면 느려진다. 지금 지형 텍스처(512 / 320m)는 흐릿하다.
   - 방향: GPU 베이크 경로(Blit/Compute 셰이더 → RT → PNG), 지형 디테일 텍스처 타일링.
 
-- [ ] **G4-2 스카이박스 앰비언트는 라이팅 베이크가 필요해서 Trilight로 우회 중**
-  - 방향: `ctx.BakeSkyReflection()` 큐브맵에서 SH를 계산해 `RenderSettings.ambientProbe`를 코드로 설정.
+- **G4-2 스카이박스 앰비언트는 라이팅 베이크가 필요해서 Trilight로 우회 중** → 2026-09-30 해결(W4, 아래 "해결됨").
 
-- [ ] **G4-3 코드로 만든 URP Lit 머티리얼은 키워드를 수동으로 켜야 한다**
-  - 현상: `_NORMALMAP` 등을 직접 `EnableKeyword`. 빠뜨리면 조용히 틀린 결과.
-  - 방향: `ctx.LitMaterial(...)` 헬퍼가 텍스처 설정에 맞춰 키워드 자동 설정.
+- **G4-3 코드로 만든 URP Lit 머티리얼은 키워드를 수동으로 켜야 한다** → 2026-09-30 해결(W4, 아래 "해결됨").
 
 - [ ] **G4-4 절차적 라이브러리가 기본 수준이다**
   - 방향: SDF 형상, 스플라인/튜브, 식생·바위 스캐터, 데칼, 절차적 스카이.
@@ -243,7 +265,7 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
 이 하네스는 이제 UPM 패키지(`com.geuneda.agentharness`, git URL `?path=`)이고 **설치 스크립트 한 번으로 기존 프로젝트에 붙였다 뗄 수 있다**(P-2).
 붙인 뒤의 격차(구 Input Manager 입력, `Assembly-CSharp` 검사, 부트 → 메뉴 → 레벨 흐름, 캡처 포즈, 머신 간 제거)는 P-5에서 메웠고, 공개 프로젝트 2개와
 사내 대형 프로젝트 1개에서 검증했다.
-Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000.6.3f1에서 렌더링 한 가지를 빼고 녹색 — P-1, P-4), OS는 Windows 하나에서만 검증했다.
+Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 전부 녹색 — P-1, P-4), OS는 Windows 하나에서만 검증했다.
 
 순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트, 2026-09-29 해결) → P-5(붙인 뒤의 격차, 2026-09-29 해결) → P-3(macOS, 나중)**.
 버전은 `tools/fresh-clone-test.ps1 -SelfTest -UnityVersion <v>`, 기존 프로젝트는 `tools/attach-test.ps1 -Project <클론>`으로 검증한다.
@@ -253,25 +275,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
 
 - **P-5 기존 프로젝트에 붙였을 때 아직 안 되는 것** → 2026-09-29 해결(아래 "해결됨").
 
-- [ ] **P-4 Unity 6.6(URP 17.6)에서 샘플 씬의 조명이 검게 나온다** (2026-09-29, P-1 검증 중 발견)
-  - 현상: 6000.6.3f1로 연 새 클론에서 에디터 세션의 **첫 플레이만** 정상이고(overview meanLuma 48.3, 6.3은 50.3), 그 뒤의 플레이와
-    편집 모드 캡처는 URP Lit 표면(지형·받침대)의 확산광·앰비언트가 0이 되어 거의 검다(closeup 25.0, horizon 15.6, overview 0.5).
-    하늘과 커스텀 HLSL 매듭은 그려진다. 루프는 녹색이지만 `shotStats[].dark`(98% 검정)가 잡고, `selftest.ps1` 1번이 빨갛다.
-    Game 뷰 자체도 검다(`screen` 캡처) → 하네스 캡처 경로(`SubmitRenderRequest`) 문제가 아니다.
-  - 확인한 것(같은 세션에서): **태양 그림자를 끄거나 하드 그림자로 바꾸면** 밝아진다(정상인지는 미확인: 6.3보다 훨씬 밝은 125.9).
-    소프트 그림자 + 캐스케이드 2–4개면 검정, 1개면 한 번은 밝고 한 번은 검정(비결정적). SSAO·Forward/Forward+/Deferred·Domain Reload·
-    빌드 캐시·GPU Resident Drawer·Game 뷰 크기·URP 에셋 재직렬화·파이프라인 재생성·`ScriptableRendererData.SetDirty`와는 무관.
-    머티리얼 값·라이트·앰비언트 프로브는 6.3과 같다. 하네스 없는 빈 씬(기본 카메라·방향광 + 평면·큐브)에서도 6.6만 소프트 그림자가 더 어둡다
-    (Soft 114.7 / Hard 138.0 / None 138.1; 6.3은 137.8 / 138.0 / 138.1) → URP 17.6 쪽 문제로 보인다.
-  - 2026-09-29(W1 매트릭스, 다른 에디터 없이): 새 클론 루프는 그대로(첫 루프 130.2/56.8/48.3, 2·3번 25.0/15.6/0.5)였는데, 같은 에디터 세션에서
-    이어진 selftest 1번 루프 3회는 **6.3에 가까운 밝기**(61.2/56.8/48.3; 6.3은 65.1/60.5/50.3)로 녹색이었다(이전 실행은 여기서 검어 빨강).
-    한 세션 안에서 검정 → 정상으로 돌아오기도 한다 = 비결정적. 해결로 치지 않는다(W4에서 원인부터).
-  - 2026-09-30(W3 매트릭스): 6.6 새 클론의 fingerprint가 `0ba32228…` → `c24b65e7…`로 바뀌었다. W2 커밋으로 떠도 같아서(덤프 동일) 코드가 아니라 이 머신의 6.6 쪽
-    변화다(원인 미상). selftest 1번의 기준 이미지 검사가 루프끼리의 조명 차이(maxDiff 225)를 잡는다 — W4의 원인 조사에 쓸 수 있다.
-  - 방향: 프레임 디버거/RenderDoc으로 주광 그림자 패스(캐스케이드 아틀라스, `_MainLightShadowParams`)를 6.3과 비교한다. Unity 쪽 버그면
-    최소 재현 프로젝트로 신고하고, 그 전까지 6.6에서는 소프트 그림자 캐스케이드를 쓰지 않는 설정을 샘플에 둘지 정한다.
-    6000.6.x 새 패치가 나오면 `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`로 다시 본다.
-  - 완료 기준: 6.6에서 새 클론 selftest 1–8 녹색(샷에 `dark` 없음, 6.3과 육안 동일).
+- **P-4 Unity 6.6(URP 17.6)에서 샘플 씬의 조명이 검게 나온다** → 2026-09-30 해결(W4, 아래 "해결됨"). 원인은 그림자가 아니라
+  `Camera.RenderToCubemap(Cubemap)`이 6.6에서 CPU 픽셀을 채우지 않는 것(반사 큐브맵에 초기화 안 된 메모리가 저장됨)이었다. Unity 신고는 "상시".
 
 - [ ] **P-3 Windows에서만 동작한다 (macOS 지원은 나중)** — 기존 O-2를 옮겨 왔다.
   - 작업 방식: P-1·P-2를 Windows에서 끝낸 뒤 실제 Mac에서 진행한다. 그 전까지 Windows 작업에서는 새 코드에
@@ -344,6 +349,10 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
    + 연속 캡처(G3-3, 플레이 중 eval로 만든 오버레이 캔버스·스택 카메라가 2x2 시트의 모든 프레임에, `motion` > 0)
    + 실제 입력 격리(G3-6): 플레이 동안 실제 키보드 장치에 스페이스를 넣어도 `play.events` 그대로·`isolatedDevices` 누름 > 0, 실패한 플레이·중간에
    멈춘 플레이 뒤에도 실제 장치가 다시 켜짐)
+   + 렌더 설정(W4): RP·Renderer 에셋이 생성물이고 루프 2·3은 다시 쓰지 않음, 지우면(그동안 Built-in) 루프 한 번으로 다시 생기고 fingerprint·픽셀·
+   `git status`가 같음(G1-1); 반사 큐브맵에 잘못된 텍셀이 없고 가장 밝은 텍셀이 태양 방향 2° 안(P-4); 앰비언트 = 생성된 라이팅 데이터의 큐브맵 SH,
+   `AmbientProbe`가 균일 환경을 Flat 앰비언트와 같게·쓰레기 텍셀은 거부(G4-2); `ctx.Material`이 오타·옛 URP 이름·토글 없는 이미션을 경고,
+   `ctx.LitMaterial`이 이미션·알파 클립을 켬(G4-3)
 2. C# 컴파일 에러 주입 → `stage=compile`, file/line/module 정확 → 원복 후 녹색
 3. 런타임 예외 주입 → `stage=runtime`, 정확한 줄 → 원복 후 녹색
 4. HLSL 에러 주입 → `stage=shader`, 재임포트 없는 다음 루프에서도 검출 → 원복 후 녹색(그 샷을 이 항목의 기준 이미지로). 셰이더 한 줄(스펙큘러 절반, G3-4)
@@ -376,6 +385,83 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G1-1 프로젝트 설정과 URP 에셋이 여전히 YAML** · **P-4 Unity 6.6에서 샘플 씬의 조명이 검게 나온다** · **G4-3 코드로 만든 URP Lit 머티리얼은
+  키워드를 수동으로 켜야 한다** · **G4-2 스카이박스 앰비언트는 라이팅 베이크가 필요해서 Trilight로 우회 중** (2026-09-30, W4)
+  - 현상(전): `Assets/Settings/PC_RPAsset`·`PC_Renderer`·`Mobile_*`는 템플릿 YAML 그대로라 그림자·SSAO·렌더링 경로를 바꾸려면 GUI나 일회성 eval이 필요했고,
+    다른 버전으로 열면 Unity가 다시 써서 `git status`가 더러워졌다. 6.6 새 클론은 첫 플레이만 밝고 이후 URP Lit 표면이 검었다(selftest 1번 빨강).
+    머티리얼은 `ctx.Material` + 속성 이름 문자열이라 오타·옛 이름이 조용히 무시됐고, 앰비언트는 베이크를 피해 Trilight 색 세 개였다.
+    `build.fingerprint`는 GameObject만 훑어 RenderSettings(안개·앰비언트·스카이박스·반사)가 바뀌어도 그대로였다.
+  - 방법(G1-1, `Editor/Build/ISettingsStep.cs`·`SettingsContext.cs`, `HarnessBuild`·`HarnessSetup`):
+    - 모듈 `Builders/`의 `ISettingsStep.Apply(SettingsContext)`를 `harness_build`가 빌드 스텝 **전에**(빌드 스텝의 렌더가 그 파이프라인을 쓰게), `harness_setup`도
+      실행한다(새 클론이 첫 루프 전에 파이프라인을 가짐). `setup: harness`에서만; `attach`면 건너뛰고 `build.warnings`에 스텝 수.
+    - `ctx.UniversalPipeline(name, rp => …, renderer => …)` = URP 메뉴가 새 에셋을 만드는 것과 같은 기본값(`UniversalRenderPipelineAsset.Create`, 기본
+      `PostProcessData`)에서 시작해 코드를 적용 → `<name>_RPAsset.asset` + `<name>_Renderer.asset`. `SettingsContext.AddRendererFeature<T>`(하위 에셋),
+      `SettingsContext.Set(obj, "직렬화 경로", 값)`(internal setter 필드 — 이 버전에 없거나 타입이 틀리면 비슷한 이름과 함께 예외), `ctx.UsePipeline(rp[, 품질 레벨…])`
+      (Graphics 기본 / 레벨별; 레벨의 `customRenderPipeline`은 SerializedObject로).
+    - 에셋은 생성물(`<generatedRoot>/<모듈>/`, gitignore). **GUID = 경로의 MD5**: `AssetDatabase.CreateAsset`은 GUID를 고를 수 없어서(미리 쓴 `.meta`도 무시)
+      임시 폴더에 `CreateAsset`으로 Unity가 쓴 파일을 제자리로 옮기고 `.meta`를 쓴 뒤 임포트한다(`SaveToSerializedFileAndForget`은 메인 fileID가 1이라
+      로드 안 됨). 그래서 지워도 같은 GUID로 돌아오고 그것을 참조하는 `GraphicsSettings.asset`·`QualitySettings.asset`은 바뀌지 않는다(이번 커밋에서 한 번
+      새 GUID로 바뀜, QualitySettings는 6.3 형식으로 다시 저장됨).
+    - 새 인스턴스와 디스크 에셋을 파일 ID에 무관한 덤프(`SettingsContext.Dump`, 하위 오브젝트는 제자리 덤프, `m_RendererFeatureMap` 제외)로 비교해 다를 때만
+      제자리 덮어쓰기(URP 파이프라인 재생성·재임포트를 매 루프 하지 않음). URP 17.6은 Renderer Feature에 `HideInHierarchy`를 켜서 6.6에서만 매번 다르게
+      보였다 → 모든 버전에서 켠다.
+    - 새 클론은 이제 Built-in으로 열리고 첫 `harness_setup`이 세션 도중 URP로 바꾼다. 그랬더니 **6.6 새 클론의 selftest 1번 카메라 픽스처가 2회 연속 빨갰다**:
+      첫 캡처에서 스택 Overlay 카메라의 새 Unlit 쿼드가 빠짐(두 번째 캡처엔 있음, 비동기 셰이더 컴파일 꺼짐). 같은 클론을 처음부터 URP로 열면 셰이더 캐시를 지워도
+      녹색, Built-in 시작 → setup으로 되돌리면 다시 빨강, 전환 뒤 도메인 리로드를 한 번 넣으면 녹색(6.0·6.3은 전환해도 녹색). → 설정 스텝이 활성 파이프라인을
+      바꾸면 `EditorUtility.RequestScriptReload()`하고 결과에 `settings.switched`·`reloadRequested`·`domainReloads`; `uc.ps1`(`Wait-HarnessReload`)과 루프
+      (`timings.reloadSec`)가 리로드가 끝난 뒤 계속한다. RP 에셋을 지운 뒤의 루프도 같은 경로(리로드 2.25 s).
+    - fingerprint: 설정 에셋 덤프 + Graphics·품질 레벨별 파이프라인(`--settings--`), 그리고 씬의 RenderSettings·라이팅 데이터 참조(`RenderSettings` 절).
+      GPU로 구운 큐브맵과 그 SH는 참조만(GPU마다 끝자리가 다를 수 있다; 기준 이미지가 본다).
+    - 샘플: `Assets/Game/Stage/Builders/StageRenderSettingsStep.cs`가 옛 PC·Mobile 에셋의 값(URP 기본값과 다른 것: 깊이/불투명 텍스처, 추가 광원 그림자,
+      캐스케이드 4개·분할·바이어스, 소프트 그림자 High, 반사 프로브 블렌딩·박스, 라이트 레이어, Forward+, SSAO 0.4/0.3, 네이티브 렌더 패스, copy depth,
+      intermediate Auto; Mobile은 템플릿 값)을 옮겼다. 셰이더 프리필터 값(`m_Prefilter*`)은 플레이어 빌드가 계산하므로 옮기지 않았다.
+      `Assets/Settings/`에는 URP가 관리하는 `UniversalRenderPipelineGlobalSettings`·`DefaultVolumeProfile`만 남았다.
+  - 원인과 방법(P-4): 그림자가 아니었다. 6.6에서 설정을 하나씩 꺼 보니(태양·그림자·SSAO·안개·후처리 모두 무관) **반사**만 원인이었고(강도 0·큐브맵 없음·
+    스카이박스 반사면 57–61), `ctx.BakeSkyReflection`의 큐브맵이 모든 mip 평균 −23.203 = half `0xCDCD`(초기화 안 된 메모리)였다.
+    **`Camera.RenderToCubemap(Cubemap)`은 6.6에서 성공을 돌려주지만 CPU 픽셀을 채우지 않는다**(같은 세션에서 0이기도 함 → 비결정적). GPU 쪽은 맞게
+    그려져서 에셋을 처음 만든 루프의 플레이만 밝았고, 저장된 에셋(쓰레기)을 다시 읽으면 음수 반사로 Lit 표면이 검었다. 6.3에서는 같은 호출이 CPU 픽셀을
+    **sRGB로 인코딩해서** 넣었다(선형 0.071 → 0.298): 반사가 실제보다 밝고 태양 HDR(116)이 눌려 있었다.
+    → 큐브 `RenderTexture`에 렌더하고 `AsyncGPUReadback`으로 면마다 읽어 `SetPixelData`(선형 HDR 그대로, 6.0/6.3/6.6 같은 경로). 면 방향은 6.3의 옛 결과와
+    같은 배치(D3D 큐브맵 규약)이고 가장 밝은 텍셀이 태양 방향과 0.32° 차이. 옛 메모의 "하드 그림자·그림자 끄면 밝아진다"는 재현되지 않았다(검은 상태에서
+    소프트 끄기·품질 Low/Medium/High·캐스케이드 1/2/4·하드·그림자 없음 모두 overview 1.0) — 저장된 쓰레기가 실행마다 달라(0이면 반사만 빠져 밝게 보임)
+    설정 탓으로 보였던 것으로 본다. "빈 씬에서도 6.6만 소프트 그림자가 어둡다(114.7)"는 6.6이 새 씬의 **첫 렌더**에 기본 환경광이 아직 없어서였다
+    (같은 순서로 다시 재면 Soft 114.7 → Hard 197.4 → None 197.6 → Soft 197.2).
+  - 방법(G4-3, `Editor/Build/BuildContext.Materials.cs`): `ctx.LitMaterial(name, m => …)` + `LitSettings`(BaseColor/BaseMap/Tiling/Offset, Metallic/Smoothness/
+    MetallicGlossMap, NormalMap/NormalScale, OcclusionMap, Emission/EmissionMap, Transparent, AlphaClip, Cull, ReceiveShadows). 조사해 보니 텍스처 키워드
+    (`_NORMALMAP`·`_OCCLUSIONMAP`·`_METALLICSPECGLOSSMAP`·`_PARALLAXMAP`·`_DETAIL_MULX2`)·투명·알파 클립·큐는 이미 `ValidateMaterial`이 맞추고 있었고, 조용히
+    틀리는 건 **이미션**이었다: `_EmissionColor` + `EnableKeyword("_EMISSION")`을 검증이 끈다(인스펙터의 Emission 체크 = GI 플래그, 기본 `EmissiveIsBlack`) →
+    `LitMaterial`은 `Emission`이 검정이 아니면 `RealtimeEmissive`. `ctx.Material`은 설정 전·후·검증 후 값을 `GetPropertyNames`로 비교해(선언 안 된 이름은
+    직렬화 목록엔 없고 여기엔 있다) 셰이더에 없는 이름(비슷한 이름 제시), URP가 읽지 않는 옛 이름(`_MainTex`·`_Color`·`_Glossiness`·`_GlossMapScale`·
+    `_GlossyReflections`), 검증이 덮어쓴 값, 토글 없는 이미션 색을 `build.warnings`로. `LitMaterial`은 노멀맵이 노멀맵으로 임포트되지 않았거나 마스크가 sRGB면 경고.
+    샘플 지형은 `LitMaterial`로 바꿨다(`EnableKeyword` 줄 삭제) — 머티리얼이 바이트까지 같아 fingerprint 그대로.
+  - 방법(G4-2, `Runtime/Procedural/AmbientProbe.cs`, `ctx.SkyAmbient`): 큐브맵 텍셀마다 radiance × 입체각으로 L2 SH에 투영하고 코사인 로브로 컨볼루션(밴드별
+    1, 2/3, 1/4)해 Unity의 `SphericalHarmonicsL2` 형식(`Evaluate` 기저를 재서 확인: 정규화 없는 1, y, z, x, xy, yz, 3z²−1, xz, x²−y²; 균일 radiance c → 계수0 = c
+    = Flat 앰비언트 c)으로. 코사인 가중 적분(brute force)과 6방향에서 0.01 안. 유한·비음수가 아닌 텍셀이 있으면 예외(P-4 같은 쓰레기가 검은 씬 대신 빌드 에러).
+    씬의 RenderSettings에는 앰비언트 프로브가 저장되지 않아서 Unity 6.0+의 공개 API `new LightingDataAsset(scene)` + `SetAmbientProbe` +
+    `Lightmapping.SetLightingDataAssetForScene`으로 생성 라이팅 데이터에 넣고 ambient mode Skybox — 베이크한 것과 같은 자리. 저장 안 된 씬으로 만들면
+    씬을 열 때마다 "incompatible … scene was not serialized" 경고가 나서(첫 매트릭스에서 루프마다 `warningCount` 1로 드러남), 씬을 저장한 뒤 만들고 씬을
+    한 번 더 저장한다. Trilight 우회 삭제.
+  - 검증(이 머신, 에디터를 하나씩):
+    - G1-1: 옛 에셋과 새 에셋의 직렬화 차이는 프리필터 값·쓰이지 않는 기본 스텐실 값·캐스케이드 경계 소수점뿐이고 기준 이미지 **픽셀까지 같음**(`meanDiff` 0, 반사
+      수정 전). 설정 스텝 첫 생성 530 ms, 이후 무변경 10 ms. RP·Renderer 에셋 4개를 지우면 그동안 Built-in → 루프 한 번으로 같은 GUID로 다시 생기고 fingerprint·
+      기준 이미지·`git status` 같음(selftest 1번에 넣음). 6.6 새 클론의 `harness_setup`이 4개를 만들고 `git status` 깨끗.
+    - P-4: 6.6 새 클론 루프 3회 61.0/56.4/47.3(전: 60.9/56.4/48.0 → 25.5/15.3/1.0 `dark`). 반사가 선형이 되면서 6.3도 60.9/56.4/47.3으로 6.6과 같아졌다
+      (옛 6.3 기준 64.8/60.1/50.0과의 차이 = sRGB로 부풀었던 반사, 받침대 윗면이 회색 → 하늘을 비추는 남색).
+    - G4-2: 앰비언트 계수0 (0.214, 0.289, 0.407)(Trilight 0.141/0.158/0.216), 위를 향한 면 (0.086, 0.153, 0.375)·아래 (0.294, 0.343, 0.327) — 이 하늘은 천정이 짙은
+      파랑이고 지평선 아래 색(안개와 맞춘 `_GroundColor`)이 밝다. 샷 60.3/55.6/45.7, 그늘이 조금 더 푸르고 어둡다. 의도한 변경이라 6.3 기준 이미지를 갱신했다.
+    - 루프 3.67–3.96 s(W3 3.48–3.52: 빌드 0.74 s 중 설정 스텝 10 ms, 늘어난 건 fingerprint의 설정 덤프와 라이팅 데이터 뒤 씬 재저장), 빌드 스텝 합 ~87 ms.
+    - 매트릭스: 샘플 selftest 1–8 녹색 248.2 s(`4dc9c80b…`, 줄 61/68/87; 1번 51.1 s에 W4 검사 7개).
+      9: 새 클론(최종 커밋) 6000.3.11f1 녹색 347.4 s(`4dc9c80b…` = 메인 트리, 새 Library의 첫 루프부터 기준 이미지 `same=3`, `harness_setup` 4.6 s),
+      6000.0.84f1 녹색 307.5 s(`088e7345…`, 샷 60.3/55.6/45.7 = 6.3), **6000.6.3f1 녹색 333.4 s**(`d6ca82e3…`, 60.4/55.7/45.7, setup 12.5 s = 전환 뒤 리로드 포함) —
+      세 버전 모두 루프 콘솔 경고 0, `git status`는 버전 전환 파일뿐(6.6은 `PhysicsCoreProjectSettings2D.asset`·`ProjectAuditorSettings.asset`을 새로 만든다).
+      도중에: 첫 6.6 실행 2회가 카메라 픽스처로 빨강 → 위의 전환 뒤 리로드. 6.3·6.6 한 번씩 실제 입력 검사가 빨강(그 루프만 `editorFocused=false`) → selftest가
+      포커스 없는 시도를 다시 하게 하고 G3-9로 남김(최종 실행은 세 버전 모두 첫 시도에 포커스 있음). 메인 트리 selftest 1–8은 리로드 수정 뒤 248.2 s, 재시도 수정 뒤 1번 55.4 s.
+      10: BagelGame 녹색 57.6 s(`619be553…`, 65.5, 출시 빌드 `Managed/` 132개·`Harness.*` 0개), Fluid-Sim(Built-in) 녹색 31.2 s(`54880f05…`,
+      23.0/14.9/22.2 = W3, 103개·0개), 사내 프로젝트 A 녹색 129.9 s(`6664b723…`, `brd-lobby-w3.json`: 37.7/91.2/120.3/145.7, 끝난 뒤 서버 선택 PlayerPrefs 1 → 0).
+      세 프로젝트 모두 설정 스텝이 없어 RP 에셋을 건드리지 않았고(제거 뒤 `git status` 비어 있음) fingerprint는 W3와 같다.
+  - 남은 것: RP 밖의 프로젝트 설정 → G1-5(W10). 반사·앰비언트는 하늘만(씬 오브젝트가 비치지 않음, 반사 프로브는 W6c). 기준 이미지는 여전히 6.3만(6.0·6.6은
+    이제 6.3과 같은 밝기라 만들 수 있다). Unity 신고(RenderToCubemap)는 "상시".
 
 - [x] **G3-7 캡처는 카메라 하나 + 스크린 공간 UI다** · **G3-4 시각 회귀 검사가 없다** · **G3-3 정지 이미지만 나온다** (2026-09-30, W3)
   - 현상(전): 캡처는 템플릿 카메라 하나를 렌더하고 UI만 합성해서 URP 스택의 Overlay 카메라(무기, UI 카메라)와 다른 Base 카메라(미니맵)가 빠졌다.

@@ -15,7 +15,7 @@ namespace Harness.Editor
     /// overwritten in place (GUIDs stay stable), so rebuilding is idempotent. Assets no step touched during a build are
     /// deleted afterwards.
     /// </summary>
-    public sealed class BuildContext
+    public sealed partial class BuildContext
     {
         public Scene Scene { get; }
 
@@ -162,7 +162,11 @@ namespace Harness.Editor
         public T SaveAsset<T>(T obj, string relative) where T : Object
         {
             if (string.IsNullOrEmpty(Path.GetExtension(relative))) relative += ".asset";
-            var path = AssetPath(relative);
+            return SaveAssetAt(obj, AssetPath(relative));
+        }
+
+        T SaveAssetAt<T>(T obj, string path) where T : Object
+        {
             EnsureFolder(Path.GetDirectoryName(path));
             TouchedAssets.Add(path);
             obj.name = Path.GetFileNameWithoutExtension(path);
@@ -188,17 +192,26 @@ namespace Harness.Editor
             return Material(name, shader, setup);
         }
 
+        /// <summary>
+        /// A material from <paramref name="shader"/>: <paramref name="setup"/> sets properties, then the shader's own validation
+        /// derives keywords, queue and blend state (<see cref="ValidateMaterial"/>). Properties the shader does not have, values the
+        /// validation replaced and an emission color with emission off are reported in build warnings. URP Lit: <see cref="LitMaterial"/>.
+        /// </summary>
         public Material Material(string name, Shader shader, Action<Material> setup = null)
         {
             var m = new Material(shader);
+            var defaults = MaterialValues(m);
             setup?.Invoke(m);
+            var set = MaterialValues(m);
             ValidateMaterial(m);
+            CheckMaterial(name, m, defaults, set);
             return SaveAsset(m, name + ".mat");
         }
 
         /// <summary>
         /// Run the shader's ShaderGUI.ValidateMaterial (what the Inspector does on every change). URP Lit derives
-        /// keywords, the RenderType tag, disabled passes and legacy _Color/_MainTex from its properties there.
+        /// keywords (_NORMALMAP, _OCCLUSIONMAP, _ALPHATEST_ON, _SURFACE_TYPE_TRANSPARENT, ...), the queue, the RenderType tag,
+        /// disabled passes and legacy _Color/_MainTex from its properties there.
         /// Without it the first build (URP's import postprocessor validates new .mat files) and later in-place
         /// overwrites (no postprocessor) produce different materials.
         /// </summary>
@@ -288,6 +301,7 @@ namespace Harness.Editor
         public Cubemap BakeSkyReflection(string name = "SkyReflection", int size = 128)
         {
             var go = new GameObject("[HarnessSkyBake]") { hideFlags = HideFlags.HideAndDontSave };
+            RenderTexture rt = null;
             try
             {
                 var cam = go.AddComponent<Camera>();
@@ -295,12 +309,27 @@ namespace Harness.Editor
                 cam.cullingMask = 0;
                 cam.clearFlags = CameraClearFlags.Skybox;
                 cam.allowHDR = true;
-                var cube = new Cubemap(size, TextureFormat.RGBAHalf, true);
-                if (!cam.RenderToCubemap(cube))
+                // Render into a cube render texture and read the faces back. Camera.RenderToCubemap(Cubemap) renders on the GPU,
+                // but in Unity 6.6 it leaves the Cubemap's pixel data uninitialized - and that is what gets saved (P-4: the next
+                // load reflected garbage, often negative, and every URP Lit surface went black).
+                rt = new RenderTexture(new RenderTextureDescriptor(size, size, RenderTextureFormat.ARGBHalf, 0) { dimension = TextureDimension.Cube });
+                if (!SystemInfo.supportsAsyncGPUReadback || !cam.RenderToCubemap(rt))
                 {
-                    Warn("Camera.RenderToCubemap failed; default reflection left unset");
-                    Object.DestroyImmediate(cube);
+                    Warn("rendering the sky into a cubemap failed; default reflection left unset");
                     return null;
+                }
+                var cube = new Cubemap(size, TextureFormat.RGBAHalf, true);
+                for (var face = 0; face < 6; face++)
+                {
+                    var request = AsyncGPUReadback.Request(rt, 0, 0, size, 0, size, face, 1, TextureFormat.RGBAHalf);
+                    request.WaitForCompletion();
+                    if (request.hasError)
+                    {
+                        Warn("reading the sky cubemap back from the GPU failed; default reflection left unset");
+                        Object.DestroyImmediate(cube);
+                        return null;
+                    }
+                    cube.SetPixelData(request.GetData<byte>(), 0, (CubemapFace)face);
                 }
                 cube.Apply(true);
                 cube = SaveAsset(cube, name + ".asset");
@@ -309,7 +338,46 @@ namespace Harness.Editor
                 RenderSettings.reflectionIntensity = 1f;
                 return cube;
             }
-            finally { Object.DestroyImmediate(go); }
+            finally
+            {
+                if (rt != null) { rt.Release(); Object.DestroyImmediate(rt); }
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        /// <summary>
+        /// Ambient light from the sky without a lighting bake (G4-2): projects <paramref name="sky"/> (e.g. BakeSkyReflection's
+        /// cubemap) to L2 spherical harmonics (<see cref="Harness.Procedural.AmbientProbe"/>) and stores them as the scene's
+        /// lighting data with ambient mode Skybox - what baking the environment lighting would store. <paramref name="intensity"/>
+        /// scales the probe.
+        /// </summary>
+        public UnityEngine.Rendering.SphericalHarmonicsL2 SkyAmbient(Cubemap sky, float intensity = 1f)
+        {
+            var sh = Harness.Procedural.AmbientProbe.FromCubemap(sky) * intensity;
+            // The lighting data is written once the scene is saved (SaveLightingData): made for an unsaved scene, it loads with
+            // an "incompatible ... scene was not serialized" warning every time.
+            m_Ambient = sh;
+            m_AmbientPath = AssetPath("LightingData.asset");
+            TouchedAssets.Add(m_AmbientPath);
+            RenderSettings.ambientMode = AmbientMode.Skybox;
+            RenderSettings.ambientIntensity = 1f;
+            return sh;
+        }
+
+        UnityEngine.Rendering.SphericalHarmonicsL2? m_Ambient;
+        string m_AmbientPath;
+
+        /// <summary>After the scene is saved: its lighting data with the <see cref="SkyAmbient"/> probe. True when the scene needs saving again.</summary>
+        internal bool SaveLightingData()
+        {
+            if (m_Ambient == null) return false;
+            var data = new LightingDataAsset(Scene);
+            data.SetAmbientProbe(m_Ambient.Value);
+            data = SaveAssetAt(data, m_AmbientPath);
+            AssetDatabase.SaveAssetIfDirty(data);
+            if (!HarnessPaths.Config.IsHarnessProject) HarnessBuild.MarkGenerated(m_AmbientPath);
+            Lightmapping.SetLightingDataAssetForScene(Scene, data);
+            return true;
         }
 
         public const string DefaultThemePath = HarnessConfig.PackageRoot + "/UI/DefaultRuntimeTheme.tss";

@@ -34,15 +34,11 @@ namespace Game.Stage.Builders
             var albedo = ctx.LoadAsset<Texture2D>("TerrainAlbedo.png");
             var normal = ctx.LoadAsset<Texture2D>("TerrainNormal.png");
 
-            var mat = ctx.Material("Terrain", "Universal Render Pipeline/Lit", m =>
+            var mat = ctx.LitMaterial("Terrain", m =>
             {
-                m.SetTexture("_BaseMap", albedo);
-                m.SetColor("_BaseColor", Color.white);
-                m.SetTexture("_BumpMap", normal);
-                m.SetFloat("_BumpScale", 1f);
-                m.EnableKeyword("_NORMALMAP");
-                m.SetFloat("_Smoothness", 0.12f);
-                m.SetFloat("_Metallic", 0f);
+                m.BaseMap = albedo;
+                m.NormalMap = normal;
+                m.Smoothness = 0.12f;
             });
 
             var go = ctx.MeshObject("Terrain", mesh, mat);

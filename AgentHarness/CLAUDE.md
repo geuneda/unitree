@@ -12,7 +12,7 @@ Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **
 
 | # | Three.js 환경의 성질 | Unity 기본 상태 | 이 하네스가 복원하는 방법 |
 |---|---|---|---|
-| 1 | 모든 게 텍스트(JS 코드) | 씬/프리팹이 GUID로 얽힌 YAML, GUI 중심 도구 | 씬은 `IBuildStep` 코드가 생성, HLSL·UXML/USS·코드로 만든 머티리얼/Volume/라이팅 |
+| 1 | 모든 게 텍스트(JS 코드) | 씬/프리팹이 GUID로 얽힌 YAML, GUI 중심 도구 | 씬은 `IBuildStep` 코드가 생성, 렌더 파이프라인 설정은 `ISettingsStep` 코드, HLSL·UXML/USS·코드로 만든 머티리얼/Volume/라이팅 |
 | 2 | 수정→새로고침이 초 단위 | 컴파일 + 도메인 리로드 | Domain Reload 끔, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크 |
 | 3 | 스크린샷·콘솔·FPS를 눈/기계로 확인 | 에이전트가 화면을 못 봄 | `harness_capture/play`가 PNG + 이미지 통계, `harness_console/stats`가 JSON |
 | 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/Texture 베이크), URP Volume을 코드로 |
@@ -42,7 +42,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 `tools/loop.ps1` = recompile → (C# 컴파일 에러면 즉시 중단) → lint → `harness_build` → `harness_shaders` → `harness_play`(기본 3컷)
 → `harness_console` + `harness_stats` → `HarnessOut/latest/report.json` (stdout에도 같은 JSON). 종료코드 0 = 전부 녹색.
 
-**매 루프 후 반드시**: `report.json`의 `ok/stage`를 보고, `shots`의 PNG를 **Read 툴로 직접 열어** 눈으로 확인한다.
+**매 루프 후 반드시**: `report.json`의 `ok/stage`를 보고, `shots`의 PNG를 **Read 툴로 직접 열어** 눈으로 확인한다. `build.warnings`(머티리얼 설정 실수 등)도 읽는다.
 `shotStats[].blank=true`(평평/검은 화면)면 렌더가 깨진 것이다. `dark=true`(픽셀 98% 이상이 거의 검정)는 실패로 치지 않지만
 조명이 빠진 화면일 가능성이 크다 — PNG를 열어 본다. `magenta=true`(에러 셰이더의 마젠타가 0.05% 이상)도 실패로 치지 않지만 거의 항상
 렌더 파이프라인이 못 그리는 머티리얼이다(URP 프로젝트에서 `Shader.Find("Standard")` 같은 Built-in 셰이더, 없는·깨진 셰이더) — `hint`가 그 렌더러를 짚는다.
@@ -68,8 +68,9 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
   "fps": {"avg","min","p95ms","p99ms","hitches","cpuMainAvgMs","samples","editorFocused"},
   "shots": ["C:/.../HarnessOut/latest/shot0_closeup.png", ...],
   "durationSec": 3.5, "unityVersion": "6000.3.11f1",   // 루프를 돌린 에디터 버전
-  "timings": {"lockWaitSec","editorWaitSec","compileSec","buildSec","playSec","collectSec","goldenSec"},   // editorWaitSec: 시작 시 리로드·busy 대기(있을 때만)
-  "build": {"fingerprint","steps":[{"type","module","ms","error","file","line"}], ...},
+  "timings": {"lockWaitSec","editorWaitSec","compileSec","buildSec","reloadSec","playSec","collectSec","goldenSec"},   // editorWaitSec: 시작 시 리로드·busy 대기, reloadSec: 파이프라인 전환 뒤 리로드(있을 때만)
+  "build": {"fingerprint","steps":[{"type","module","ms","error","file","line"}], "warnings":[],   // warnings: 머티리얼 설정 실수 등(실패 아님, 읽을 것)
+            "settings": {"assets","written","assigned","pipeline","switched","reloadRequested"}, ...},   // ISettingsStep이 만든 RP 에셋·이번에 다시 쓴 것·활성 파이프라인·전환
   "play": {"success","probeReady","frames","gameSec","modules","failedModules","inputEventsApplied",
            "events":[{"name":"SpinnerLap","count":2}],     // EventBus 발행 횟수 → 게임플레이를 기계적으로 검증
            "inputBackends":["inputSystem"|"hook"], "inputHooks":["HarnessInput.OnScenarioInput"],   // 입력이 들어간 곳
@@ -104,7 +105,8 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 
 1. **`.unity` / `.prefab` / `.asset` YAML 직접 수정 금지.** 씬은 `Assets/Game/<Module>/Builders/`의 `IBuildStep`이 만든다.
    `Assets/Scenes/Main.unity`와 `Assets/Generated/`는 빌드 산출물이며 gitignore 되어 있다(고쳐도 다음 빌드에 덮어써진다).
-   프로젝트 설정도 YAML이 아니라 에디터 API(`harness_setup` 등)로 바꾼다.
+   렌더 파이프라인(URP·Renderer 에셋, Renderer Feature, 품질 레벨별 파이프라인)은 같은 폴더의 `ISettingsStep` 코드가 만든다(아래 "렌더 설정").
+   그 밖의 프로젝트 설정도 YAML이 아니라 에디터 API(`harness_setup` 등)로 바꾼다.
 2. **텍스트로 쓸 수 있는 형태만.** 셰이더 = 손으로 쓴 HLSL `.shader`(Shader Graph 금지), UI = UI Toolkit UXML/USS(uGUI 프리팹 금지),
    머티리얼·파티클·Volume·라이팅·PanelSettings = 빌더 코드(`BuildContext`)로 생성. Animator/Timeline 같은 GUI 에셋이 필요하면 코드로 생성한다.
 3. **자기 모듈 폴더 밖 수정 금지.** 작업 범위는 `Assets/Game/<Module>/` 하나. 모듈 간 공유 이벤트 타입만
@@ -129,15 +131,17 @@ Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json:
                                ScenarioInput(KeyNames, InputHookReplay), ScenarioRunner, HarnessCapture(+CaptureCameras: 화면의 카메라들,
                                CaptureUi: 스크린 공간 UI 합성, ContactSheet: 연속 캡처 시트)
                                (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
-  Runtime/Procedural/          MeshBuilder, Noise(Perlin/fBm/Ridged/Worley/Rng), TextureBaker, PMath
-  Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교) 와 BuildContext/IBuildStep, HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
+  Runtime/Procedural/          MeshBuilder, Noise(Perlin/fBm/Ridged/Worley/Rng), TextureBaker, PMath, AmbientProbe(큐브맵 → 앰비언트 SH)
+  Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교) 와 BuildContext(+.Materials: LitMaterial)/IBuildStep,
+                               SettingsContext/ISettingsStep(렌더 설정), HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
   UI/                          DefaultRuntimeTheme.tss (UI Toolkit 기본 테마, 텍스트)
   Tools~/                      도구 본체(.ps1, Harness.psm1) + templates/ (진입점, 기본 시나리오, 기존 프로젝트용 안내서, HarnessInput.cs)
 ProjectSettings/AgentHarness.json   하네스 설정: setup 모드, 모듈 루트/폴더, contracts, 생성물 경로, 빌드·플레이 씬
 Assets/Game/Contracts/         모듈 간 이벤트 타입 (Game.Contracts, 추가만)
 Assets/Game/<Module>/          런타임 코드 (Game.<Module>.asmdef) + Shaders/*.shader + UI/*.uxml|uss
-Assets/Game/<Module>/Builders/ IBuildStep 구현 (Game.<Module>.Builders.asmdef, Editor 전용)
-Assets/Generated/, Assets/Scenes/Main.unity   빌드 산출물 (gitignore, 직접 수정 금지)
+Assets/Game/<Module>/Builders/ IBuildStep·ISettingsStep 구현 (Game.<Module>.Builders.asmdef, Editor 전용)
+Assets/Generated/, Assets/Scenes/Main.unity   빌드 산출물 (gitignore, 직접 수정 금지). RP·Renderer 에셋도 여기(경로에서 만든 고정 GUID)
+Assets/Settings/               URP가 관리하는 전역 설정(UniversalRenderPipelineGlobalSettings, DefaultVolumeProfile)만 커밋
 tools/loop.ps1                 원커맨드 루프          tools/uc.ps1          커맨드 1개 호출(JSON 인자)
 tools/submit.ps1               worktree의 모듈 → 에디터 트리, 트랜잭션 루프(실패 시 되돌림)
 tools/land.ps1                 worktree 브랜치 → 에디터 트리 브랜치로 병합, 트랜잭션 루프(실패 시 되돌림)
@@ -195,7 +199,8 @@ public sealed class FooBuildStep : IBuildStep
     public void Build(BuildContext ctx)
     {
         var mesh = ctx.SaveMesh(MeshBuilder.Sphere(0.5f).ToMesh("Ball"), "Ball");       // Assets/Generated/Foo/Ball.asset
-        var mat  = ctx.Material("BallMat", "Game/Foo/MyShader", m => m.SetColor("_BaseColor", Color.red));
+        var mat  = ctx.LitMaterial("BallMat", m => { m.BaseColor = Color.red; m.Emission = Color.red * 2f; });  // URP Lit, 키워드 자동
+        var glow = ctx.Material("Glow", "Game/Foo/MyShader", m => m.SetFloat("_Glow", 2f)); // 직접 쓴 셰이더
         var go   = ctx.MeshObject("Props/Ball", mesh, mat);                              // 씬: Foo/Props/Ball
         var tex  = ctx.SaveTexture(TextureBaker.Bake(256, 256, (u, v) => Color.white), "BallTex"); // PNG (Read 가능)
         ctx.VolumeProfile("Post", p => p.Add<Bloom>(true).intensity.value = 1f);         // Volume 오버라이드
@@ -207,7 +212,49 @@ public sealed class FooBuildStep : IBuildStep
 ```
 `BuildContext`는 산출물을 제자리 덮어쓰기(GUID 유지)하고, 이번 빌드에서 아무도 만들지 않은 `Assets/Generated` 에셋은 지운다.
 `ctx.CacheHit`: 스텝 어셈블리·Harness.Runtime 코드와 입력이 같으면 재생성을 건너뛴다(`harness_build {"no_cache":true}`로 무시).
-환경 헬퍼: `ctx.BakeSkyReflection()`(스카이박스→큐브맵 반사, 베이크 불필요), `ctx.Create(path, types)`, `ctx.Root()`, `ctx.Seed(salt)`.
+환경 헬퍼: `ctx.BakeSkyReflection()`(스카이박스→HDR 큐브맵, 기본 반사로), `ctx.SkyAmbient(cube)`(그 큐브맵의 SH를 씬 라이팅 데이터의
+앰비언트로 — 스카이박스 앰비언트를 베이크 없이), `ctx.Create(path, types)`, `ctx.Root()`, `ctx.Seed(salt)`.
+- 머티리얼: URP Lit은 `ctx.LitMaterial(name, m => …)`(`LitSettings`: BaseColor/BaseMap/Tiling, Metallic/Smoothness/MetallicGlossMap,
+  NormalMap/NormalScale, OcclusionMap, Emission/EmissionMap, Transparent, AlphaClip, Cull, ReceiveShadows). 키워드·큐·블렌드는 셰이더 검증이
+  설정에서 만든다 — 이미션은 GI 플래그(인스펙터의 Emission 체크)로 켜지므로 `EnableKeyword("_EMISSION")`은 검증이 되돌린다.
+  다른 셰이더는 `ctx.Material(name, shader, m => …)`: 셰이더에 없는 프로퍼티(오타, 다른 파이프라인 이름), URP가 읽지 않는 옛 이름
+  (`_MainTex`·`_Color`·`_Glossiness`), 검증이 덮어쓴 값, 이미션 색만 넣고 꺼진 이미션은 `build.warnings`에 나온다.
+
+### 렌더 설정 (ISettingsStep, G1-1)
+
+```csharp
+public sealed class FooRenderSettings : ISettingsStep     // Builders/ 폴더, 빌드 스텝보다 먼저 돈다
+{
+    public int Order => 0;
+    public void Apply(SettingsContext ctx)
+    {
+        var pc = ctx.UniversalPipeline("PC", rp =>           // Assets/Generated/Foo/PC_RPAsset.asset + PC_Renderer.asset
+        {
+            rp.shadowDistance = 50f; rp.shadowCascadeCount = 4; rp.supportsHDR = true;
+            SettingsContext.Set(rp, "m_SoftShadowsSupported", true);        // public setter가 없는 필드: 직렬화 경로(YAML 이름)
+        }, renderer =>
+        {
+            renderer.renderingMode = RenderingMode.ForwardPlus;
+            SettingsContext.AddRendererFeature<ScreenSpaceAmbientOcclusion>(renderer, f => SettingsContext.Set(f, "m_Settings.Intensity", 0.4f));
+        });
+        ctx.UsePipeline(pc);            // Graphics 설정의 기본 파이프라인
+        ctx.UsePipeline(pc, "PC");      // 이 품질 레벨의 파이프라인(레벨은 이름으로, 있어야 함)
+    }
+}
+```
+- `harness_build`가 매번(빌드 스텝 전에), `harness_setup`도 돌린다(새 클론이 첫 루프 전에 파이프라인을 갖게). **`setup: harness`에서만** —
+  `attach` 프로젝트의 RP 에셋은 건드리지 않는다(`build.warnings`에 건너뛴 스텝 수).
+- 매번 URP 새 에셋 기본값에서 시작해 코드를 적용한다 → 코드가 정하지 않은 값은 그 Unity 버전의 기본값. 디스크의 에셋과 내용이 같으면 쓰지 않는다
+  (`build.settings.written`이 비어 있음, ~10 ms), 다르면 제자리 덮어쓰기.
+- 에셋은 생성물(`Assets/Generated/<모듈>/`, gitignore)이고 GUID는 경로에서 만든다(MD5) → 지워도 루프 한 번이면 같은 GUID로 다시 생기고, 그 GUID를
+  참조하는 `ProjectSettings/GraphicsSettings.asset`·`QualitySettings.asset`은 바뀌지 않는다. 새 클론은 첫 `harness_setup`/루프까지 Built-in으로 열린다(씬도 아직 없다).
+- 설정 스텝이 **활성 파이프라인을 바꾸면**(새 클론의 첫 `harness_setup`, RP 에셋을 지운 뒤의 루프) 도메인 리로드를 요청하고(`settings.switched`), `uc.ps1`과
+  루프는 리로드가 끝난 뒤 계속한다(`timings.reloadSec`, ~2–10 s). Unity 6.6은 Built-in으로 시작한 세션에서 URP로 바뀐 뒤 새 셰이더 변형의 첫 그리기를 빼먹었다(아래 "함정").
+- `SettingsContext.Set(obj, "경로", 값)`: 이 Unity 버전에 그 필드가 없거나 타입이 안 맞으면 예외(스텝의 줄로 `stage=build`) — 비슷한 필드 이름을 알려 준다.
+  필드 이름은 생성된 에셋 YAML(`Assets/Generated/…_RPAsset.asset`)에서 읽는다.
+- 설정값·파이프라인 배정은 `build.fingerprint`에 들어간다(`Library/Harness/fingerprint.txt`의 `--settings--`). 씬의 RenderSettings(안개·앰비언트·
+  스카이박스·반사)와 라이팅 데이터 참조도 fingerprint에 들어간다(GPU로 구운 큐브맵·그 SH는 참조만 — GPU마다 끝자리가 다를 수 있어 기준 이미지가 본다).
+- URP의 전역 설정(`Assets/Settings/UniversalRenderPipelineGlobalSettings.asset`, `DefaultVolumeProfile.asset`)은 URP가 없으면 새 GUID로 만들어서 커밋된 채 둔다.
 
 ## 에디터 커맨드 (모두 JSON 반환)
 
@@ -216,7 +263,7 @@ public sealed class FooBuildStep : IBuildStep
 
 | 커맨드 | 하는 일 |
 |---|---|
-| `harness_build` | Builders의 IBuildStep을 Order 순으로 빈 씬에 실행 → `buildScene` 저장. `{ok, fingerprint, steps[], cacheHits, deletedAssets}`. `dry_run`, `no_cache`. 빌드 스텝이 없고 `playScene`이 build가 아니면(기존 프로젝트) 플레이 씬을 열고 에셋 기준 fingerprint만(`skipped`) |
+| `harness_build` | Builders의 ISettingsStep(렌더 설정, harness 프로젝트만) → IBuildStep을 Order 순으로 빈 씬에 실행 → `buildScene` 저장. `{ok, fingerprint, steps[], settings, cacheHits, deletedAssets}`. `dry_run`, `no_cache`. 빌드 스텝이 없고 `playScene`이 build가 아니면(기존 프로젝트) 플레이 씬을 열고 에셋 기준 fingerprint만(`skipped`) |
 | `harness_capture` | `{"preset":"all"\|"<name>"\|"main","out":"HarnessOut/capture","scene":"","ui":true}` 편집 모드 오프스크린 PNG(프로젝트 캡처 크기, 화면의 카메라들 + 스크린 공간 UI 합성) + `meanLuma/stdLuma/blank/dark/magenta/cameras/ui`. 샷 = 씬의 ShotPreset + 설정 `shots`. 플레이 씬을 먼저 연다(`"scene":"open"`이면 열린 씬 그대로) |
 | `harness_golden` | `{"shots":"[{\"path\",\"name\",\"ignore\":[{x,y,w,h}]}]","golden":"","key":"default","out":"","update":false}` 샷을 `<golden>/<Unity 버전>/<key>/<파일>`과 비교(샷마다 status·meanDiff·changedRatio·ssim·rect, 바뀌었으면 `<out>/golden/<샷>.diff.png`) 또는 그 폴더에 씀(`update`). 루프가 매번 부른다 |
 | `harness_play` | `{"scenario":"tools/scenarios/default.json"\|"{...inline}","out":"HarnessOut/play"}` 즉시 반환 → `harness_play_status` 폴링 |
@@ -226,7 +273,7 @@ public sealed class FooBuildStep : IBuildStep
 | `harness_lint` | static-reset / module-asmdef / module-boundary 규칙 검사 |
 | `harness_shaders` | Assets/ 셰이더의 현재 컴파일 에러(file, line, msg, module). 셰이더 에러는 로그가 아니라 상태라 매 루프 조회 |
 | `harness_ping` | domainReloads, isCompiling, isPlaying, compileFailed, mark, unityVersion |
-| `harness_setup` | `setup: harness`면 프로젝트 설정 멱등 적용(Domain Reload off, runInBackground, 동기 셰이더 컴파일(`syncShaders`), 템플릿 샘플 삭제). `attach`면 아무것도 안 바꾸고 `recommendations`만(`{"apply":"domainReload,syncShaders"}`로 명시 적용). Debug 코드 최적화(세션 한정)는 둘 다 |
+| `harness_setup` | `setup: harness`면 프로젝트 설정 멱등 적용(Domain Reload off, runInBackground, 동기 셰이더 컴파일(`syncShaders`), 템플릿 샘플 삭제, ISettingsStep 실행 → `settings`). `attach`면 아무것도 안 바꾸고 `recommendations`만(`{"apply":"domainReload,syncShaders"}`로 명시 적용). Debug 코드 최적화(세션 한정)는 둘 다 |
 | `harness_sync_csproj` | .sln/.csproj 생성(사용자 외부 에디터 설정은 복원) — compile-check msbuild 백엔드용 |
 | `harness_quit` | 응답 ~0.3s 뒤 `EditorApplication.Exit(0)`(저장 확인 없음). 직접 부르지 말고 `tools/quit.ps1`(락 + 종료 대기) |
 
@@ -420,7 +467,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~4분
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 977545a7
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 4dc9c80b
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
 - 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark/magenta 없음, 모든 샷 1280x720에 HUD 합성, 기준 이미지: 루프 1이 `HarnessOut/selftest/golden`에
@@ -428,8 +475,11 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   uGUI 합성(편집 모드, 저장하지 않는 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·스택 UI 카메라의 캔버스 → 순서, 선형 공간 블렌드 오차 ≤ 2, 되돌림) +
   카메라(G3-7, 픽스처: 메인 카메라 자식인 스택 Overlay 카메라가 그리는 쿼드가 메인·다른 포즈 모두 화면 중앙, 미니맵 Base 카메라가 오른쪽 위, 앞 depth 카메라는 덮임,
   `"camera"`로 미니맵만, 메인 카메라·타깃·스택 되돌림, 씬 dirty 아님) + 플레이 중 픽스처(오버레이 캔버스·스택 카메라)와 연속 캡처(2x2 시트, `motion` > 0) +
-  실제 입력 격리(플레이 동안 실제 키보드 장치에 스페이스를 넣어도 events 그대로·`isolatedDevices` 누름 > 0, 실패·중단한 플레이 뒤에도 실제 장치가 다시 켜짐) +
-  `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 ·
+  실제 입력 격리(플레이 동안 실제 키보드 장치에 스페이스를 넣어도 events 그대로·`isolatedDevices` 누름 > 0, 실패·중단한 플레이 뒤에도 실제 장치가 다시 켜짐;
+  에디터에 포커스가 없던 시도는 3번까지 다시 — 백그라운드에선 Input System이 장치를 먼저 꺼서 격리가 돌 일이 없다, ROADMAP G3-9) +
+  렌더 설정(W4: RP 에셋이 생성물이고 루프 2·3은 다시 쓰지 않음, 지우면 루프 한 번으로 다시 생기고 fingerprint·픽셀·`git status` 같음; 반사 큐브맵에 잘못된 텍셀이
+  없고 가장 밝은 텍셀이 태양 방향(2° 안); 앰비언트 = 라이팅 데이터의 큐브맵 SH; `AmbientProbe` 균일 환경 → Flat과 같음·쓰레기 텍셀 거부; 머티리얼 경고 3종과
+  `LitMaterial`의 이미션·알파 클립) + `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 ·
   4 HLSL 에러(재임포트 없는 다음 루프에서도) + 되돌린 상태를 기준 이미지로 → 셰이더 한 줄(스펙큘러 절반) → golden `changed`(rect·diff PNG), 루프는 녹색 +
   파이프라인이 못 그리는 머티리얼(받침대를 `Standard`로 → 샷 `magenta`, `hint`에 `Smoke/Pedestal`, golden `changed`, 루프는 녹색 → 되돌리면 `same`) · 5 리셋 없는 static(lint) · 6 루프 2개 동시 · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
   다른 worktree의 새 모듈·계약은 락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부) ·
@@ -449,18 +499,18 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-09-29, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`):
+- 검증한 버전(2026-09-30 W4, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`):
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
-  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `d9a6d092…` | 61 / 68 / 87 | 1–9 녹색, 샷은 6.3과 같은 밝기 |
-  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `977545a7…` | 61 / 68 / 87 | 1–9 녹색 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `c24b65e7…`(2026-09-30; 09-29까지 `0ba32228…` — 같은 커밋도 바뀜, 이 머신의 6.6 쪽 변화) | 61 / 68 / 87 | 2–8 녹색, **1은 대개 빨강**: 첫 플레이 뒤 조명이 검다(`dark`, 루프끼리 기준 이미지 차이, ROADMAP P-4; 비결정적이라 녹색일 때도 있음) |
+  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `088e7345…` | 61 / 68 / 87 | 1–9 녹색, 샷 60.3/55.6/45.7(6.3과 같음) |
+  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `4dc9c80b…` | 61 / 68 / 87 | 1–9 녹색, 커밋된 기준 이미지와 같음 |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `d6ca82e3…` | 61 / 68 / 87 | 1–9 녹색, 샷 60.4/55.7/45.7(W4 전에는 첫 플레이 뒤 검었다 — ROADMAP P-4) |
 
   fingerprint는 버전마다 다르다(URP가 만드는 머티리얼·에셋 직렬화가 다르다). 같은 버전 안에서만 매번 같아야 한다.
-- 다른 버전으로 열면 Unity가 다시 쓰는 파일(커밋하지 않는다): `Packages/packages-lock.json`, `Assets/Settings/*RPAsset.asset`·
-  `UniversalRenderPipelineGlobalSettings.asset`, `ProjectSettings/*`(버전별 새 필드). URP·Core 같은 **코어 패키지는 manifest의 버전(17.3.0)과
-  상관없이 에디터 내장 버전으로 해석된다**.
+- 다른 버전으로 열면 Unity가 다시 쓰는 파일(커밋하지 않는다): `Packages/packages-lock.json`, `Assets/Settings/UniversalRenderPipelineGlobalSettings.asset`,
+  `ProjectSettings/*`(버전별 새 필드). RP·Renderer 에셋은 W4부터 생성물이라 버전마다 그 버전의 모양으로 만들어진다(gitignore).
+  URP·Core 같은 **코어 패키지는 manifest의 버전(17.3.0)과 상관없이 에디터 내장 버전으로 해석된다**.
 - 하네스 패키지에는 버전 문자열을 쓰지 않는다. 에디터·컴파일러 경로는 실행 중인 에디터 프로세스 → `unity editors --installed`에서 얻고,
   API 차이는 `Runtime/UnityCompat.cs` 한 곳에서 `#if UNITY_6000_4_OR_NEWER`처럼 가른다(예: 6.4부터 `FindObjectsSortMode` obsolete).
   선택 패키지는 asmdef `versionDefines`로 가른다: `AGENTHARNESS_URP`(URP 카메라 데이터 복사), `AGENTHARNESS_RP_CORE`(`ctx.VolumeProfile`),
@@ -544,8 +594,25 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   `dialog.title`로 보고한다 → 사람이 동의해야 한다. 시작 시 컴파일 에러가 있으면 "Enter Safe Mode?"도 같은 식으로 보고된다(창 제목은
   `Process.MainWindowTitle`로는 안 보여서 Win32 `EnumWindows`로 읽는다).
 - 템플릿에서 온 URP 에셋이 옛 직렬화 버전이면(`Mobile_RPAsset`이 `k_AssetVersion: 12`, URP 17.3은 13) 셰이더 재임포트 같은 작업 뒤
-  URP가 모든 RP 에셋을 다시 써서 **에디터 종료 때** 저장한다 → 새 클론의 `git status`가 더러워졌다. 에디터 API(SerializedObject + SaveAssetIfDirty)로
-  그 버전이 쓰는 모양 그대로 저장해 커밋했다.
+  URP가 모든 RP 에셋을 다시 써서 **에디터 종료 때** 저장한다 → 새 클론의 `git status`가 더러워졌다. W4부터 RP 에셋은 `ISettingsStep`이 그 버전으로
+  만드는 생성물이라 커밋하지 않는다.
+- **`AssetDatabase.CreateAsset`은 GUID를 고를 수 없다**(먼저 써 둔 `.meta`도 무시하고 새 GUID로 덮어쓴다). `SaveToSerializedFileAndForget`으로 쓴 파일은
+  GUID는 지켜지지만 메인 오브젝트 fileID가 1이라 `.meta`의 11400000과 맞지 않는다. → 설정 에셋은 임시 폴더에 `CreateAsset`으로 Unity가 쓰게 한 뒤 그 파일을
+  제자리로 옮기고 경로에서 만든 GUID로 `.meta`를 쓴 다음 임포트한다(하위 에셋 fileID 유지). 에셋이 있으면 제자리 덮어쓰기만.
+- **URP 17.6은 Renderer Feature 하위 에셋에 `HideInHierarchy`를 켠다**(렌더러를 로드할 때·메뉴로 추가할 때). 코드로 만든 기능에 없으면 6.6에서만 매번
+  "내용이 다름"으로 다시 썼다 → `AddRendererFeature`가 모든 버전에서 같이 켠다.
+- **`Camera.RenderToCubemap(Cubemap)`은 버전마다 CPU 픽셀이 다르다**: 6.3은 GPU 결과를 **sRGB로 인코딩해서** half-float 큐브맵에 넣고(선형 0.071 → 0.298,
+  반사가 실제보다 밝고 태양 HDR이 눌림), **6.6은 성공을 돌려주지만 CPU 픽셀을 채우지 않는다**(초기화 안 된 메모리: half `0xCDCD` = −23.2 또는 0).
+  GPU 쪽은 맞게 그려져서 에셋을 만든 직후의 첫 플레이만 정상이고, 저장된 에셋을 다시 읽은 뒤엔 음수 반사로 URP Lit 표면이 전부 검었다(P-4, 비결정적).
+  → `BakeSkyReflection`은 큐브 RenderTexture에 렌더하고 `AsyncGPUReadback`으로 면마다 읽어 `SetPixelData`(선형 HDR 그대로, 6.0/6.3/6.6 같음).
+  `AmbientProbe.FromCubemap`은 유한·비음수가 아닌 텍셀이 있으면 예외를 던진다(검은 씬 대신 빌드 에러).
+- **Built-in으로 시작한 에디터 세션에서 URP로 바꾸면 6.6은 새 셰이더 변형의 첫 그리기를 빼먹었다**: 새 클론(RP 에셋이 생성물이라 Built-in으로 열림) → `harness_setup`이
+  URP를 만들고 배정 → selftest 1번 카메라 픽스처의 첫 캡처에서 스택 Overlay 카메라의 새 Unlit 쿼드가 없었다(두 번째 캡처엔 있음, 비동기 셰이더 컴파일은 꺼져 있음,
+  6.6 새 클론 2회 연속·같은 클론을 Built-in 시작으로 되돌려 재현; 처음부터 URP로 연 세션은 셰이더 캐시를 지워도 정상, 6.0·6.3은 정상). 전환 뒤 도메인 리로드
+  한 번이면 정상 → 설정 스텝이 활성 파이프라인을 바꾸면 `EditorUtility.RequestScriptReload()`, `uc.ps1`·루프가 리로드를 기다린다.
+- 6.6은 새 씬의 **첫 렌더에 기본 환경광(스카이박스 앰비언트·반사)이 아직 없다**(빈 씬 첫 렌더 114.7 → 다음부터 197). 설정별로 밝기를 잴 때 첫 렌더를
+  빼지 않으면 먼저 잰 설정만 어둡다(P-4 조사 초기에 "소프트 그림자만 어둡다"로 잘못 본 원인).
+- W4 전 `build.fingerprint`는 씬의 GameObject만 훑어서 RenderSettings(안개·앰비언트·스카이박스·반사)와 라이팅 데이터가 바뀌어도 그대로였다 → 지금은 들어간다.
 - Game 뷰 크기 목록(`PlayModeWindow.SetCustomRenderingResolution`이 여기에 추가한다)과 에디터 기본 레이아웃은 **사용자 전역**이다
   (`%APPDATA%\Unity\Editor-5.x\Preferences\GameViewSizes.asset`, `Layouts\current\default-6000.dwlt`). 하네스·실험 코드에서 바꾸지 않는다.
 - **에디터에서 `ScriptableObject.CreateInstance<PanelSettings>()`를 하면 Unity가 `Assets/UI Toolkit/UnityThemes/UnityDefaultRuntimeTheme.tss`를 만든다**
@@ -596,13 +663,18 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - `UnityEngine.Object`에 `?.` 금지(에디터의 fake null). `TryGetComponent`를 쓴다.
 - 에디터 명령/빌더에서 `EditorApplication.delayCall` 금지 — 포커스 없는 에디터에선 실행되지 않는다(`harness_play`가 73s 멈췄던 원인).
   `EditorApplication.update` 한 번짜리 콜백이나 직접 호출을 쓴다.
-- 머티리얼은 `ctx.Material()`로 만든다. `ShaderGUI.ValidateMaterial`을 불러 URP Lit의 태그·패스·레거시 프로퍼티를 맞추므로
-  첫 빌드와 이후 빌드가 같아진다. 그래도 텍스처에 따른 키워드(`_NORMALMAP` 등)는 직접 켠다.
-- 프로젝트는 짧은 경로(60자 이하)에 둔다. 길면 Windows 260자 제한으로 Unity 패키지 파일 로드가 실패한다. `%TEMP%` 아래도 피한다(Burst DLL 차단). 스카이박스 앰비언트는 라이팅 베이크가 필요해서 Trilight + `ctx.BakeSkyReflection()`을 쓴다.
+- 머티리얼은 `ctx.LitMaterial()`/`ctx.Material()`로 만든다. `ShaderGUI.ValidateMaterial`을 불러 URP Lit의 키워드(`_NORMALMAP` 등 텍스처에 따른 것 포함)·
+  태그·패스·레거시 프로퍼티를 맞추므로 첫 빌드와 이후 빌드가 같아진다. **이미션만은 키워드가 아니라 GI 플래그가 켠다**: `_EmissionColor` + `EnableKeyword("_EMISSION")`은
+  검증이 끈다(`globalIlluminationFlags`가 기본 `EmissiveIsBlack`) → `LitMaterial`의 `Emission`, 또는 `m.globalIlluminationFlags = RealtimeEmissive`.
+  `Material.SetFloat`은 셰이더에 없는 이름도 조용히 저장한다(`GetPropertyNames`에는 보이고 직렬화 목록엔 없음) → `ctx.Material`이 경고한다.
+- 프로젝트는 짧은 경로(60자 이하)에 둔다. 길면 Windows 260자 제한으로 Unity 패키지 파일 로드가 실패한다. `%TEMP%` 아래도 피한다(Burst DLL 차단).
+- 스카이박스 앰비언트는 원래 라이팅 베이크가 만든다(씬의 RenderSettings에는 앰비언트 프로브가 저장되지 않는다). Unity 6.0+의 공개 API
+  `new LightingDataAsset(scene)` + `SetAmbientProbe` + `Lightmapping.SetLightingDataAssetForScene`으로 베이크 없이 넣을 수 있다 → `ctx.SkyAmbient`.
+  `SphericalHarmonicsL2.Evaluate`의 기저는 정규화 상수 없는 {1, y, z, x, xy, yz, 3z²−1, xz, x²−y²}이고 균일 radiance c → 계수0 = c(Flat 앰비언트 c)다.
 - 캡처 카메라는 메인 카메라 설정(후처리 포함)을 복사해 오프스크린 렌더한다. 메인 카메라가 없으면 캡처 실패.
 - 에디터 플레이 모드 FPS는 에디터 오버헤드·autotick 영향을 받는다. 절대값이 아니라 **변경 전후 비교**용이다(`editorFocused` 확인).
 - Code Optimization은 Debug(정확한 예외 줄 번호). Release면 throw 위치가 메서드 끝 줄로 보고되고, **절차적 메시·텍스처의 float 결과가 달라져
-  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `977545a7…`).
+  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `4dc9c80b…`).
   `CompilationPipeline.codeOptimization`은 에디터 세션 동안만 유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다
   → `HarnessCodeOptimization`([InitializeOnLoad])이 도메인이 로드될 때마다 이 프로젝트만 Debug로 되돌린다(재컴파일 1회; 그래서 이 프로젝트에선
   Release가 유지되지 않는다). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다.

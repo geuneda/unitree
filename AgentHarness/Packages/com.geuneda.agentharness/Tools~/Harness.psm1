@@ -686,6 +686,23 @@ function Wait-HarnessIdle {
     return $null
 }
 
+# A command's result says a domain reload was requested (settings.reloadRequested: a settings step switched the render
+# pipeline). Wait until the Editor has reloaded (domainReloads past the reported value) and is idle; $true when it has
+# or nothing was requested.
+function Wait-HarnessReload {
+    param($Result, [int]$TimeoutSec = 120)
+    Set-StrictMode -Off   # any command's reply: settings is usually absent
+    if ($null -eq $Result -or $null -eq $Result.settings -or -not $Result.settings.reloadRequested) { return $true }
+    $before = [int]$Result.settings.domainReloads
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
+        $p = Invoke-UnityCommand -Name 'harness_ping' -TimeoutSec 5
+        if ($p.success -and [int]$p.result.domainReloads -gt $before -and -not $p.result.isCompiling -and -not $p.result.isUpdating) { return $true }
+        Start-Sleep -Milliseconds 150
+    }
+    return $false
+}
+
 # Import changed files, compile, and wait until the new domain has loaded. Returns
 # @{ ok; status; failed; errors; compileErrors; seconds; reloaded }.
 # Does not trust the Pipeline status file alone (it can report a stale failure right after a failed compile,
@@ -868,6 +885,8 @@ function Invoke-HarnessLoop {
     $Timings['buildSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
     $report['build'] = if ($build.success) {
         $b = [ordered]@{ ok = $build.result.ok; fingerprint = $build.result.fingerprint; gameObjects = $build.result.gameObjects; durationMs = $build.result.durationMs; steps = @($build.result.steps | ForEach-Object { [ordered]@{ type = $_.type; module = $_.module; ms = $_.ms; error = $_.error; file = $_.file; line = $_.line } }); warnings = @($build.result.warnings) }
+        # Render settings from code (ISettingsStep): their assets, what this build rewrote, the active pipeline.
+        if ($build.result.settings) { $b['settings'] = $build.result.settings }
         # No build steps (an attached project): nothing was built; the fingerprint is the play scene's.
         if ($build.result.skipped) { $b['skipped'] = $true; $b['scene'] = $build.result.scene; $b['fingerprintOf'] = $build.result.fingerprintOf }
         $b
@@ -879,6 +898,19 @@ function Invoke-HarnessLoop {
         $con = Invoke-UnityCommand -Name 'harness_console' -Params @{ since = $mark } -TimeoutSec 10
         if ($con.success) { $report.runtimeErrors = @($con.result.runtimeErrors | ForEach-Object { [ordered]@{ type = $_.type; msg = $_.message; file = $_.file; line = $_.line; module = $_.module; count = $_.count } }) }
         return $report
+    }
+
+    # A settings step switched the render pipeline (e.g. its assets were deleted): the build asked for a domain reload,
+    # which must be over before the play (see SettingsContext.Run).
+    if ($build.result.settings -and $build.result.settings.reloadRequested) {
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $reloaded = Wait-HarnessReload $build.result
+        $Timings['reloadSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+        if (-not $reloaded) {
+            $report.stage = 'editor'
+            $report['error'] = "the domain reload requested after the render pipeline switch ($($build.result.settings.switched)) did not finish"
+            return $report
+        }
     }
 
     # ---- 3. Play scenario (or edit-mode capture) ------------------------------------------------------
@@ -1062,7 +1094,7 @@ Export-ModuleMember -Function Get-HarnessProjectRoot, Get-HarnessWorkRoot, Test-
     Wait-UnityReachable, Get-HarnessEditorProcess, Get-HarnessLaunchedEditor, Save-HarnessLaunchedEditor, Get-HarnessWindowTitles, Test-HarnessProjectOpen,
     Get-HarnessProjectVersion, Get-HarnessInstalledEditors,
     Find-HarnessEditorExe, Read-HarnessLogTail, Invoke-HarnessProcess, Get-HarnessPowerShell, ConvertTo-HarnessArg,
-    Invoke-HarnessRecompile, Get-HarnessCompileState, Wait-HarnessIdle, Enter-HarnessLock, Exit-HarnessLock, Test-HarnessReadOnly,
+    Invoke-HarnessRecompile, Get-HarnessCompileState, Wait-HarnessIdle, Wait-HarnessReload, Enter-HarnessLock, Exit-HarnessLock, Test-HarnessReadOnly,
     Get-HarnessLastRecovery, Get-HarnessLastLandRecovery, Add-HarnessRecovery, Start-HarnessSubmit, Complete-HarnessSubmit,
     Undo-HarnessSubmit, Invoke-HarnessLoop, Save-HarnessReport, Invoke-HarnessGit, Split-HarnessZ, Get-HarnessGitStatus,
     Test-HarnessSamePath, Get-HarnessRepoRoot, Write-HarnessPathspec, Get-HarnessContentIds, Get-HarnessOwners, Save-HarnessOwners,

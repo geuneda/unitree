@@ -45,7 +45,7 @@ namespace Harness.Editor
         [CliCommand("harness_setup",
             "Idempotently apply the harness project settings. setup 'harness' (ProjectSettings/AgentHarness.json): Enter Play Mode " +
             "without Domain Reload (scene reload kept), Run In Background, Frame Timing Stats, synchronous shader compilation, remove " +
-            "URP template sample content, create the module roots and generated folders. setup 'attach' (an existing project): changes " +
+            "URP template sample content, create the module roots and generated folders, run the ISettingsStep code (render pipeline assets). setup 'attach' (an existing project): changes " +
             "no project setting and deletes nothing; it reports recommendations, and --apply 'domainReload,runInBackground,frameTimingStats,syncShaders' applies those. " +
             "Debug code optimization (Editor session only) always. Returns {ok, setup, changed[], issues[], recommendations[]}.",
             Tags = new[] { "harness", "settings" })]
@@ -97,6 +97,19 @@ namespace Harness.Editor
                 }
             }
 
+            // Render settings from code (ISettingsStep), so a new clone has its pipeline before the first loop.
+            object settings = null;
+            if (config.IsHarnessProject && config.loadError == null)
+            {
+                var run = SettingsContext.Run(new List<string>());
+                if (run.failed)
+                    return new { ok = false, error = "settings step failed", setup = config.setup, changed, steps = run.steps.ConvertAll(s => s.info), warnings = run.ctx.Warnings };
+                foreach (var p in run.ctx.Written) changed.Add("settings: wrote " + p);
+                foreach (var a in run.ctx.Assigned) changed.Add("settings: " + a);
+                if (run.switched != null) changed.Add("settings: render pipeline " + run.switched + " (domain reload requested)");
+                if (run.steps.Count > 0) settings = HarnessBuild.SettingsSummary(run);
+            }
+
             if (changed.Count > 0) AssetDatabase.SaveAssets();
             return new
             {
@@ -105,6 +118,7 @@ namespace Harness.Editor
                 setup = config.setup,
                 config = config.fromFile ? HarnessConfig.FileName : HarnessConfig.FileName + " (missing: defaults)",
                 changed,
+                settings,
                 issues = Check(),
                 recommendations = config.IsHarnessProject ? new List<object>() : Recommendations(),
             };

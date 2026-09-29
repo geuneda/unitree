@@ -26,7 +26,8 @@ namespace Harness.Editor
 
         static readonly StringBuilder s_AssetDump = new StringBuilder();
 
-        public static Result Compute(Scene scene)
+        /// <param name="settings">Render settings (<see cref="SettingsContext.Fingerprint"/>) hashed with the scene, or null.</param>
+        public static Result Compute(Scene scene, string settings = null)
         {
             s_AssetDump.Clear();
             var sb = new StringBuilder(1 << 16);
@@ -35,6 +36,7 @@ namespace Harness.Editor
 
             foreach (var root in scene.GetRootGameObjects())
                 Walk(root.transform, sb, assets, r);
+            DumpRenderSettings(scene, sb, assets);
 
             // Generated assets referenced by the scene (and assets they reference, one level at a time).
             var visited = new HashSet<string>(StringComparer.Ordinal);
@@ -53,6 +55,7 @@ namespace Harness.Editor
             r.assets = ordered.Count;
 
             var text = sb.ToString() + "\n--assets--\n" + assetSb;
+            if (settings != null) text += "\n--settings--\n" + settings;
             r.hash = Sha1(text);
             // Kept for diffing when two builds disagree: Library/Harness/fingerprint.txt (+ per-asset dumps). The last
             // different dump is kept as fingerprint.prev.txt, so a changed fingerprint can be diffed after the fact.
@@ -98,6 +101,40 @@ namespace Harness.Editor
             catch { }
             return r;
         }
+
+        /// <summary>
+        /// The scene's render settings (fog, ambient, sky, reflection) and lighting data, which live outside its GameObjects.
+        /// GPU-baked lighting (the reflection cubemap, the ambient probe computed from it) is referenced, not hashed: it can
+        /// differ in the last bits between GPUs, and the golden images compare how it looks.
+        /// </summary>
+        static void DumpRenderSettings(Scene scene, StringBuilder sb, SortedSet<string> assets)
+        {
+            if (SceneManager.GetActiveScene() != scene) return;   // RenderSettings are the active scene's
+            void Line(string key, string value) => sb.Append("  ").Append(key).Append('=').Append(value).Append('\n');
+            sb.Append("RenderSettings\n");
+            Line("fog", RenderSettings.fog ? "1" : "0");
+            Line("fogMode", RenderSettings.fogMode.ToString());
+            Line("fogColor", RenderSettings.fogColor.ToString("R"));
+            Line("fogDensity", RenderSettings.fogDensity.ToString("R"));
+            Line("fogStartDistance", RenderSettings.fogStartDistance.ToString("R"));
+            Line("fogEndDistance", RenderSettings.fogEndDistance.ToString("R"));
+            Line("ambientMode", RenderSettings.ambientMode.ToString());
+            Line("ambientSkyColor", RenderSettings.ambientSkyColor.ToString("R"));
+            Line("ambientEquatorColor", RenderSettings.ambientEquatorColor.ToString("R"));
+            Line("ambientGroundColor", RenderSettings.ambientGroundColor.ToString("R"));
+            Line("ambientIntensity", RenderSettings.ambientIntensity.ToString("R"));
+            Line("subtractiveShadowColor", RenderSettings.subtractiveShadowColor.ToString("R"));
+            Line("skybox", RefId(RenderSettings.skybox, assets));
+            Line("sun", RenderSettings.sun == null ? "null" : "go:" + PathOf(RenderSettings.sun.transform));
+            Line("defaultReflectionMode", RenderSettings.defaultReflectionMode.ToString());
+            Line("defaultReflectionResolution", RenderSettings.defaultReflectionResolution.ToString());
+            Line("reflectionIntensity", RenderSettings.reflectionIntensity.ToString("R"));
+            Line("reflectionBounces", RenderSettings.reflectionBounces.ToString());
+            Line("customReflectionTexture", RefOnly(RenderSettings.customReflectionTexture));
+            Line("lightingDataAsset", RefOnly(Lightmapping.GetLightingDataAssetForScene(scene)));
+        }
+
+        static string RefOnly(Object o) => o == null ? "null" : $"asset:{AssetDatabase.GetAssetPath(o)}:{o.GetType().Name}:{o.name}";
 
         static void Walk(Transform t, StringBuilder sb, SortedSet<string> assets, Result r)
         {
@@ -145,7 +182,7 @@ namespace Harness.Editor
             }
         }
 
-        static string Value(SerializedProperty p)
+        internal static string Value(SerializedProperty p)
         {
             switch (p.propertyType)
             {

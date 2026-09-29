@@ -24,7 +24,11 @@ if (-not (Test-HarnessReadOnly $Command)) {
     $rec = Get-HarnessLastLandRecovery
     if ($rec) { [Console]::Error.WriteLine("uc.ps1: undid an interrupted land: $($rec | ConvertTo-Json -Compress)") }
 }
-try { $r = Invoke-UnityCommand -Name $Command -Params $params -TimeoutSec $TimeoutSec }
+try {
+    $r = Invoke-UnityCommand -Name $Command -Params $params -TimeoutSec $TimeoutSec
+    # harness_setup / harness_build switched the render pipeline and requested a domain reload: return once it is over.
+    if ($r.success -and -not (Wait-HarnessReload $r.result)) { [Console]::Error.WriteLine('uc.ps1: the requested domain reload did not finish in 120 s') }
+}
 finally { Exit-HarnessLock }
 $r | ConvertTo-Json -Depth 30
 if (-not $r.success) { exit 1 }
