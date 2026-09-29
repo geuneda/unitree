@@ -79,6 +79,14 @@
   - 현상: `blank`는 밝기 표준편차·색 버킷 수로만 판정. 셰이더 실패로 인한 마젠타(핑크) 머티리얼은 따로 잡지 못한다(컴파일 에러는 `harness_shaders`가 잡음).
   - 방향: 마젠타 픽셀 비율 통계 추가.
 
+- [ ] **G3-6 실제 키보드·게임패드 입력이 시나리오 재생에 섞인다** (2026-09-29 발견)
+  - 현상: 검증 매트릭스 중 루프 1회(약 25회 중)에서 `play.events`가 `SpinDirectionChanged=2`(정상 1). 같은 루프의 `inputEventsApplied`(2)·frames(163)·gameSec은
+    정상 루프와 같았다 → 시나리오 밖에서 들어온 입력.
+  - 원인(추정): `ScriptedInput`은 에디터가 백그라운드여도 재생되도록 `backgroundBehavior=IgnoreFocus`, `AllDeviceInputAlwaysGoesToGameView`를 켠다.
+    그런데 게임의 `<Keyboard>/space` 바인딩은 가상 키보드만이 아니라 **실제 키보드도** 받는다. 플레이 3초 사이 다른 창에서 누른 스페이스가 게임 이벤트가 된다.
+  - 방향: 시나리오 동안 `ScriptedInput`이 만든 장치 말고는 `InputSystem.DisableDevice`로 끄고 끝나면 되돌린다. 걸러 낸 실제 입력 수를 `play`에 보고.
+  - 완료 기준: 루프가 도는 동안 실제 키보드로 스페이스를 연타해도 `play.events`가 매번 같다.
+
 ## 성질 4 — 에셋 없이도 완성도
 
 - [ ] **G4-1 CPU(C#) 텍스처 베이크가 느리다**
@@ -118,12 +126,12 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
 이 하네스는 지금 **"이 저장소를 클론해서 그 안에서 시작"하는 방식만** 된다. Unity 버전은 6000.3.11f1 하나, OS는 Windows 하나에서만 검증했다.
 
 순서: **P-1(버전) → P-2(기존 프로젝트) → P-3(macOS, 나중)**. 기존 프로젝트는 저마다 다른 6.x 버전을 쓰므로 P-2는 P-1이 먼저 필요하다.
-세 항목 모두 검증은 O-8(새 클론 검증 자동화)을 버전·OS·대상 프로젝트별로 돌리는 방식이라 O-8을 같이 진행한다.
+세 항목 모두 `tools/fresh-clone-test.ps1`(O-8, 2026-09-29 해결)을 버전(`-UnityVersion`)·OS·대상 프로젝트별로 돌려서 검증한다.
 
 - [ ] **P-1 Unity 버전이 6000.3.11f1로 고정돼 있다**
   - 현상:
     - 검증한 버전이 하나뿐이다. `ProjectVersion.txt`와 `manifest.json`(URP 17.3.0, Input System 1.19.0)이 이 버전 기준이고,
-      기준선 표와 검증 매트릭스 기대값(fingerprint `b012cf35…`, 컴파일 61행·런타임 68행·셰이더 87행)도 이 버전에서 잰 값이다.
+      기준선 표와 검증 매트릭스 기대값(fingerprint `5887385e…`, 컴파일 61행·런타임 68행·셰이더 87행)도 이 버전에서 잰 값이다.
     - 하한: `com.unity.pipeline` 0.8.0-exp.1의 `package.json`이 `"unity": "6000.0"`이다. 2022.3 LTS 같은 Unity 6 미만 버전은
       에디터 연결 방식(Pipeline HTTP 서버 + `[CliCommand]`)을 바꾸지 않는 한 지원할 수 없다.
     - 도구: `compile-check.ps1`은 `ProjectVersion.txt`의 버전으로 에디터를 찾고(Hub 기본 경로 → `unity editors --installed`),
@@ -131,13 +139,17 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
     - 코드: 이미 버전 차이를 한 곳 우회했다(`enterPlayModeOptionsEnabled`가 6.x에서 obsolete → 리플렉션). 다른 버전에서 컴파일되고 동작하는지는 확인하지 않았다.
     - O-1의 recompile 상태 레이스 우회는 Pipeline 0.8.0-exp.1의 동작에 맞춘 것이다.
     - 프로젝트를 다른 버전 에디터로 열면 업그레이드 확인 모달이 뜬다(G2-2와 같은 문제). `unity open`만으로는 끝까지 진행되지 않을 수 있다.
+      `open.ps1`은 모달을 `dialog`로 보고하고 실패한다. `fresh-clone-test.ps1 -UnityVersion`은 클론의 `ProjectVersion.txt`를 그 버전으로 바꿔서
+      모달 없이 열도록 했지만, 설치된 에디터가 6000.3.11f1뿐이라 다른 버전으로는 아직 돌려 보지 않았다(2022.3은 하한 미만).
+    - `compile-check.ps1`의 에디터 찾기(`Get-EditorPath`)는 아직 Hub 기본 경로를 먼저 본다. `Harness.psm1`에 `Find-HarnessEditorExe`
+      (`unity editors --installed`)와 `Get-HarnessEditorProcess`(실행 중인 에디터)가 생겼으니 그쪽으로 바꾼다.
   - 방향:
     - 지원 범위를 "Unity 6.0 LTS 이상"으로 선언하고 검증 대상 목록을 둔다(예: 6.0 LTS 최신 패치, 6.3 LTS, 최신 정식).
     - 버전별 API 차이는 `#if UNITY_6000_x_OR_NEWER`와 asmdef `versionDefines`(URP 17.0–17.x)로 가른다.
     - 샘플 프로젝트(이 저장소)는 한 버전으로 고정해 두되, `Assets/Harness/`와 `tools/`에는 버전 문자열을 하드코딩하지 않는다.
       compile-check는 실행 중인 에디터 프로세스의 경로를 먼저 쓴다(실제로 컴파일하는 버전이 그 에디터다).
     - 매트릭스 기대값은 버전별로 기록한다. 줄 번호는 모든 버전에서 같아야 한다. fingerprint는 버전마다 달라도 되지만, 같은 버전 안에서는 3회 동일해야 한다.
-    - O-8 스크립트에 `-UnityVersion`을 두고 목록의 버전마다 반복한다.
+    - `fresh-clone-test.ps1 -UnityVersion <v> -ExpectFingerprint <그 버전의 값>`을 목록의 버전마다 반복한다(파라미터는 O-8에서 만들었다).
   - 완료 기준: 목록의 각 버전에서 새 클론(해당 버전으로 업그레이드) → `harness_setup` → 매트릭스 1–8 녹색.
     `Assets/Harness/`·`tools/`에서 `6000.` 검색 결과 0건.
 
@@ -193,6 +205,10 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
     - 결정성: Apple Silicon(ARM64) JIT의 부동소수점 결과가 x64와 달라서 fingerprint가 OS·CPU마다 다를 수 있다(F-6처럼 절차적 베이크 결과가 바뀜).
       기준을 "같은 머신 안에서 결정적"으로 둘지 먼저 정해야 한다.
     - README에 macOS용 Unity CLI 설치 방법이 없다.
+    - O-4·O-7·O-8에서 만든 `open.ps1`·`quit.ps1`·`fresh-clone-test.ps1`은 경로를 `/`로 쓰고, 자식 PowerShell을 현재 호스트(`Get-HarnessPowerShell`)로,
+      에디터를 `unity editors --installed`의 위치로 띄운다(`.app`이면 `Contents/MacOS/Unity`). 그래도 macOS에서 확인할 것:
+      `Temp/UnityLockfile` 잠금 검사(`Test-HarnessProjectOpen`, Unix에서 .NET `FileShare.None`은 flock), 종료 직후 pid 판정(`HasExited`),
+      전역 로그 위치(`~/Library/Logs/Unity/Editor.log` — `-logFile`로 우회하므로 영향은 없어야 한다).
   - 방향: 도구를 PowerShell 7(pwsh, 크로스플랫폼)로 옮긴다. Windows에서도 pwsh 7을 요구할지, 5.1 호환을 유지할지 정해야 한다.
     경로는 `/`와 다단 `Join-Path`로 통일하고, 에디터·dotnet·csc 경로는 `unity editors --installed`나 실행 중인 에디터 프로세스에서 얻는다.
     Unix에서는 락을 파일 락(배타 핸들)으로 바꾸는 것도 검토한다.
@@ -205,20 +221,12 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
   - 할 일: 패키지를 업그레이드할 때마다 loop 검증 매트릭스(아래)를 다시 돌린다.
 - **O-2 스크립트가 Windows PowerShell 5.1 전용** → P-3으로 옮겼다(2026-09-29).
 - [ ] **O-3 하네스 자체의 자동 테스트가 없다.** 아래 매트릭스를 스크립트(`tools/selftest.ps1`)로 만든다.
-- [ ] **O-4 Pipeline `quit` 커맨드가 편집 모드에서 실패한다** (`PipelineQuitScheduler`가 DontDestroyOnLoad 호출).
-  에디터를 코드로 닫는 믿을 만한 방법이 없다. `EditorApplication.delayCall` 경유 `Exit`도 백그라운드 에디터에선 실행되지 않는다.
-  2026-09-29 클론 검증 중 메인 에디터가 정상 종료 절차로 꺼졌는데 원인을 로그로 특정하지 못했다.
-  확인된 우회: `eval`로 `EditorApplication.Exit(0)`를 **직접** 호출하면 백그라운드 에디터도 정상 종료된다 → `harness_quit`으로 만들 것.
-  2026-09-29 재확인: `uc.ps1 eval_file`로 3회 모두 1–2s 안에 정상 종료(응답은 빈 본문이라 `unexpected reply (HTTP 200)`).
+- **O-4 에디터를 코드로 닫을 방법이 없다** → 2026-09-29 해결(아래 "해결됨").
 - [ ] **O-5 `%TEMP%` 아래 프로젝트에서 Burst JIT DLL 로드가 막힌다** (LoadLibrary error 4551 = Windows 애플리케이션 제어 정책).
   editorErrors로만 보고된다. 프로젝트를 Temp에 두지 말 것.
 - [ ] **O-6 도메인 리로드 직후 Unity Search 인덱서 예외** (`UnityEditor.Search.SearchInit.IndexationOnStartup`, ArgumentOutOfRange).
   에디터 내부 에러라 `editorErrors`로 분류(루프 실패 아님). Unity 쪽 수정 전까지 유지.
-- [ ] **O-7 에디터 두 개를 같이 띄웠을 때 전역 `Editor.log`가 1.4GB까지 커졌다** ("Access version should be odd when acquiring lock" 반복).
-  원인 미확인. 에디터마다 `-logFile`을 따로 주는 실행 스크립트로 막는다.
-- [ ] **O-8 새 클론 검증을 자동화한다.** 짧은 경로에 클론 → 에디터 실행 → `harness_setup` → loop 3회를 스크립트로(`tools/fresh-clone-test.ps1`).
-  사람이 수동으로 돌려서 아래 해결됨 항목들을 찾았다.
-  P-1~P-3 검증도 이 스크립트를 버전(`-UnityVersion`)·OS·대상 프로젝트별로 돌리는 방식이라 먼저 만들어 둘 것.
+- **O-7 두 에디터가 전역 `Editor.log`를 같이 쓴다**, **O-8 새 클론 검증 자동화** → 2026-09-29 해결(아래 "해결됨").
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
@@ -235,12 +243,62 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
    submit은 락 대기 후 녹색. 컴파일 에러 커밋 land → `stage=compile` + `land.reverted` + `restore.ok`, HEAD·`git status` 동일.
    land를 병합 직후 kill → 다음 `loop.ps1`에 `recoveredLand`, 녹색, HEAD·`git status` 동일. `.meta` 미커밋·충돌 → `stage=land` 거부, 무변경.
    테스트 병합 커밋은 끝나면 `git reset --mixed <테스트 전 커밋>`으로 걷어내고 테스트 모듈 파일을 지운다
+9. 새 클론(O-8): `tools/`·`ProjectSettings/`·`Packages/`·`.gitignore`·에디터 시작 코드를 바꿨으면 임시 커밋 후
+   `tools/fresh-clone-test.ps1 -ExpectFingerprint <1의 fingerprint>` 녹색(클론이 메인 트리와 같은 fingerprint), `shots/`를 Read로 확인
 
 ---
 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **O-8 새 클론 검증을 자동화한다** (2026-09-29)
+  - 방법: `tools/fresh-clone-test.ps1`. 이 저장소(기본 HEAD; `-Source`/`-Ref`로 원격도)를 짧은 경로(`<저장소 상위>/ah-fresh`, 프로젝트 경로 60자·`%TEMP%` 밖 검사)에
+    클론 → 클론의 `open.ps1`(첫 임포트) → `uc.ps1 harness_setup` → `loop.ps1` ×3 → `quit.ps1` → 클론 `git status` → 삭제. 모든 단계를 **클론의 도구**로,
+    자식 PowerShell(현재 호스트, `AGENTHARNESS_EDITOR_ROOT` 제거)에서 돌린다. 판정: 단계 성공, setup 뒤 `issues` 없음, 루프 녹색, 루프끼리 fingerprint·events 동일
+    (`-ExpectFingerprint`), `harness_quit`으로 정상 종료, 종료 뒤 `git status` 깨끗. 결과는 `HarnessOut/fresh-clone/`(report.json, loop<N>.json, 마지막 루프 shots/,
+    클론 Editor.log). 실패하면 에디터는 닫고 클론은 남긴다(`-Force`로 교체). `-Keep`, P-1용 `-UnityVersion`(설치 확인 + 클론의 `ProjectVersion.txt` 교체; 다른 버전으로는 아직 미실행).
+    child 프로세스 실행은 `Invoke-HarnessProcess`(git도 이것을 쓰도록 `Invoke-HarnessGit`을 옮김)로.
+  - **찾은 것: 같은 코드·같은 버전인데 새 클론의 fingerprint(`e0a075e5…`)가 메인 트리(`b012cf35…`)와 달랐다.** `-Keep`으로 남긴 클론의 덤프와 diff하니
+    URP Lit `.mat` 2개에서 숨은 하위 객체 `AssetVersion`의 **순서만** 달랐다. `LoadAllAssetsAtPath`는 로컬 fileID 순서로 주는데 새로 만든 .mat은 AssetVersion이 앞,
+    이력이 있는 .mat은 뒤다. F-2 때 새 클론에서 본 `e0a075e5…`도 이것이었다. `SceneFingerprint.HashAsset`이 객체별 덤프를 정렬해서 해시하도록 고쳤다
+    → 메인 트리·남긴 클론·새 클론 모두 `5887385e…`. (Release 값은 다시 재지 못했다: `HarnessCodeOptimization`이 도메인 로드마다 Debug로 되돌려서
+    이 프로젝트에서는 Release가 유지되지 않는다.)
+  - 측정(이 머신, 다른 에디터 없음, 3회): 전체 108 s 안팎 — 클론 0.4–0.6 s, open(첫 임포트 + Debug 재컴파일) 78–80 s, setup 0.5 s(`created Assets/Generated`),
+    루프 8.1–9.0 / 3.6–5.2 / 3.7–4.1 s(자식 PowerShell 포함), quit 2.8–3.4 s, 삭제 7.8–8.3 s. 클론 `Editor.log` 1.1 MB. 종료 뒤 `git status` 깨끗.
+    `-ExpectFingerprint 5887385e`로 녹색. `-Force`로 에디터가 열린 채 남은 클론을 닫고 교체. 샷은 메인 트리와 육안 동일.
+    첫 루프 `editorErrors`에 O-6(Search 인덱서) 1건.
+  - 만들다 겪은 것: `quit.ps1`이 종료를 확인한(`HasExited`) 직후에도 `Get-Process`에 그 pid가 잠깐 남아서, 처음엔 이미 끝난 프로세스를 kill하고
+    `killed`로 보고했다 → 살아 있는지는 `HasExited`로 보고, quit이 실패했을 때만 kill.
+
+- [x] **O-4 에디터를 코드로 닫는 믿을 만한 방법이 없다** (2026-09-29)
+  - 원인: Pipeline `quit`은 플레이어용(`DontDestroyOnLoad`)이라 편집 모드에서 실패하고, `delayCall`은 포커스 없는 에디터에서 돌지 않는다.
+    `eval`로 `Exit(0)`를 직접 부르면 닫히지만 응답이 깨진다(빈 본문).
+  - 방법: `harness_quit`(`HarnessQuit.cs`)이 `EditorApplication.update`에 한 번짜리 콜백을 걸고 0.3 s 뒤 `EditorApplication.Exit(0)`.
+    update는 Pipeline 디스패처가 명령을 실행하는 곳이라 백그라운드에서도 돌고, 응답은 HTTP 스레드가 메서드 반환 뒤에 쓰므로 지연을 둔다.
+    `tools/quit.ps1` = 에디터 락(다른 에이전트의 loop/submit/land가 끝난 뒤) → `harness_quit`(도메인 리로드가 예약을 지울 수 있어 10 s마다 재요청) →
+    프로세스 종료 대기. `-Force`면 타임아웃 뒤 kill, busy(`blocked_by_dialog`)면 `dialogs`를 보고. 에디터가 없으면 `method=none`으로 녹색.
+    디스크립터의 pid는 프로세스 시작 시각이 디스크립터보다 늦으면(죽은 에디터의 pid 재사용) 무시한다.
+  - 검증: 포커스 없는 메인 에디터 3.8 s, 새 클론 에디터 2.8–3.4 s(3회) 모두 `method=harness_quit`. 로그: `[Harness] harness_quit: closing the Editor`
+    → 레이아웃 저장 → 정상 종료. 다시 `open.ps1`로 열어 첫 루프 녹색.
+
+- [x] **O-7 에디터 두 개를 같이 띄웠을 때 전역 `Editor.log`가 1.4GB까지 커졌다** (2026-09-29)
+  - 원인(확인): `-logFile` 없이 뜬 에디터(`unity open`, Hub)는 모두 `%LOCALAPPDATA%\Unity\Editor\Editor.log` 하나에 쓰고, 나중에 뜬 에디터는 파일
+    **처음부터** 쓴다. 두 프로세스가 각자의 위치에 이어 쓰면서 서로 덮어쓴다: 전역 로그 10,755행 중 ~3,100행까지가 AgentHarness 에디터(`harness_quit`까지),
+    뒤쪽은 먼저 떠 있던 BunkerRandomDefense 에디터의 종료 기록이었다. 한 프로젝트의 로그를 따로 볼 수 없고, 한쪽이 같은 메시지를 쏟아 내면 파일이 커진다.
+    1.4GB를 채운 "Access version should be odd when acquiring lock" 자체의 원인은 여전히 모른다(이번 세션 로그들에는 0건).
+  - 방법: `tools/open.ps1`이 설치된 에디터(`unity editors --installed`)를 직접 `-projectPath <p> -logFile <p>/Logs/Editor.log`로 실행한다(직전 로그는
+    `Editor-prev.log`). pid를 알고 기다린다: `harness_ping` 응답 + 3 s idle(첫 응답 뒤 Debug 재컴파일 포함)이면 녹색, 에디터가 죽으면 `logTail`과 함께,
+    모달 다이얼로그가 20 s 이상이면 `dialog`와 함께 실패. 이미 열려 있으면(디스크립터 pid 또는 `Temp/UnityLockfile` 잠금) 기다리기만 한다.
+    CLAUDE.md·README의 `unity open`을 `open.ps1`로 바꿨다.
+  - 검증: 메인 에디터를 `open.ps1`로 다시 열기 29 s(domainReloads 2) — 전역 로그 mtime 그대로, `Logs/Editor.log`에만 기록, 도구 호출이 끝나도 에디터 유지.
+    첫 루프 4.9 s 녹색(`editorWaitSec` 없음; F-7 때는 ~27 s 대기). 새 클론 에디터가 같이 떠 있는 동안에도 전역 로그 무변화, 각자 `Logs/Editor.log`.
+  - 검증 매트릭스 1–9 녹색(이 항목들 전체 기준): fingerprint 3회 동일(`5887385e…`), 컴파일 61행·런타임 68행·셰이더 87행 정확, 재임포트 없는 셰이더 재검출,
+    lint, 동시 루프 두 번째 3.69 s 대기 후 녹색. 7: 게이트 1.15 s 거부(에디터 트리 무변화), 강제 submit `stage=compile` + 되돌림 + 복구 ok,
+    그 사이 B의 새 모듈 + 계약 submit 락 4.73 s 대기 후 녹색(`ProbeEcho=2`), submit kill → `recoveredSubmit` 녹색. 8: land fast-forward 5.84 s
+    (stash 버림, 소유 해제), 그 사이 A의 submit 4.72 s 대기 후 녹색, 컴파일 에러 land → 되돌림 + HEAD·status 동일, 병합 직후 kill → `recoveredLand` 녹색,
+    `.meta` 누락 1.06 s·미커밋 0.37 s·충돌 0.82 s·에디터 트리 직접 수정 1.18 s 거부(무변화), 이미 병합된 브랜치 0.79 s 녹색. 9: 위 O-8.
+    루프(변경 없음) 3.45–4.0 s. 매트릭스 중 1회 `SpinDirectionChanged=2` → G3-6으로 등록.
 
 - [x] **F-6 에디터를 재시작하면 예외 줄 번호와 build fingerprint가 바뀜** (2026-09-29)
   - 현상: 메모리 부족으로 에디터가 꺼진 뒤 다시 열자 같은 코드의 fingerprint가 `b012cf35…` → `6b977ecd…`, 런타임 예외 줄이 68 → 74(메서드 끝).

@@ -23,10 +23,14 @@
 ## 빠른 시작 (새로고침 + 스크린샷 + 콘솔 = 한 방)
 
 ```powershell
-unity status                      # state "ready" 인 에디터가 있어야 한다. 없으면:
-unity open <이 폴더 절대경로>      # 그 다음 unity status 가 ready 가 될 때까지 대기 (첫 루프는 Debug 전환 재컴파일을 ~30s 기다린다)
+powershell -ExecutionPolicy Bypass -File tools/open.ps1   # 에디터가 없으면 열고, 쓸 수 있을 때까지 기다린다(이미 열려 있으면 기다리기만)
 powershell -ExecutionPolicy Bypass -File tools/loop.ps1
+powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 잡고 정상 종료, 프로세스가 끝날 때까지 대기
 ```
+
+`open.ps1`은 에디터 로그를 `Logs/Editor.log`(직전 것은 `Editor-prev.log`)에 따로 쓰게 하고, 첫 응답 뒤 Debug 재컴파일까지 끝나
+3초간 idle일 때 돌아온다(재시작 ~30s, 새 클론 첫 임포트는 수 분). `unity open`이나 Hub로 열면 `-logFile`이 없어 여러 에디터가
+사용자 전역 `Editor.log` 하나를 서로 덮어쓴다(아래 "함정"). 실패하면 JSON의 `error`, `dialog`(모달 다이얼로그 — 사람이 답해야 함), `logTail`을 본다.
 
 `tools/loop.ps1` = recompile → (C# 컴파일 에러면 즉시 중단) → lint → `harness_build` → `harness_shaders` → `harness_play`(기본 3컷)
 → `harness_console` + `harness_stats` → `HarnessOut/latest/report.json` (stdout에도 같은 JSON). 종료코드 0 = 전부 녹색.
@@ -106,6 +110,8 @@ tools/loop.ps1                 원커맨드 루프          tools/uc.ps1        
 tools/submit.ps1               worktree의 모듈 → 에디터 트리, 트랜잭션 루프(실패 시 되돌림)
 tools/land.ps1                 worktree 브랜치 → 에디터 트리 브랜치로 병합, 트랜잭션 루프(실패 시 되돌림)
 tools/compile-check.ps1        에디터 없는 컴파일 검사  tools/Harness.psm1    HTTP 클라이언트·락·루프·submit/land 저널·git
+tools/open.ps1 / quit.ps1      에디터 열기(프로젝트별 로그, 준비 대기) / 정상 종료(락)
+tools/fresh-clone-test.ps1     새 클론 검증: 짧은 경로에 클론 → open → harness_setup → 루프 N회 → quit → 삭제
 tools/scenarios/*.json         플레이 시나리오        HarnessOut/           캡처·result.json·report.json (gitignore)
 AgentScripts/                  eval_file / run_script 용 임시 C# (gitignore)
 ```
@@ -186,6 +192,7 @@ public sealed class FooBuildStep : IBuildStep
 | `harness_ping` | domainReloads, isCompiling, isPlaying, compileFailed, mark |
 | `harness_setup` | 프로젝트 설정 멱등 적용(Domain Reload off, runInBackground, Debug 코드 최적화, 템플릿 샘플 삭제) |
 | `harness_sync_csproj` | .sln/.csproj 생성(사용자 외부 에디터 설정은 복원) — compile-check msbuild 백엔드용 |
+| `harness_quit` | 응답 ~0.3s 뒤 `EditorApplication.Exit(0)`(저장 확인 없음). 직접 부르지 말고 `tools/quit.ps1`(락 + 종료 대기) |
 
 Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_status`, `eval_file {"file":"AgentScripts/x.cs"}`(C# 본문, using 불가 → 정규화된 이름 사용),
 `run_script`, `get_scene_hierarchy`, `editor_status`(모달 다이얼로그 확인), `editor_stop`, `set_autotick`. 목록: `unity command --detail compact`.
@@ -276,6 +283,23 @@ powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke -
 - 한계: 검사 집합 밖(다른 모듈, `-IncludeHarness` 없는 Harness)은 **에디터가 마지막으로 컴파일한 DLL** 기준이다.
   최종 판정은 항상 `loop.ps1` / `submit.ps1`.
 
+## 새 클론 검증 (tools/fresh-clone-test.ps1)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1                    # 이 저장소의 HEAD, ~110s
+powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source https://github.com/geuneda/unitree -Ref master
+```
+- 짧은 경로(기본 `<저장소 상위>/ah-fresh`; 프로젝트 경로 60자 이하, `%TEMP%` 밖)에 클론 → 클론의 `open.ps1`(첫 임포트) →
+  `uc.ps1 harness_setup` → `loop.ps1` N회(`-Loops`, 기본 3) → `quit.ps1` → 클론 삭제. 모두 **클론의 도구**로 돌리므로 **커밋된 코드**를 검사한다
+  (미커밋 변경은 report의 `uncommittedNotTested`에 나온다 → 임시 커밋 후 실행).
+- 녹색 = 각 단계 성공 + `harness_setup` 뒤 남은 `issues` 없음 + 루프 전부 녹색 + 루프끼리 `build.fingerprint`·`play.events` 동일
+  (`-ExpectFingerprint`로 값까지) + `harness_quit`으로 정상 종료 + 종료 뒤 클론의 `git status`가 깨끗.
+- 결과: `HarnessOut/fresh-clone/report.json`(`stage` = prepare|clone|version|open|setup|loop|determinism|quit|git), `loop<N>.json`,
+  마지막 루프의 `shots/`(Read로 확인), 클론의 `Editor.log`. 실패하면 에디터는 닫고 클론은 남긴다(`kept`) → 다음 실행은 `-Force`.
+  `-Keep`은 녹색이어도 클론과 에디터를 남긴다(비교·디버깅용).
+- `-UnityVersion <설치된 버전>`: 클론의 `ProjectVersion.txt`를 그 버전으로 바꿔서 연다(P-1용; 이때 `git status` 변경은 보고만 한다).
+- 언제: `tools/`, `ProjectSettings/`, `Packages/`, `.gitignore`, 에디터 시작 경로(`[InitializeOnLoad]`)를 바꿨을 때와 공개 전.
+
 ## 함정 (겪은 것)
 
 - `Mathf.SmoothStep(from, to, t)`는 GLSL `smoothstep`이 **아니다**(값 보간). `PMath.Smoothstep(e0, e1, x)`를 써라. 지형이 전부 눈으로 나온 원인.
@@ -288,13 +312,21 @@ powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke -
 - 캡처 카메라는 메인 카메라 설정(후처리 포함)을 복사해 오프스크린 렌더한다. 메인 카메라가 없으면 캡처 실패.
 - 에디터 플레이 모드 FPS는 에디터 오버헤드·autotick 영향을 받는다. 절대값이 아니라 **변경 전후 비교**용이다(`editorFocused` 확인).
 - Code Optimization은 Debug(정확한 예외 줄 번호). Release면 throw 위치가 메서드 끝 줄로 보고되고, **절차적 메시·텍스처의 float 결과가 달라져
-  build fingerprint도 바뀐다**(스모크 씬: Debug `b012cf35…`, Release `6b977ecd…`). `CompilationPipeline.codeOptimization`은 에디터 세션 동안만
-  유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다 → `HarnessCodeOptimization`([InitializeOnLoad])이
-  세션마다 이 프로젝트만 Debug로 되돌린다(재컴파일 1회). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다.
+  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `5887385e…`).
+  `CompilationPipeline.codeOptimization`은 에디터 세션 동안만 유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다
+  → `HarnessCodeOptimization`([InitializeOnLoad])이 도메인이 로드될 때마다 이 프로젝트만 Debug로 되돌린다(재컴파일 1회; 그래서 이 프로젝트에선
+  Release가 유지되지 않는다). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다.
+- fingerprint는 에셋의 하위 객체를 정렬해서 해시한다. `LoadAllAssetsAtPath`는 하위 객체를 로컬 fileID 순서로 주는데, 그 순서는 에셋의 이력에 따라
+  다르다(새로 만든 URP `.mat`은 숨은 `AssetVersion`이 머티리얼 앞, 오래된 것은 뒤). 정렬 전에는 새 클론이 같은 코드로 다른 fingerprint를 냈다.
 - 에디터를 막 열면 `unity status`가 ready여도 Pipeline 서버가 잠시 **503 Server Busy**를 준다. 루프 시작 ping은 연결 끊김·401과 함께
-  busy도 에디터 프로세스가 살아 있는 동안 최대 120s 기다린다(`timings.editorWaitSec`, 재시작 직후 ~27s).
-- 에디터를 코드로 닫기: `AgentScripts/quit.cs`에 `UnityEditor.EditorApplication.Exit(0);`를 쓰고 `uc.ps1 eval_file`(응답은 빈 본문 오류지만 1–2s 뒤 정상 종료).
-  PowerShell에서 `uc.ps1`을 `powershell -File`로 부르면 JSON 인자의 따옴표가 벗겨진다 → `& ./tools/uc.ps1 ...`처럼 같은 프로세스에서 호출.
+  busy도 에디터 프로세스가 살아 있는 동안 최대 120s 기다린다(`timings.editorWaitSec`, 재시작 직후 ~27s). `open.ps1`로 열면 이 대기가 open에서 끝난다.
+- 에디터를 코드로 닫기는 `tools/quit.ps1`. Pipeline `quit`은 플레이어용이라 편집 모드에서 실패하고(`DontDestroyOnLoad`),
+  `delayCall`은 포커스 없는 에디터에서 안 돈다 → `harness_quit`이 `EditorApplication.update`(Pipeline 디스패처가 도는 곳이라 백그라운드에서도 돈다)에서
+  응답이 나간 뒤 `Exit(0)`을 부른다.
+- `-logFile` 없이 연 에디터(`unity open`, Hub)는 모두 사용자 전역 `Editor.log`(Windows는 `%LOCALAPPDATA%\Unity\Editor\`) 하나에 쓰고,
+  나중에 뜬 에디터는 파일 처음부터 **덮어쓴다**. 두 에디터가 각자의 위치에 번갈아 써서 로그가 뒤섞이고(O-7, 1.4GB까지 커진 적 있음),
+  한 프로젝트의 로그만 따로 볼 수 없다 → 에디터는 `tools/open.ps1`로 연다(`<프로젝트>/Logs/Editor.log`).
+- PowerShell에서 `uc.ps1`을 `powershell -File`로 부르면 JSON 인자의 따옴표가 벗겨진다 → `& ./tools/uc.ps1 ...`처럼 같은 프로세스에서 호출.
 - PowerShell 5.1: `tools/*.ps1`은 ASCII만 쓴다(BOM 없는 UTF-8 비ASCII는 깨진다). 인자는 `uc.ps1`에 JSON 한 덩어리로.
 - 직전 컴파일이 실패한 상태에서 Pipeline `recompile`은 컴파일 시작 전의 옛 실패를 보고할 수 있다. `Invoke-HarnessRecompile`(loop.ps1)은
   컴파일 세대 번호로 이를 피한다 — 직접 `recompile_status`만 믿지 말 것.
@@ -308,8 +340,9 @@ powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke -
 
 ## 문제 해결
 
-- `stage=editor`: 에디터가 없거나 응답 없음. `unity status`; 열려 있는데 연결이 안 되면 Safe Mode(시작 시 컴파일 에러)일 수 있다 →
-  `unity pipeline list`, `Logs/Editor.log`에서 `error CS` 확인 후 소스 수정 → 에디터 재시작. `editor_status`가 `blocked_by_dialog`면 사람에게 다이얼로그를 닫아 달라고 한다.
+- `stage=editor`: 에디터가 없거나 응답 없음 → `tools/open.ps1`(열려 있으면 준비될 때까지 기다리기만 한다). 열려 있는데 연결이 안 되면
+  Safe Mode(시작 시 컴파일 에러)일 수 있다 → `unity pipeline list`, `Logs/Editor.log`에서 `error CS` 확인 후 소스 수정 → `quit.ps1 -Force` → `open.ps1`.
+  `open.ps1`의 `dialog`나 `editor_status`의 `blocked_by_dialog`는 모달 다이얼로그다 → 사람에게 닫아 달라고 한다.
 - 플레이가 끝나지 않음: 시나리오 타임아웃(duration+70s) 후 자동 종료. 수동: `tools/uc.ps1 editor_stop`.
 - 빌드 fingerprint가 매번 바뀜: 빌더가 비결정적(시드 없는 랜덤, 시간, Dictionary 순회 순서 등)이거나 Code Optimization이 Release다
   (`build.warnings`에 경고). 덤프가 바뀌면 직전 덤프가 `Library/Harness/fingerprint.prev.txt`로 남으니 `fingerprint.txt`와 diff한다.

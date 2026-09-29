@@ -184,15 +184,21 @@ namespace Harness.Editor
                 }
                 return File.Exists(full) ? Sha1(File.ReadAllBytes(full)) + "|" + ImporterSummary(path) : "missing";
             }
-            var sb = new StringBuilder();
+            // One dump per object, sorted: LoadAllAssetsAtPath lists sub-objects in local fileID order, which depends on the
+            // asset's history (a freshly created .mat lists URP's hidden AssetVersion before the Material, an older one after it).
+            var dumps = new List<string>();
             foreach (var o in AssetDatabase.LoadAllAssetsAtPath(path))
             {
                 if (o == null) continue;
+                var sb = new StringBuilder();
                 sb.Append("O ").Append(o.GetType().FullName).Append(':').Append(o.name).Append('\n');
                 Dump(o, sb, referenced);
+                dumps.Add(sb.ToString());
             }
-            s_AssetDump.Append("== ").Append(path).Append('\n').Append(sb);
-            return Sha1(sb.ToString());
+            dumps.Sort(StringComparer.Ordinal);
+            var text = string.Concat(dumps);
+            s_AssetDump.Append("== ").Append(path).Append('\n').Append(text);
+            return Sha1(text);
         }
 
         static string ImporterSummary(string path)

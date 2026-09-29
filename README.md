@@ -66,11 +66,17 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 
 ```powershell
 git clone https://github.com/geuneda/unitree C:\dev\unitree
-unity open C:\dev\unitree\AgentHarness          # 첫 임포트는 몇 분. `unity status`가 ready 가 될 때까지 대기
 cd C:\dev\unitree\AgentHarness
+powershell -ExecutionPolicy Bypass -File tools/open.ps1               # 에디터를 열고 쓸 수 있을 때까지 대기 (첫 임포트 ~1.5분)
 powershell -ExecutionPolicy Bypass -File tools/uc.ps1 harness_setup   # 1회: 사용자별 설정(Debug 코드 최적화 등)
 powershell -ExecutionPolicy Bypass -File tools/loop.ps1               # 씬이 없으면 여기서 코드로 생성된다
+powershell -ExecutionPolicy Bypass -File tools/quit.ps1               # 끝낼 때: 정상 종료
 ```
+
+`open.ps1`은 에디터 로그를 프로젝트의 `Logs/Editor.log`에 따로 쓰게 합니다. `unity open`이나 Hub로 열면 모든 에디터가
+사용자 전역 `Editor.log` 하나를 서로 덮어써서, 에디터를 둘 이상 띄우면 로그가 뒤섞입니다.
+
+위 과정 전체(클론 → 열기 → 설정 → 루프 3회 → 종료 → 삭제)를 `tools/fresh-clone-test.ps1` 하나로 검증할 수 있습니다(이 머신에서 ~110 s).
 
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)
 또는 `unity command harness_capture --preset all --format json`.
@@ -171,6 +177,7 @@ AgentHarness/
   Assets/Harness/Editor/    harness_* 에디터 커맨드, BuildContext / IBuildStep
   Assets/Game/<Module>/     모듈 런타임 코드 (+ Shaders/, UI/), Builders/ 에 씬 빌드 스텝
   tools/                    loop.ps1 · submit.ps1 · land.ps1 · uc.ps1 · compile-check.ps1 · scenarios/*.json
+                            open.ps1 · quit.ps1 (에디터 열기·닫기) · fresh-clone-test.ps1 (새 클론 검증)
 ```
 
 ## 에이전트와 함께 쓰기

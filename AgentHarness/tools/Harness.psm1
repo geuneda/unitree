@@ -105,6 +105,58 @@ function Wait-UnityReachable {
     return $false
 }
 
+# ---- Editor process (tools/open.ps1, tools/quit.ps1, tools/fresh-clone-test.ps1) ---------------------------------
+# The Editor serving this project, from the Pipeline descriptor. $null when none is running or the descriptor is stale
+# (left by a killed Editor: its pid is gone or now belongs to another program, possibly another Editor).
+function Get-HarnessEditorProcess {
+    $ep = Get-HarnessEndpoint
+    if ($null -eq $ep -or $ep.Pid -le 0) { return $null }
+    $p = Get-Process -Id $ep.Pid -ErrorAction SilentlyContinue
+    if (-not $p -or $p.ProcessName -ne 'Unity') { return $null }
+    # The descriptor is written after its Editor started; a process that started later reuses a dead Editor's pid.
+    try { if ($p.StartTime -gt (Get-Item -LiteralPath $script:Descriptor).LastWriteTime) { return $null } } catch { }
+    $p
+}
+
+# True while an Editor has this project open, also before its Pipeline server is up (first import, Safe Mode):
+# the Editor holds Temp/UnityLockfile exclusively.
+function Test-HarnessProjectOpen {
+    $f = Join-Path $script:ProjectRoot 'Temp/UnityLockfile'
+    if (-not (Test-Path -LiteralPath $f)) { return $false }
+    try { $s = [IO.File]::Open($f, 'Open', 'Read', 'None'); $s.Dispose(); return $false } catch { return $true }
+}
+
+function Get-HarnessProjectVersion([string]$Root = $script:ProjectRoot) {
+    $m = [regex]::Match([IO.File]::ReadAllText((Join-Path $Root 'ProjectSettings/ProjectVersion.txt')), 'm_EditorVersion:\s*(\S+)')
+    if ($m.Success) { $m.Groups[1].Value } else { $null }
+}
+
+# Installed Editors ({version, location}) from 'unity editors --installed': Hub installs and registered locations.
+function Get-HarnessInstalledEditors {
+    $r = Invoke-HarnessProcess 'unity' @('editors', '--installed', '--format', 'json', '--no-banner') -TimeoutSec 60
+    if ($r.code -ne 0) { throw "unity editors --installed failed ($($r.code)): $($r.err.Trim())" }
+    @(($r.out | ConvertFrom-Json).data | ForEach-Object { [pscustomobject]@{ version = [string]$_.version; location = [string]$_.location } })
+}
+
+# The Editor executable of an installed version, or $null. On macOS the CLI reports the .app bundle.
+function Find-HarnessEditorExe([string]$Version) {
+    $e = @(Get-HarnessInstalledEditors | Where-Object { $_.version -eq $Version }) | Select-Object -First 1
+    if (-not $e) { return $null }
+    if ($e.location -like '*.app') { return (Join-Path $e.location 'Contents/MacOS/Unity') }
+    $e.location
+}
+
+# Last lines of a log that an Editor may still be writing.
+function Read-HarnessLogTail([string]$Path, [int]$Lines = 40) {
+    if (-not (Test-Path -LiteralPath $Path)) { return @() }
+    $s = New-Object IO.FileStream($Path, 'Open', 'Read', 'ReadWrite, Delete')
+    try {
+        [void]$s.Seek([math]::Max(0, $s.Length - 65536), 'Begin')
+        $text = (New-Object IO.StreamReader($s, [Text.Encoding]::UTF8)).ReadToEnd()
+    } finally { $s.Dispose() }
+    @($text -split "`r?`n" | Where-Object { $_ -ne '' } | Select-Object -Last $Lines)
+}
+
 # ---- Editor lock -------------------------------------------------------------------------------------
 # One Editor, many agents: every Editor-mutating operation (recompile/build/play/capture/submit...) runs under a
 # machine-wide mutex per project, so parallel agents queue instead of interleaving.
@@ -233,19 +285,21 @@ function Restore-HarnessPendingSubmit {
     }
 }
 
-# ---- git (tools/land.ps1, submit ownership) -------------------------------------------------------------------
-# git runs through Process, not the call operator: UTF-8 output (non-ASCII paths), stderr captured without PowerShell
-# 5.1 turning it into errors, exit code returned. Paths come back unquoted (core.quotePath=false).
+# ---- Child processes (git, unity CLI, PowerShell scripts) ------------------------------------------------------
+# Programs run through Process, not the call operator: UTF-8 output (non-ASCII paths), stderr captured without
+# PowerShell 5.1 turning it into errors, exit code returned. -Environment: name -> value ($null removes the variable).
+# -TimeoutSec > 0 kills the program when it runs longer (timedOut = $true).
 function ConvertTo-HarnessArg([string]$a) {
     if ($a -ne '' -and $a -notmatch '[\s"]') { return $a }
     '"' + (($a -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
 }
 
-function Invoke-HarnessGit {
-    param([Parameter(Mandatory, Position = 0)][string]$Dir, [Parameter(Mandatory, Position = 1)][string[]]$Arguments, [switch]$Check)
+function Invoke-HarnessProcess {
+    param([Parameter(Mandatory, Position = 0)][string]$File, [Parameter(Position = 1)][string[]]$Arguments = @(),
+        [hashtable]$Environment = @{}, [int]$TimeoutSec = 0)
     $psi = New-Object Diagnostics.ProcessStartInfo
-    $psi.FileName = 'git'
-    $psi.Arguments = (@('-C', $Dir, '-c', 'core.quotePath=false') + $Arguments | ForEach-Object { ConvertTo-HarnessArg $_ }) -join ' '
+    $psi.FileName = $File
+    $psi.Arguments = (@($Arguments) | ForEach-Object { ConvertTo-HarnessArg $_ }) -join ' '
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardInput = $true
@@ -254,16 +308,37 @@ function Invoke-HarnessGit {
     $utf8 = New-Object Text.UTF8Encoding($false)
     $psi.StandardOutputEncoding = $utf8
     $psi.StandardErrorEncoding = $utf8
-    $psi.EnvironmentVariables['GIT_TERMINAL_PROMPT'] = '0'
-    $psi.EnvironmentVariables['GIT_MERGE_AUTOEDIT'] = 'no'
-    $psi.EnvironmentVariables['LC_ALL'] = 'C'
+    foreach ($k in $Environment.Keys) {
+        if ($null -eq $Environment[$k]) { $psi.EnvironmentVariables.Remove($k) } else { $psi.EnvironmentVariables[$k] = [string]$Environment[$k] }
+    }
+    $sw = [Diagnostics.Stopwatch]::StartNew()
     $p = [Diagnostics.Process]::Start($psi)
     $p.StandardInput.Close()   # nothing to read (.NET may have written the console encoding's BOM to it already)
     $out = $p.StandardOutput.ReadToEndAsync()
     $err = $p.StandardError.ReadToEndAsync()
+    $timedOut = $false
+    if ($TimeoutSec -gt 0 -and -not $p.WaitForExit($TimeoutSec * 1000)) {
+        $timedOut = $true
+        try { $p.Kill() } catch { }
+    }
     $p.WaitForExit()
-    $r = [pscustomobject]@{ code = $p.ExitCode; out = $out.Result; err = $err.Result.Trim() }
+    # A grandchild that inherited the pipes would keep them open: do not wait for it.
+    $stdout = if ($out.Wait(10000)) { $out.Result } else { '' }
+    $stderr = if ($err.Wait(10000)) { $err.Result } else { '' }
+    $r = [pscustomobject]@{ code = $p.ExitCode; out = $stdout; err = $stderr; timedOut = $timedOut; sec = [math]::Round($sw.Elapsed.TotalSeconds, 2) }
     $p.Dispose()
+    $r
+}
+
+# The PowerShell running this script (powershell.exe or pwsh), for running other tools/*.ps1 as child processes.
+function Get-HarnessPowerShell { [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName }
+
+# ---- git (tools/land.ps1, submit ownership) -------------------------------------------------------------------
+# Paths come back unquoted (core.quotePath=false).
+function Invoke-HarnessGit {
+    param([Parameter(Mandatory, Position = 0)][string]$Dir, [Parameter(Mandatory, Position = 1)][string[]]$Arguments, [switch]$Check)
+    $p = Invoke-HarnessProcess 'git' (@('-C', $Dir, '-c', 'core.quotePath=false') + $Arguments) -Environment @{ GIT_TERMINAL_PROMPT = '0'; GIT_MERGE_AUTOEDIT = 'no'; LC_ALL = 'C' }
+    $r = [pscustomobject]@{ code = $p.code; out = $p.out; err = $p.err.Trim() }
     if ($Check -and $r.code -ne 0) { throw "git $($Arguments -join ' ') failed ($($r.code)): $($r.err) $($r.out.Trim())" }
     $r
 }
@@ -614,7 +689,7 @@ function Invoke-HarnessLoop {
     }
     if (-not $ping.success) {
         $report.stage = 'editor'
-        $report['error'] = "Editor not reachable: $($ping.error). Open it with 'unity open $script:ProjectRoot' and wait for 'unity status' = ready. If it is open, it may be in Safe Mode (compile errors at startup): run 'unity pipeline list'."
+        $report['error'] = "Editor not reachable: $($ping.error). Open it with tools/open.ps1 (waits until it answers). If it is open, it may be in Safe Mode (compile errors at startup): run 'unity pipeline list'."
         return $report
     }
     # Keep the Editor ticking while it is not the foreground app (otherwise compile/play stall). Idempotent.
@@ -756,9 +831,11 @@ function Save-HarnessReport {
 }
 
 Export-ModuleMember -Function Get-HarnessProjectRoot, Get-HarnessWorkRoot, Test-HarnessWorktree, Get-HarnessEndpoint, Invoke-UnityCommand,
-    Wait-UnityReachable, Invoke-HarnessRecompile, Get-HarnessCompileState, Wait-HarnessIdle, Enter-HarnessLock, Exit-HarnessLock,
-    Test-HarnessReadOnly, Get-HarnessLastRecovery, Get-HarnessLastLandRecovery, Add-HarnessRecovery, Start-HarnessSubmit,
-    Complete-HarnessSubmit, Undo-HarnessSubmit, Invoke-HarnessLoop, Save-HarnessReport,
-    Invoke-HarnessGit, Split-HarnessZ, Get-HarnessGitStatus, Test-HarnessSamePath, Get-HarnessRepoRoot, Write-HarnessPathspec,
-    Get-HarnessContentIds, Get-HarnessOwners, Save-HarnessOwners, Get-HarnessModuleChanges,
-    Save-HarnessLandJournal, Complete-HarnessLand, Get-HarnessLandStashRef, Find-HarnessLandStash, Undo-HarnessLand
+    Wait-UnityReachable, Get-HarnessEditorProcess, Test-HarnessProjectOpen, Get-HarnessProjectVersion, Get-HarnessInstalledEditors,
+    Find-HarnessEditorExe, Read-HarnessLogTail, Invoke-HarnessProcess, Get-HarnessPowerShell, ConvertTo-HarnessArg,
+    Invoke-HarnessRecompile, Get-HarnessCompileState, Wait-HarnessIdle, Enter-HarnessLock, Exit-HarnessLock, Test-HarnessReadOnly,
+    Get-HarnessLastRecovery, Get-HarnessLastLandRecovery, Add-HarnessRecovery, Start-HarnessSubmit, Complete-HarnessSubmit,
+    Undo-HarnessSubmit, Invoke-HarnessLoop, Save-HarnessReport, Invoke-HarnessGit, Split-HarnessZ, Get-HarnessGitStatus,
+    Test-HarnessSamePath, Get-HarnessRepoRoot, Write-HarnessPathspec, Get-HarnessContentIds, Get-HarnessOwners, Save-HarnessOwners,
+    Get-HarnessModuleChanges, Save-HarnessLandJournal, Complete-HarnessLand, Get-HarnessLandStashRef, Find-HarnessLandStash,
+    Undo-HarnessLand
