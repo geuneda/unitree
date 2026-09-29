@@ -3,6 +3,7 @@
     "rootNamespace": "Harness.Editor",
     "references": [
         "Harness.Runtime",
+        "Unity.Pipeline",
         "Unity.Pipeline.Attributes",
         "Unity.InputSystem",
         "Unity.RenderPipelines.Core.Runtime",

@@ -13,7 +13,7 @@ Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **
 | # | Three.js 환경의 성질 | Unity 기본 상태 | 이 하네스가 복원하는 방법 |
 |---|---|---|---|
 | 1 | 모든 게 텍스트(JS 코드) | 씬/프리팹이 GUID로 얽힌 YAML, GUI 중심 도구 | 씬은 `IBuildStep` 코드가 생성, 렌더 파이프라인 설정은 `ISettingsStep` 코드, HLSL·UXML/USS·코드로 만든 머티리얼/Volume/라이팅 |
-| 2 | 수정→새로고침이 초 단위 | 컴파일 + 도메인 리로드 | Domain Reload 끔, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크 |
+| 2 | 수정→새로고침이 초 단위 | 컴파일 + 도메인 리로드 | Domain Reload 끔, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 본문만 바꾸면 컴파일 없이 적용하는 핫 루프(`loop.ps1 -Hot`) |
 | 3 | 스크린샷·콘솔·FPS를 눈/기계로 확인 | 에이전트가 화면을 못 봄 | `harness_capture/play`가 PNG + 이미지 통계, `harness_console/stats`가 JSON |
 | 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/Texture 베이크), URP Volume을 코드로 |
 | 5 | 레지스트리 구조라 병렬 작업이 쉬움 | 에디터 하나를 공유 | `GameRoot.Register` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 git worktree + `submit.ps1`/`land.ps1` 트랜잭션 |
@@ -22,6 +22,9 @@ Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **
 
 **아직 해결 안 된 격차는 [`docs/ROADMAP.md`](docs/ROADMAP.md)에 성질 1~5와 이식성(Unity 버전·기존 프로젝트·macOS)별로 기록돼 있다.** 하네스를 개선할 때는 거기 "작업 순서"에서 다음 워크플로우(W1…)를 고르고,
 해결하면 체크 + 검증 방법·측정값을 남긴다. 하네스를 고친 뒤에는 ROADMAP의 "검증 매트릭스"를 다시 돌린다(1–8 = `tools/selftest.ps1`, 아래 "하네스 자기 검증").
+**워크플로우마다 빠짐없이 갱신하는 문서**(커밋 전 확인): `docs/ROADMAP.md`(작업 순서 표의 상태, 워크플로우 절, 성질별 항목 → "해결됨"과 측정값, 새로 드러난 항목,
+검증 매트릭스, 기준선 표가 있으면 그 값), 저장소 루트 `README.md`(소개·표·측정값·요구 사항·구조 중 바뀐 것), 이 문서, 기존 프로젝트용 안내서
+`Tools~/templates/AgentHarness.md`(에이전트가 쓰는 기능이 바뀌었으면).
 
 ## 빠른 시작 (새로고침 + 스크린샷 + 콘솔 = 한 방)
 
@@ -41,6 +44,8 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 
 `tools/loop.ps1` = recompile → (C# 컴파일 에러면 즉시 중단) → lint → `harness_build` → `harness_shaders` → `harness_play`(기본 3컷)
 → `harness_console` + `harness_stats` → `HarnessOut/latest/report.json` (stdout에도 같은 JSON). 종료코드 0 = 전부 녹색.
+**모듈의 `[CodeReload] Tick` 본문만 고쳤으면 `tools/loop.ps1 -Hot`**: 컴파일·도메인 리로드·빌드 없이 그 본문을 바꿔 넣고 같은 시나리오를 돈다
+(~3.1 s, 전체 루프 ~9 s). 그 밖의 변경이면 알아서 전체 루프를 돌고 이유를 `hot.fallback`에 남긴다(아래 "핫 루프").
 
 **매 루프 후 반드시**: `report.json`의 `ok/stage`를 보고, `shots`의 PNG를 **Read 툴로 직접 열어** 눈으로 확인한다. `build.warnings`(머티리얼 설정 실수 등)도 읽는다.
 `shotStats[].blank=true`(평평/검은 화면)면 렌더가 깨진 것이다. `dark=true`(픽셀 98% 이상이 거의 검정)는 실패로 치지 않지만
@@ -50,7 +55,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 들어 있다(`shotStats[].ui`, 아래 "시나리오"). **`golden.changed` > 0이면** 기준 이미지와 달라진 샷이다(실패 아님): 의도한 변경이 아니면
 `shotStats[].golden.diff` PNG(바뀐 픽셀 빨강, 바뀐 곳 노란 테두리)를 연다. 의도한 변경이고 샷이 맞으면 `-UpdateGolden`으로 갱신해 함께 커밋한다(아래 "기준 이미지").
 
-옵션: `-Scenario tools/scenarios/x.json`, `-Out HarnessOut/x`, `-NoPlay`(편집 모드 캡처만), `-NoCompile`,
+옵션: `-Scenario tools/scenarios/x.json`, `-Out HarnessOut/x`, `-NoPlay`(편집 모드 캡처만), `-NoCompile`, `-Hot`(핫 루프),
 `-UpdateGolden`(녹색이면 이번 샷을 기준 이미지로), `-Golden <폴더>`(기준 이미지 루트, 기본 설정 `goldenRoot` = `golden`).
 **여러 에이전트가 동시에 작업하면** 이 폴더를 직접 고치지 말고 각자 worktree에서 `tools/submit.ps1`을 쓰고, 끝나면 커밋해서
 `tools/land.ps1`로 병합한다(아래 "병렬 에이전트").
@@ -68,9 +73,14 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
   "fps": {"avg","min","p95ms","p99ms","hitches","cpuMainAvgMs","samples","editorFocused"},
   "shots": ["C:/.../HarnessOut/latest/shot0_closeup.png", ...],
   "durationSec": 3.5, "unityVersion": "6000.3.11f1",   // 루프를 돌린 에디터 버전
-  "timings": {"lockWaitSec","editorWaitSec","compileSec","buildSec","reloadSec","playSec","collectSec","goldenSec"},   // editorWaitSec: 시작 시 리로드·busy 대기, reloadSec: 파이프라인 전환 뒤 리로드(있을 때만)
+  "timings": {"lockWaitSec","editorWaitSec","hotSec","compileSec","snapshotSec","buildSec","reloadSec","playSec","hotPlaySec","collectSec","goldenSec"},
+      // editorWaitSec: 시작 시 리로드·busy 대기, reloadSec: 파이프라인 전환 뒤 리로드(있을 때만), hotSec: 핫 판정·적용(-Hot),
+      // snapshotSec: 핫 루프의 기준이 될 소스 스냅샷(compileSec에 포함), hotPlaySec: 핫 본문이 예외를 던져 전체 루프로 다시 돌기 전의 플레이
+  "hot": {"applied","reloaded":[{"file","methods","ms"}],"overridesCleared","fallback","changes":[{"file","kind","line","methods"}]},   // -Hot만
   "build": {"fingerprint","steps":[{"type","module","ms","error","file","line"}], "warnings":[],   // warnings: 머티리얼 설정 실수 등(실패 아님, 읽을 것)
+            "phases": {"check","settings","steps","cleanup","save","lighting","fingerprint"},   // 빌드 시간이 든 곳(ms)
             "settings": {"assets","written","assigned","pipeline","switched","reloadRequested"}, ...},   // ISettingsStep이 만든 RP 에셋·이번에 다시 쓴 것·활성 파이프라인·전환
+            // 핫 루프는 빌드하지 않는다: {"ok":true,"skipped":true,"note"}
   "play": {"success","probeReady","frames","gameSec","modules","failedModules","inputEventsApplied",
            "events":[{"name":"SpinnerLap","count":2}],     // EventBus 발행 횟수 → 게임플레이를 기계적으로 검증
            "inputBackends":["inputSystem"|"hook"], "inputHooks":["HarnessInput.OnScenarioInput"],   // 입력이 들어간 곳
@@ -98,8 +108,9 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 }
 ```
 
-측정된 한 바퀴 시간(이 머신): 코드 변경 없음 **~3.5s**, 셰이더만 수정 **~4s**(도메인 리로드 없음), 모듈 C# 1줄 수정 **~9s**
-(컴파일+도메인 리로드 ~4s, 빌드 ~2s(리로드 직후 JIT), 플레이 ~2.8s), 컴파일 에러 보고 **~1s**.
+측정된 한 바퀴 시간(이 머신, W5): 코드 변경 없음 **~3.4s**, 셰이더만 수정 **~3.8s**(도메인 리로드 없음), 모듈 C# 1줄 수정 **~9.2s**
+(컴파일 ~0.4s + 도메인 리로드 ~2.5s + 리로드 뒤 에디터 자체 작업 ~0.9s + 리로드 직후 빌드 ~0.9s + 플레이 ~2.4s), **`-Hot`(본문만) ~3.1s**
+(첫 캡처까지 ~1.3s; 도메인 리로드 뒤 첫 핫 루프는 +0.8s), 컴파일 에러 보고 **~1.1s**. 도메인 리로드는 에디터를 오래 띄워 둘수록 늘었다(2.5 → 3.5s, 아래 "함정").
 
 ## 규칙 (반드시 지킬 것)
 
@@ -132,7 +143,7 @@ Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json:
                                CaptureUi: 스크린 공간 UI 합성, ContactSheet: 연속 캡처 시트)
                                (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
   Runtime/Procedural/          MeshBuilder, Noise(Perlin/fBm/Ridged/Worley/Rng), TextureBaker, PMath, AmbientProbe(큐브맵 → 앰비언트 SH)
-  Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교) 와 BuildContext(+.Materials: LitMaterial)/IBuildStep,
+  Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교, HarnessHot: 핫 루프) 와 BuildContext(+.Materials: LitMaterial)/IBuildStep,
                                SettingsContext/ISettingsStep(렌더 설정), HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
   UI/                          DefaultRuntimeTheme.tss (UI Toolkit 기본 테마, 텍스트)
   Tools~/                      도구 본체(.ps1, Harness.psm1) + templates/ (진입점, 기본 시나리오, 기존 프로젝트용 안내서, HarnessInput.cs)
@@ -162,8 +173,9 @@ AgentScripts/                  eval_file / run_script 용 임시 C# (gitignore)
 `Game.<Name>.asmdef`:
 ```json
 { "name": "Game.<Name>", "rootNamespace": "Game.<Name>",
-  "references": ["Harness.Runtime", "Game.Contracts", "Unity.InputSystem"], "autoReferenced": false }
+  "references": ["Harness.Runtime", "Game.Contracts", "Unity.InputSystem", "Unity.Pipeline", "Unity.Pipeline.Attributes"], "autoReferenced": false }
 ```
+(`Unity.Pipeline*`은 `[CodeReload]`(핫 루프)용. 출시 빌드에서는 `Unity.Pipeline`이 define 제약으로 빠지고 표식은 아무것도 하지 않는다.)
 `Builders/Game.<Name>.Builders.asmdef`:
 ```json
 { "name": "Game.<Name>.Builders", "references": ["Harness.Runtime", "Harness.Editor",
@@ -184,6 +196,7 @@ public sealed class FooModule : IGameModule
     public void Init(GameContext ctx) {   // 씬 로드 후. ctx.Find("Foo", "Child/Path")
         m_Sub = EventBus.Subscribe<SpinnerLap>(e => { /* ... */ });
     }
+    [CodeReload]                          // using Unity.Pipeline.CodeReload; 본문만 고치면 loop.ps1 -Hot으로 컴파일 없이 반영
     public void Tick(float dt) { }        // 매 프레임 (예외는 GameRoot가 잡아 로그 → report.runtimeErrors)
     public void Dispose() { m_Sub?.Dispose(); }
 }
@@ -275,6 +288,7 @@ public sealed class FooRenderSettings : ISettingsStep     // Builders/ 폴더, �
 | `harness_ping` | domainReloads, isCompiling, isPlaying, compileFailed, mark, unityVersion |
 | `harness_setup` | `setup: harness`면 프로젝트 설정 멱등 적용(Domain Reload off, runInBackground, 동기 셰이더 컴파일(`syncShaders`), 템플릿 샘플 삭제, ISettingsStep 실행 → `settings`). `attach`면 아무것도 안 바꾸고 `recommendations`만(`{"apply":"domainReload,syncShaders"}`로 명시 적용). Debug 코드 최적화(세션 한정)는 둘 다 |
 | `harness_sync_csproj` | .sln/.csproj 생성(사용자 외부 에디터 설정은 복원) — compile-check msbuild 백엔드용 |
+| `harness_hot` | `{"mode":"apply"\|"check"\|"prepare"\|"commit"}` 핫 루프(위 "핫 루프"). apply: 마지막 컴파일 스냅샷과 비교해 `[CodeReload]` 본문만 바뀌었으면 앞선 교체를 지우고 인터프리터로 다시 넣음 → `{hot, applied, changes}`, 아니면 `{hot:false, reason, changes}`. check: 판정만. prepare/commit: 전체 루프가 컴파일 전후에 부른다 |
 | `harness_quit` | 응답 ~0.3s 뒤 `EditorApplication.Exit(0)`(저장 확인 없음). 직접 부르지 말고 `tools/quit.ps1`(락 + 종료 대기) |
 
 Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_status`, `eval_file {"file":"AgentScripts/x.cs"}`(C# 본문, using 불가 → 정규화된 이름 사용),
@@ -362,6 +376,32 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1                 # 이후
 - 매번 다른 글자(시계·네트워크 값)가 있는 샷: 캡처에 `"ignore": [{"x": 0.8, "y": 0, "w": 0.2, "h": 0.1}]`(이미지 비율, 왼쪽 위 기준)로 그 영역을 빼거나
   `"golden": false`, 또는 `"ui": false` 샷을 따로 둔다. `"screen"` 샷(Game 뷰 크기)은 비교하지 않는다. 연속 캡처는 시트 이미지를 비교한다.
 - 비용: 샷 3장 비교 ~0.2 s(`timings.goldenSec`). 샷 PNG 한 장 ~1 MB라 기준 이미지를 자주 갈면 저장소가 커진다 — 의도한 화면 변경일 때만 갱신한다.
+
+## 핫 루프 (loop.ps1 -Hot, G2-1)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -Hot           # 본문만 고쳤으면 ~3.1s, 아니면 알아서 전체 루프
+powershell -ExecutionPolicy Bypass -File tools/uc.ps1 harness_hot '{"mode":"check"}'   # 무엇이 바뀌었고 핫으로 되는지만
+```
+- **핫으로 되는 것**: 마지막 전체 루프가 컴파일한 뒤 바뀐 것이 `[CodeReload]` 메서드의 **본문뿐**일 때. 그 파일들을 Pipeline의 인터프리터 백엔드
+  (`reload_file_editor_interpreter`)로 다시 넣고(컴파일·도메인 리로드 없음), lint·빌드·셰이더 검사를 건너뛰고(`build.skipped`), 같은 시나리오를
+  처음부터 돈다 → `play.events`·기준 이미지 비교가 전체 루프와 그대로 비교된다(같은 코드면 픽셀까지 같음을 확인). `report.hot.reloaded`에 파일과 메서드.
+- **전체 루프로 돌아가는 것**(`hot.applied=false`, `hot.fallback`에 이유, `hot.changes`에 파일별 `kind`): 필드·시그니처·using·다른(표식 없는) 메서드·
+  속성 표식 추가(`context`, 첫 차이의 `line`), 새·지운 파일(`added`/`deleted`), `[CodeReload]`가 없던 .cs나 셰이더·UXML·에셋·설정(`changed`),
+  문법 오류, 인터프리터가 못 돌리는 본문(`try/catch`, `lock`, 제네릭 메서드 선언, `T?` 값 타입 nullable 등 — Pipeline 문서 "Interpreter constraints"),
+  Domain Reload가 켜진 프로젝트, 에디터를 다시 열었거나 루프 밖에서 컴파일된 뒤(스냅샷이 오래됨).
+- **바꾼 본문이 플레이 중 예외를 던지면** 전체 루프를 다시 돈다(`hot.fallback`: "a reloaded method failed ..."): Pipeline은 인터프리터의 예외를 줄 없이
+  로그하고(메서드 선언 줄로 보고됨) 원래 본문을 한 번 더 돌린다(이벤트가 두 번 나감). 컴파일된 전체 루프가 정확한 줄로 보고한다.
+- 기준: 전체 루프마다 컴파일 직전에 `Assets/`(생성물·빌드 씬 제외)·`ProjectSettings/`·`Packages/`의 크기·시각과 `CodeReload`가 든 .cs의 텍스트를
+  찍고(`harness_hot` prepare, 이때 이전 핫 루프의 교체도 지운다), 컴파일이 성공하면 확정한다(commit) → `Library/Harness/hot/compiled.json`.
+  비교는 Roslyn 토큰 단위(공백·주석·비활성 `#if` 무시)라 서식만 바꾼 파일은 바뀐 게 아니다. `timings.snapshotSec` ~0.01s(샘플 170개 파일).
+- 핫 루프마다 앞선 교체를 모두 지우고 지금 바뀐 파일만 다시 넣는다 → 컴파일된 텍스트로 되돌린 메서드는 다시 컴파일된 코드로 돈다(`hot.overridesCleared`).
+- 속도: 판정 ~10 ms + 교체 ~0.1 s(도메인 리로드 뒤 첫 번째는 Roslyn 적재로 ~0.9 s — `[CodeReload]`가 있는 프로젝트는 리로드 직후 워커 스레드에서
+  Roslyn을 한 번 돌려 1.5 s에서 줄였다). 인터프리터로 도는 메서드는 컴파일된 것보다 느리다 — 무거운 Tick이면 `fps`를 보고 전체 루프와 비교한다.
+- 조건: Domain Reload 끔(하네스 프로젝트 기본), 메서드가 public이고 void·`IEnumerator`, 어셈블리가 `Unity.Pipeline`·`Unity.Pipeline.Attributes` 참조
+  (위 모듈 템플릿; `Assembly-CSharp`는 자동). 샘플의 `SmokeModule.Tick`·`StageModule.Tick`이 표식돼 있다.
+- `reload_file`(Assembly.Load 백엔드)은 쓰지 않는다: 교체한 본문이 public 멤버만 쓸 수 있는데 모듈은 상태를 private 필드에 둔다.
+- submit/land는 항상 전체 루프다(핫 교체는 에디터 트리의 메모리에만 있어 트랜잭션으로 되돌릴 수 없다).
 
 ## 병렬 에이전트: worktree + submit + land (남의 컴파일 에러에 막히지 않기)
 
@@ -466,8 +506,8 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
 ## 하네스 자기 검증 (tools/selftest.ps1)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~4분
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 4dc9c80b
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~5분
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 78354e2e
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
 - 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark/magenta 없음, 모든 샷 1280x720에 HUD 합성, 기준 이미지: 루프 1이 `HarnessOut/selftest/golden`에
@@ -479,14 +519,17 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   에디터에 포커스가 없던 시도는 3번까지 다시 — 백그라운드에선 Input System이 장치를 먼저 꺼서 격리가 돌 일이 없다, ROADMAP G3-9) +
   렌더 설정(W4: RP 에셋이 생성물이고 루프 2·3은 다시 쓰지 않음, 지우면 루프 한 번으로 다시 생기고 fingerprint·픽셀·`git status` 같음; 반사 큐브맵에 잘못된 텍셀이
   없고 가장 밝은 텍셀이 태양 방향(2° 안); 앰비언트 = 라이팅 데이터의 큐브맵 SH; `AmbientProbe` 균일 환경 → Flat과 같음·쓰레기 텍셀 거부; 머티리얼 경고 3종과
-  `LitMaterial`의 이미션·알파 클립) + `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 ·
+  `LitMaterial`의 이미션·알파 클립) + `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 + 핫 루프(G2-1: `[CodeReload] Tick` 본문 수정 →
+  `-Hot`이 컴파일·빌드·도메인 리로드 없이 반영, events 같음, golden `changed` → 되돌리면 교체 해제·`same` → 필드 추가는 전체 루프(사유에 그 줄) →
+  핫 본문의 예외는 전체 루프가 주입한 줄로 보고) ·
   4 HLSL 에러(재임포트 없는 다음 루프에서도) + 되돌린 상태를 기준 이미지로 → 셰이더 한 줄(스펙큘러 절반) → golden `changed`(rect·diff PNG), 루프는 녹색 +
   파이프라인이 못 그리는 머티리얼(받침대를 `Standard`로 → 샷 `magenta`, `hint`에 `Smoke/Pedestal`, golden `changed`, 루프는 녹색 → 되돌리면 `same`) · 5 리셋 없는 static(lint) · 6 루프 2개 동시 · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
   다른 worktree의 새 모듈·계약은 락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부) ·
   8 land(fast-forward + 그 사이 submit 락 대기, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
   병합 직후 kill → `recoveredLand`). 에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
-- 주입 위치는 샘플 모듈의 표식 줄: `SmokeModule.cs`의 `m_Time += dt;`(컴파일, 61행)·`EventBus.Publish(new SpinnerLap(laps));`(런타임, 68행),
-  `SmokeIridescent.shader`의 `Frag` 첫 줄(87행). 이 줄들을 바꾸면 `selftest.ps1`의 표식도 바꾼다.
+- 주입 위치는 샘플 모듈의 표식 줄: `SmokeModule.cs`의 `m_Time += dt;`(컴파일, 63행)·`EventBus.Publish(new SpinnerLap(laps));`(런타임, 70행),
+  `SmokeIridescent.shader`의 `Frag` 첫 줄(87행). 핫 루프는 `Tick`의 `Mathf.Sin(m_Time * 1.6f) * 0.3f`(흔들림 폭)와 `float m_Time;`(필드 추가).
+  이 줄들을 바꾸면 `selftest.ps1`의 표식도 바꾼다.
 - 7–8은 커밋된 `tools/`·하네스 패키지·`Assets/Game/`·설정 파일을 쓰는 worktree 두 개를 저장소 옆(`<저장소>-st-a/-b`)에 만들고, `selftest/*` 브랜치·
   테스트 커밋(land의 병합 포함)을 만든 뒤 에디터 트리 브랜치를 시작 커밋으로 되돌린다(detached HEAD면 임시 브랜치를 썼다가 되돌린다).
   → 하네스를 고친 중이면 **임시 커밋 후** 돌린다. 도중에 에디터 트리 파일을 고치지 말 것(`git status`를 비교한다).
@@ -499,13 +542,13 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-09-30 W4, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`):
+- 검증한 버전(2026-09-30 W5, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W5에서 메시 해시 방식이 바뀌어 새 값):
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
-  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `088e7345…` | 61 / 68 / 87 | 1–9 녹색, 샷 60.3/55.6/45.7(6.3과 같음) |
-  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `4dc9c80b…` | 61 / 68 / 87 | 1–9 녹색, 커밋된 기준 이미지와 같음 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `d6ca82e3…` | 61 / 68 / 87 | 1–9 녹색, 샷 60.4/55.7/45.7(W4 전에는 첫 플레이 뒤 검었다 — ROADMAP P-4) |
+  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `d6e6d71b…` | 63 / 70 / 87 | 1–9 녹색(핫 루프 포함), 샷 60.3/55.6/45.7(6.3과 같음, W4) |
+  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `78354e2e…` | 63 / 70 / 87 | 1–9 녹색(핫 루프 포함), 커밋된 기준 이미지와 같음 |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `df34f931…` | 63 / 70 / 87 | 1–9 녹색(핫 루프 포함), 샷 60.4/55.7/45.7(W4 전에는 첫 플레이 뒤 검었다 — ROADMAP P-4) |
 
   fingerprint는 버전마다 다르다(URP가 만드는 머티리얼·에셋 직렬화가 다르다). 같은 버전 안에서만 매번 같아야 한다.
 - 다른 버전으로 열면 Unity가 다시 쓰는 파일(커밋하지 않는다): `Packages/packages-lock.json`, `Assets/Settings/UniversalRenderPipelineGlobalSettings.asset`,
@@ -658,6 +701,20 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - 프로젝트에 이미 `Tools/`가 있으면(Windows는 대소문자 무시) 진입점이 그 폴더에 들어간다. 이름이 겹치는 기존 파일이 없으면 문제없고 uninstall은 자기 파일만 지운다.
 - 에이전트의 Bash 도구(Git Bash)로 넘긴 명령은 작은따옴표·`<<'EOF'` 안에서도 `\\`가 `\`로 줄어든다(확인: `r"a\\b"`가 3글자).
   heredoc Python으로 `.ps1`을 고치다 정규식·경로가 조용히 깨진 적 있다 → 백슬래시가 든 편집은 Edit 도구로 한다.
+- **Pipeline 코드 리로드(`[CodeReload]`)의 두 백엔드**: `reload_file`(Assembly.Load)은 교체한 본문이 public 멤버만 쓸 수 있어 private 필드를 쓰는 모듈 Tick을
+  거부한다(`accessibility violation`). `reload_file_editor_interpreter`는 private도 되지만 C# 부분집합이다(`try/catch`면 "No Methods Applied"). 인터프리터 본문이
+  던진 예외는 Pipeline이 `CodeReload: Error invoking override ...`로 **줄 없이** 로그하고(보고 위치 = 메서드 선언 줄) **원래 본문을 이어서 돌린다** —
+  예외 전까지 한 일이 두 번 된다(`SpinDirectionChanged` 1 → 2). 편집 모드에서 적용한 교체는 Domain Reload가 꺼져 있으면 플레이 모드까지 유지된다.
+- **도메인 리로드 직후 에디터는 첫 두 update 틱 사이에 ~0.9 s를 네이티브 작업에 쓴다**(창 다시 그리기로 보인다; `update`·`delayCall` 콜백 중 20 ms 넘는 것은
+  없었다). 그 사이 온 메인 스레드 명령은 모두 기다린다 → 리로드 뒤 첫 명령이 ~0.9 s(W5 전에는 빌드가 "JIT 워밍업"으로 ~2 s였던 것의 절반). 2 s 쉬었다 보내면 즉시.
+- **도메인 리로드는 에디터를 오래 띄워 둘수록 느려졌다**(같은 코드로 새로 연 에디터 2.5 s → 루프·실험 ~1시간 뒤 3.5 s, `FinalizeReload` 쪽). 시간을 잴 때는 새로 연다.
+- Mono의 `RuntimeHelpers.PrepareMethod`는 아무것도 컴파일하지 않는다(612개 메서드 5 ms). `RuntimeMethodHandle.GetFunctionPointer()`는 JIT한다(55 ms).
+  하지만 JIT가 `beforefieldinit` 타입의 static 초기화를 그 스레드에서 돌릴 수 있어 Unity API를 부르는 초기화가 백그라운드에서 실패하면 그 타입이 도메인 끝까지
+  망가진다 → 하네스 코드를 백그라운드에서 미리 JIT하지 않는다(얻는 것 ~75 ms). Roslyn처럼 Unity API가 없는 코드만 데운다.
+- `CompilationPipeline.GetAssemblies`는 호출마다 ~60 ms(어셈블리 67개, 소스 4,400개)다. 빌드가 두 번, lint가 한 번 불렀다 → 다음 컴파일까지 캐시(`HarnessPaths.Assemblies`).
+- compile-check는 에디터가 마지막으로 쓴 응답 파일(`.rsp`)의 참조를 쓴다 → asmdef에 **참조를 새로 더하면** 에디터가 한 번 컴파일할 때까지 그 참조의 타입이
+  CS0103으로 나온다(루프로 컴파일하면 사라짐). msbuild 백엔드는 Unity가 만든 `.csproj`를 쓰므로 그 뒤에도 `tools/uc.ps1 harness_sync_csproj`로 다시 만들어야 한다
+  (안 하면 CS0234).
 
 - `Mathf.SmoothStep(from, to, t)`는 GLSL `smoothstep`이 **아니다**(값 보간). `PMath.Smoothstep(e0, e1, x)`를 써라. 지형이 전부 눈으로 나온 원인.
 - `UnityEngine.Object`에 `?.` 금지(에디터의 fake null). `TryGetComponent`를 쓴다.
@@ -674,7 +731,7 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - 캡처 카메라는 메인 카메라 설정(후처리 포함)을 복사해 오프스크린 렌더한다. 메인 카메라가 없으면 캡처 실패.
 - 에디터 플레이 모드 FPS는 에디터 오버헤드·autotick 영향을 받는다. 절대값이 아니라 **변경 전후 비교**용이다(`editorFocused` 확인).
 - Code Optimization은 Debug(정확한 예외 줄 번호). Release면 throw 위치가 메서드 끝 줄로 보고되고, **절차적 메시·텍스처의 float 결과가 달라져
-  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `4dc9c80b…`).
+  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `78354e2e…`).
   `CompilationPipeline.codeOptimization`은 에디터 세션 동안만 유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다
   → `HarnessCodeOptimization`([InitializeOnLoad])이 도메인이 로드될 때마다 이 프로젝트만 Debug로 되돌린다(재컴파일 1회; 그래서 이 프로젝트에선
   Release가 유지되지 않는다). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다.

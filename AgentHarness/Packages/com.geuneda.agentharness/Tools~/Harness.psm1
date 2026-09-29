@@ -805,7 +805,8 @@ function Invoke-HarnessLoop {
         [int]$TimeoutSec = 180,
         [System.Collections.IDictionary]$Timings = [ordered]@{},
         [string]$GoldenRoot,        # golden images (G3-4); default: goldenRoot of the config, under the work root
-        [switch]$UpdateGolden       # write this loop's shots as the golden images (a green loop only)
+        [switch]$UpdateGolden,      # write this loop's shots as the golden images (a green loop only)
+        [switch]$Hot                # G2-1: when only [CodeReload] method bodies changed, reload them and skip compile + build
     )
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Off   # reads optional fields of Editor replies (error, file, ...) that may be absent
@@ -849,11 +850,37 @@ function Invoke-HarnessLoop {
     $mark = [int]$ping.result.mark
     if ($ping.result.unityVersion) { $report['unityVersion'] = $ping.result.unityVersion }
 
-    # ---- 1. Recompile (stop immediately on errors) ----------------------------------------------------
-    if (-not $NoCompile) {
+    # ---- 1a. Hot (G2-1): only [CodeReload] method bodies changed since the last compile -> reload them in place ----------
+    # (the Pipeline interpreter; no compile, no domain reload) and play the same scenario. Anything else runs the full loop.
+    $hotApplied = $false
+    if ($Hot) {
         $sw = [Diagnostics.Stopwatch]::StartNew()
+        $h = Invoke-UnityCommand -Name 'harness_hot' -Params @{ mode = 'apply' } -TimeoutSec 120
+        $Timings['hotSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+        if ($h.success -and $h.result.ok -and $h.result.hot) {
+            $hotApplied = $true
+            $report['hot'] = [ordered]@{ applied = $true; reloaded = @($h.result.applied | ForEach-Object { [ordered]@{ file = $_.file; methods = @($_.methods); ms = $_.reloadMs } }) }
+            if ([int]$h.result.overridesCleared -gt 0) { $report.hot['overridesCleared'] = [int]$h.result.overridesCleared }
+        } else {
+            $why = if (-not $h.success) { "harness_hot failed: $($h.error)" } elseif (-not $h.result.ok) { $h.result.error } else { $h.result.reason }
+            $report['hot'] = [ordered]@{ applied = $false; fallback = $why }
+            if ($h.success -and @($h.result.changes).Count) { $report.hot['changes'] = @($h.result.changes) }
+        }
+    }
+
+    # ---- 1. Recompile (stop immediately on errors) ----------------------------------------------------
+    if (-not $NoCompile -and -not $hotApplied) {
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        # What is about to be compiled: the baseline of a later hot loop (kept only when the compile succeeds). Also clears
+        # the overrides of earlier hot loops, so this loop runs the compiled code. Not with Domain Reload on entering play
+        # mode (no hot loop there: the reload would drop reloaded methods).
+        $snapshot = -not $ping.result.domainReloadOnPlay
+        $prep = if ($snapshot) { Invoke-UnityCommand -Name 'harness_hot' -Params @{ mode = 'prepare' } -TimeoutSec 60 }
         $rc = Invoke-HarnessRecompile -TimeoutSec $TimeoutSec
+        $commit = if ($snapshot -and $rc.ok) { Invoke-UnityCommand -Name 'harness_hot' -Params @{ mode = 'commit' } -TimeoutSec 60 }
         $Timings['compileSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+        # The snapshot's own time (the Editor's; the commit call also waits out the Editor's work after a domain reload).
+        if ($prep -and $prep.success -and $prep.result.ok) { $Timings['snapshotSec'] = [math]::Round(([double]$prep.result.ms + $(if ($commit -and $commit.success -and $commit.result.ok) { [double]$commit.result.ms } else { 0 })) / 1000, 3) }
         if (-not $rc.ok) {
             $report.stage = 'compile'
             $con = Invoke-UnityCommand -Name 'harness_console' -Params @{ since = $mark } -TimeoutSec 10
@@ -872,44 +899,53 @@ function Invoke-HarnessLoop {
     }
 
     # ---- 2. Lint (reported, fails the loop at the end) + build -------------------------------------------
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    $lint = Invoke-UnityCommand -Name 'harness_lint' -TimeoutSec 30
-    $lintIssues = @("harness_lint failed: $($lint.error)")
-    if ($lint.success) { $lintIssues = @($lint.result.issues | ForEach-Object { [ordered]@{ rule = $_.rule; module = $_.module; file = $_.file; message = $_.message } }) }
-    $build = Invoke-UnityCommand -Name 'harness_build' -TimeoutSec $TimeoutSec
-    # Shader compile errors are state (a broken .shader stays broken without logging again): query them every loop.
-    $shaders = Invoke-UnityCommand -Name 'harness_shaders' -TimeoutSec 30
+    # A hot loop skips them: its only changes are method bodies, which no builder, shader or lint rule reads.
+    $lintIssues = @()
     $shaderErrors = @()
-    if ($shaders.success) { $shaderErrors = @($shaders.result.errors | ForEach-Object { [ordered]@{ file = $_.file; line = $_.line; msg = "shader '$($_.shader)': $($_.msg)"; module = $_.module; kind = 'shader' } }) }
-    $report.compileErrors = $shaderErrors
-    $Timings['buildSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
-    $report['build'] = if ($build.success) {
-        $b = [ordered]@{ ok = $build.result.ok; fingerprint = $build.result.fingerprint; gameObjects = $build.result.gameObjects; durationMs = $build.result.durationMs; steps = @($build.result.steps | ForEach-Object { [ordered]@{ type = $_.type; module = $_.module; ms = $_.ms; error = $_.error; file = $_.file; line = $_.line } }); warnings = @($build.result.warnings) }
-        # Render settings from code (ISettingsStep): their assets, what this build rewrote, the active pipeline.
-        if ($build.result.settings) { $b['settings'] = $build.result.settings }
-        # No build steps (an attached project): nothing was built; the fingerprint is the play scene's.
-        if ($build.result.skipped) { $b['skipped'] = $true; $b['scene'] = $build.result.scene; $b['fingerprintOf'] = $build.result.fingerprintOf }
-        $b
-    } else { [ordered]@{ ok = $false; error = $build.error } }
-    $report['lint'] = $lintIssues
-    if (-not $build.success -or -not $build.result.ok) {
-        $report.stage = 'build'
-        $report['error'] = if ($build.success) { $build.result.error } else { $build.error }
-        $con = Invoke-UnityCommand -Name 'harness_console' -Params @{ since = $mark } -TimeoutSec 10
-        if ($con.success) { $report.runtimeErrors = @($con.result.runtimeErrors | ForEach-Object { [ordered]@{ type = $_.type; msg = $_.message; file = $_.file; line = $_.line; module = $_.module; count = $_.count } }) }
-        return $report
-    }
-
-    # A settings step switched the render pipeline (e.g. its assets were deleted): the build asked for a domain reload,
-    # which must be over before the play (see SettingsContext.Run).
-    if ($build.result.settings -and $build.result.settings.reloadRequested) {
+    if ($hotApplied) {
+        $report['build'] = [ordered]@{ ok = $true; skipped = $true; note = 'hot loop: the scene of the last full loop (builders unchanged since)' }
+        $report['lint'] = $lintIssues
+    } else {
         $sw = [Diagnostics.Stopwatch]::StartNew()
-        $reloaded = Wait-HarnessReload $build.result
-        $Timings['reloadSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
-        if (-not $reloaded) {
-            $report.stage = 'editor'
-            $report['error'] = "the domain reload requested after the render pipeline switch ($($build.result.settings.switched)) did not finish"
+        $lint = Invoke-UnityCommand -Name 'harness_lint' -TimeoutSec 30
+        $lintIssues = @("harness_lint failed: $($lint.error)")
+        if ($lint.success) { $lintIssues = @($lint.result.issues | ForEach-Object { [ordered]@{ rule = $_.rule; module = $_.module; file = $_.file; message = $_.message } }) }
+        $build = Invoke-UnityCommand -Name 'harness_build' -TimeoutSec $TimeoutSec
+        # Shader compile errors are state (a broken .shader stays broken without logging again): query them every loop.
+        $shaders = Invoke-UnityCommand -Name 'harness_shaders' -TimeoutSec 30
+        $shaderErrors = @()
+        if ($shaders.success) { $shaderErrors = @($shaders.result.errors | ForEach-Object { [ordered]@{ file = $_.file; line = $_.line; msg = "shader '$($_.shader)': $($_.msg)"; module = $_.module; kind = 'shader' } }) }
+        $report.compileErrors = $shaderErrors
+        $Timings['buildSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+        $report['build'] = if ($build.success) {
+            $b = [ordered]@{ ok = $build.result.ok; fingerprint = $build.result.fingerprint; gameObjects = $build.result.gameObjects; durationMs = $build.result.durationMs; steps = @($build.result.steps | ForEach-Object { [ordered]@{ type = $_.type; module = $_.module; ms = $_.ms; error = $_.error; file = $_.file; line = $_.line } }); warnings = @($build.result.warnings) }
+            # Render settings from code (ISettingsStep): their assets, what this build rewrote, the active pipeline.
+            if ($build.result.settings) { $b['settings'] = $build.result.settings }
+            if ($build.result.phases) { $b['phases'] = $build.result.phases }   # where the build's time went (ms)
+            # No build steps (an attached project): nothing was built; the fingerprint is the play scene's.
+            if ($build.result.skipped) { $b['skipped'] = $true; $b['scene'] = $build.result.scene; $b['fingerprintOf'] = $build.result.fingerprintOf }
+            $b
+        } else { [ordered]@{ ok = $false; error = $build.error } }
+        $report['lint'] = $lintIssues
+        if (-not $build.success -or -not $build.result.ok) {
+            $report.stage = 'build'
+            $report['error'] = if ($build.success) { $build.result.error } else { $build.error }
+            $con = Invoke-UnityCommand -Name 'harness_console' -Params @{ since = $mark } -TimeoutSec 10
+            if ($con.success) { $report.runtimeErrors = @($con.result.runtimeErrors | ForEach-Object { [ordered]@{ type = $_.type; msg = $_.message; file = $_.file; line = $_.line; module = $_.module; count = $_.count } }) }
             return $report
+        }
+
+        # A settings step switched the render pipeline (e.g. its assets were deleted): the build asked for a domain reload,
+        # which must be over before the play (see SettingsContext.Run).
+        if ($build.result.settings -and $build.result.settings.reloadRequested) {
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            $reloaded = Wait-HarnessReload $build.result
+            $Timings['reloadSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+            if (-not $reloaded) {
+                $report.stage = 'editor'
+                $report['error'] = "the domain reload requested after the render pipeline switch ($($build.result.settings.switched)) did not finish"
+                return $report
+            }
         }
     }
 
@@ -932,7 +968,7 @@ function Invoke-HarnessLoop {
         $waitSec = $TimeoutSec
         if ($start.result.PSObject.Properties.Name -contains 'timeoutSec') { $waitSec = [math]::Max($TimeoutSec, [double]$start.result.timeoutSec + 30) }
         while ($sw.Elapsed.TotalSeconds -lt $waitSec) {
-            Start-Sleep -Milliseconds 200
+            Start-Sleep -Milliseconds 100   # harness_play_status is served off the main thread: polling does not slow the game
             $st = Invoke-UnityCommand -Name 'harness_play_status' -TimeoutSec 5
             if ($st.success -and $st.result.id -eq $start.result.id -and $st.result.state -in @('done', 'failed')) { $state = $st.result; break }
         }
@@ -974,6 +1010,16 @@ function Invoke-HarnessLoop {
         if ($has -contains 'knownErrorsConfigError' -and $con.result.knownErrorsConfigError) { $report['configError'] = $con.result.knownErrorsConfigError }
     }
     $report.runtimeErrors = $runtimeErrors
+    # A reloaded method that throws is caught by the Pipeline, logged without the throwing line and its original body runs
+    # instead. Run the full loop: compiled, the error comes with its exact line (and the method runs once per call).
+    $hotError = @($runtimeErrors | Where-Object { "$($_.msg)" -like 'CodeReload:*' } | Select-Object -First 1)
+    if ($hotApplied -and $hotError.Count) {
+        $Timings['hotPlaySec'] = $Timings['playSec']
+        $full = Invoke-HarnessLoop -Scenario $Scenario -OutDir $OutDir -NoPlay:$NoPlay -TimeoutSec $TimeoutSec -Timings $Timings -GoldenRoot $GoldenRoot -UpdateGolden:$UpdateGolden
+        $full['hot'] = [ordered]@{ applied = $false; reloaded = $report.hot.reloaded
+            fallback = "a reloaded method failed while playing ($(($hotError[0].msg -split "`n")[0])): the full loop below has its exact line" }
+        return $full
+    }
     $report['warningCount'] = $warningCount
     $report.shots = @($shotObjs | Where-Object { $_.path } | ForEach-Object { $_.path })
     $statsByPath = @{}

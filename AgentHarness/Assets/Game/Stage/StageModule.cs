@@ -1,6 +1,7 @@
 using System;
 using Game.Contracts;
 using Harness;
+using Unity.Pipeline.CodeReload;
 using UnityEngine;
 
 namespace Game.Stage
@@ -28,6 +29,7 @@ namespace Game.Stage
             m_LapSub = EventBus.Subscribe<SpinnerLap>(_ => m_Pulse = 1f);
         }
 
+        [CodeReload]
         public void Tick(float dt)
         {
             m_Pulse = Mathf.MoveTowards(m_Pulse, 0f, dt * 1.5f);

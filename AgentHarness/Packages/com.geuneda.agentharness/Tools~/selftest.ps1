@@ -23,7 +23,10 @@
     uniform environment to Flat ambient and refuses garbage; ctx.Material reports a misspelled / obsolete property and an
     emission color without its toggle, ctx.LitMaterial turns emission and alpha clipping on (G4-3)
   2 C# compile error in Smoke -> stage=compile at the injected file/line, module Smoke; reverted -> green
-  3 runtime exception in Smoke -> stage=runtime at the injected line; reverted -> green
+  3 runtime exception in Smoke -> stage=runtime at the injected line; reverted -> green. Hot loop (G2-1): an edit of the
+    [CodeReload] Tick body -> loop.ps1 -Hot reloads it (no compile, build or domain reload), same events, golden changed;
+    reverted -> the override cleared, golden same; a new field -> the full loop (the fallback names its line); a reloaded
+    Tick that throws -> the full loop, stage=runtime at the injected line
   4 HLSL error in the Smoke shader -> stage=shader at the injected line, again in the next loop (no reimport);
     reverted -> green (and the golden images of item 4). A one-line shader change (specular halved) -> golden
     "changed" with a diff image, loop green. A material the pipeline cannot draw (Standard in URP, G3-5) -> magenta
@@ -85,6 +88,10 @@ $MagentaMarker = '"PedestalStone", "Universal Render Pipeline/Lit"'
 $MagentaBroken = '"PedestalStone", "Standard"'   # a Built-in pipeline shader: URP draws it with its error material
 $VisualMarker = 'half spec = pow(saturate(dot(n, h)), _Gloss) * atten;'
 $VisualChanged = 'half spec = pow(saturate(dot(n, h)), _Gloss) * atten * 0.5h;'   # a valid one-line change: specular halved
+$HotMarker = 'Mathf.Sin(m_Time * 1.6f) * 0.3f'   # in the [CodeReload] Tick: the knot's bob
+$HotChanged = 'Mathf.Sin(m_Time * 1.6f) * 1.2f'
+$HotFieldMarker = 'float m_Time;'
+$HotFieldAdded = 'float m_Time; float m_SelftestField;'   # outside the method bodies: needs a compile
 
 $report = [ordered]@{ ok = $false; stage = ''; project = $root.Replace('\', '/'); projectVersion = (Get-HarnessProjectVersion); unityVersion = $null
     items = @(); fingerprint = $null; events = $null; lines = [ordered]@{}; shots = @() }
@@ -982,7 +989,7 @@ function Invoke-Item2 {
 }
 
 function Invoke-Item3 {
-    Start-Item 3 'runtime exception'
+    Start-Item 3 'runtime exception, hot loop'
     Protect-EditorFile $SmokeCs
     $line = Edit-Line (Get-Abs $root $SmokeCs) $RuntimeMarker $RuntimeBroken
     $report.lines['runtime'] = $line
@@ -994,6 +1001,41 @@ function Invoke-Item3 {
     Test-Check 'module Smoke, the injected message' ($e0.module -eq 'Smoke' -and "$($e0.msg)" -like '*selftest: runtime error*') "$($e0.module) $($e0.msg)"
     Restore-EditorFiles
     [void](Test-GreenAgain '3-restored')
+
+    # Hot loop (G2-1): an edit inside the [CodeReload] Tick is reloaded (no compile, no build, no domain reload) and played;
+    # an edit outside the method bodies, and a reloaded body that throws, run the full loop, which reports them at their line.
+    $hg = Join-Path $outAbs 'golden-hot'
+    if (Test-Path -LiteralPath $hg) { Remove-Item -LiteralPath $hg -Recurse -Force }
+    $base = Invoke-Loop '3-hot-base' @('-Golden', $hg, '-UpdateGolden')
+    Test-Check 'hot: base loop green (full; its shots are the goldens of this check)' ([bool]$base.ok -and @($base.golden.updated).Count -gt 0) (Get-Summary $base)
+    $reloads = { [int](Invoke-UnityCommand -Name 'harness_ping' -TimeoutSec 10).result.domainReloads }
+    $reloads0 = & $reloads
+    Protect-EditorFile $SmokeCs
+    $report.lines['hot'] = Edit-Line (Get-Abs $root $SmokeCs) $HotMarker $HotChanged
+    $r = Invoke-Loop '3-hot' @('-Hot', '-Golden', $hg)
+    $reloaded = @($r.hot.reloaded | ForEach-Object { @($_.methods) })
+    Test-Check 'hot: the Tick body reloaded, no compile, no build' ([bool]$r.ok -and [bool]$r.hot.applied -and ($reloaded -join ',') -eq 'SmokeModule.Tick' -and -not $r.timings.compileSec -and [bool]$r.build.skipped) "$(Get-Summary $r) hot=$($r.hot | ConvertTo-Json -Compress -Depth 5)"
+    $moved = @(Get-Golden $r | Where-Object { $_ -like '*:changed' })
+    Test-Check 'hot: same play.events, the knot bobs higher (golden changed), no domain reload' ((Get-Events $r) -eq (Get-Events $base) -and $moved.Count -gt 0 -and (& $reloads) -eq $reloads0) "events=$(Get-Events $r) golden=[$((Get-Golden $r) -join ',')] domainReloads $reloads0 -> $(& $reloads)"
+    $state.item['hot'] = [ordered]@{ sec = $r.durationSec; hotSec = $r.timings.hotSec; playSec = $r.timings.playSec; fullSec = $base.durationSec }
+    Restore-EditorFiles
+    $r = Invoke-Loop '3-hot-revert' @('-Hot', '-Golden', $hg)
+    $notSame = @(Get-Golden $r | Where-Object { $_ -notlike '*:same' })
+    Test-Check 'hot: reverted -> the override cleared, nothing reloaded, goldens same' ([bool]$r.ok -and [bool]$r.hot.applied -and @($r.hot.reloaded).Count -eq 0 -and [int]$r.hot.overridesCleared -eq 1 -and $notSame.Count -eq 0) "$(Get-Summary $r) hot=$($r.hot | ConvertTo-Json -Compress -Depth 5) golden=[$((Get-Golden $r) -join ',')]"
+    Protect-EditorFile $SmokeCs
+    $line = Edit-Line (Get-Abs $root $SmokeCs) $HotFieldMarker $HotFieldAdded
+    $r = Invoke-Loop '3-hot-field' @('-Hot', '-Golden', $hg)
+    Test-Check "hot: a new field -> the full loop, the fallback names line $line" ([bool]$r.ok -and -not $r.hot.applied -and "$($r.hot.fallback)" -like "*(line $line)*" -and [double]$r.timings.compileSec -gt 0) "$(Get-Summary $r) fallback=$($r.hot.fallback)"
+    Restore-EditorFiles
+    [void](Test-GreenAgain '3-hot-field-restored')
+    Protect-EditorFile $SmokeCs
+    $line = Edit-Line (Get-Abs $root $SmokeCs) $RuntimeMarker $RuntimeBroken
+    $r = Invoke-Loop '3-hot-throw' @('-Hot')
+    $e = @($r.runtimeErrors)
+    $e0 = if ($e.Count) { $e[0] } else { [pscustomobject]@{ file = ''; line = 0; msg = '' } }
+    Test-Check "hot: a reloaded Tick that throws -> the full loop, stage=runtime at ${SmokeCs}:$line" ($r.stage -eq 'runtime' -and -not $r.hot.applied -and "$($r.hot.fallback)" -like '*reloaded method failed*' -and $e0.file -eq $SmokeCs -and [int]$e0.line -eq $line) "$(Get-Summary $r) $($e0.file):$($e0.line) fallback=$($r.hot.fallback)"
+    Restore-EditorFiles
+    [void](Test-GreenAgain '3-hot-restored')
     Complete-Item
 }
 

@@ -27,7 +27,15 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   `isolatedDevices`(시나리오 동안 끈 실제 장치와 막은 키·버튼 누름 수 — 사람이 그 사이 키보드를 만져도 결과가 같다).
   `fps`는 에디터 플레이 모드 값이라 변경 전후 비교용.
 - `timings.playEnterSec`: 플레이 진입 시간. 이 프로젝트가 Domain Reload를 켜 두었으면 여기에 리로드 시간이 들어간다.
-- 옵션: `-Scenario tools/scenarios/x.json`, `-NoPlay`(편집 모드 캡처만), `-Out HarnessOut/x`, `-UpdateGolden`(녹색일 때 샷을 기준 이미지로).
+- 옵션: `-Scenario tools/scenarios/x.json`, `-NoPlay`(편집 모드 캡처만), `-Out HarnessOut/x`, `-UpdateGolden`(녹색일 때 샷을 기준 이미지로),
+  `-Hot`(아래).
+- **핫 루프 `tools/loop.ps1 -Hot`**: 마지막 전체 루프가 컴파일한 뒤 바뀐 것이 `[CodeReload]`(`using Unity.Pipeline.CodeReload;`) 메서드의 **본문뿐**이면
+  컴파일·도메인 리로드 없이 그 본문을 Pipeline 인터프리터로 바꿔 넣고 같은 시나리오를 돈다(`report.hot.applied`, 컴파일+리로드만큼 빠름).
+  필드·시그니처·다른 메서드·새 파일·에셋이 바뀌었거나, 인터프리터가 못 돌리는 구문(`try/catch` 등)이거나, 바꾼 본문이 플레이 중 예외를 던지면
+  전체 루프를 돌고 이유를 `hot.fallback`에 적는다(예외는 전체 루프가 정확한 줄로 보고). 조건: Domain Reload가 꺼져 있을 것
+  (`harness_setup {"apply":"domainReload"}`), 메서드가 public이고 void·`IEnumerator`일 것, 그 코드의 어셈블리가 `Unity.Pipeline`을 참조할 것
+  (`Assembly-CSharp`는 자동, asmdef는 `"Unity.Pipeline"`, `"Unity.Pipeline.Attributes"`를 references에). 바뀐 게 무엇이고 핫으로 되는지만 보려면
+  `& ./tools/uc.ps1 harness_hot '{"mode":"check"}'`.
 - 커맨드 하나: `& ./tools/uc.ps1 <command> '<JSON>'` (예: `harness_capture '{"preset":"main"}'`, `harness_console`, `harness_ping`).
   목록은 `unity command --detail compact`. 임시 C#(`eval_file`)은 `HarnessOut/scripts/`에 둔다(HarnessOut은 git이 무시한다).
 - 에디터 없이 컴파일 검사: `tools/compile-check.ps1 [-Module <이름>]` (asmdef 폴더든 `Assembly-CSharp` 폴더든 모듈 코드를 컴파일하는 어셈블리를 검사).

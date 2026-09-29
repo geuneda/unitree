@@ -21,7 +21,7 @@ Claude Code 같은 코딩 에이전트가 **Unity에서도 Three.js로 웹 3D를
 | Three.js 환경의 성질 | 이 하네스의 복원 방법 |
 |---|---|
 | 1. 모든 게 텍스트 | 씬은 `IBuildStep` 빌더 코드가 생성(YAML 직접 수정 금지), URP·Renderer 에셋과 품질 레벨별 파이프라인은 `ISettingsStep` 코드가 생성. HLSL `.shader`, UI Toolkit UXML/USS, 머티리얼·Volume·라이팅도 코드 |
-| 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크 |
+| 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 메서드 본문만 고쳤으면 컴파일 없이 바꿔 넣는 핫 루프(`loop.ps1 -Hot`) |
 | 3. 눈으로 검증 | 캡처 PNG(화면의 카메라 스택·미니맵 + 스크린 공간 UI) + 이미지 통계, 연속 캡처 시트, 기준 이미지와의 diff 점수·바뀐 곳 PNG, 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로 |
 | 4. 에셋 없이 완성도 | 절차적 메시/노이즈/텍스처 베이크, 코드로 만든 URP 후처리, 라이팅 베이크 없는 스카이 반사·앰비언트, 키워드를 알아서 맞추는 `LitMaterial` |
 | 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 worktree + 트랜잭션 submit / land |
@@ -30,6 +30,7 @@ Claude Code 같은 코딩 에이전트가 **Unity에서도 Three.js로 웹 3D를
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/loop.ps1
+powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -Hot   # [CodeReload] 메서드 본문만 고쳤을 때 (아래)
 ```
 
 recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 → 셰이더 검사 → 플레이 모드 시나리오(입력 재생 + 3컷) →
@@ -43,7 +44,7 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
   "play": { "events": [{ "name": "SpinDirectionChanged", "count": 1 }, { "name": "SpinnerLap", "count": 2 }] },
   "render": { "batches": 45.8, "setPassCalls": 42.7, "triangles": 594544 },
   "golden": { "version": "6000.3.11f1", "same": 3, "changed": 0, "missing": 0 },
-  "durationSec": 3.6 }
+  "durationSec": 3.4 }
 ```
 
 실패하면 `stage`(compile / build / shader / play / runtime / lint / shots)와 함께 `{"file","line","msg","module"}`가 나옵니다.
@@ -52,10 +53,16 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 
 | 상황 (측정) | 한 바퀴 |
 |---|---|
-| 코드 변경 없음 | ~3.5 s |
-| 셰이더만 수정 | ~4 s |
-| 모듈 C# 1줄 수정 | ~9 s (Unity 컴파일 + 도메인 리로드 ~4 s 포함) |
-| C# 컴파일 에러 보고 | ~1 s |
+| 코드 변경 없음 | ~3.4 s |
+| 셰이더만 수정 | ~3.8 s |
+| 모듈 C# 1줄 수정 | ~9.2 s (Unity 컴파일 ~0.4 s + 도메인 리로드 ~2.5 s + 리로드 뒤 에디터 자체 작업 ~0.9 s 포함) |
+| 같은 수정이 `[CodeReload] Tick` 본문 안이면 `loop.ps1 -Hot` | **~3.1 s** (첫 캡처까지 ~1.3 s) |
+| C# 컴파일 에러 보고 | ~1.1 s |
+
+`-Hot`은 마지막 전체 루프가 컴파일한 소스와 Roslyn 토큰으로 비교해, 바뀐 것이 `[CodeReload]` 메서드 본문뿐이면 Unity Pipeline 패키지의 인터프리터로
+그 본문만 바꿔 넣고(컴파일·도메인 리로드·씬 빌드 없음) 같은 시나리오를 처음부터 돕니다 — 이벤트 수·기준 이미지 비교가 전체 루프와 그대로 맞고, 같은 코드면
+픽셀까지 같습니다. 필드·시그니처·새 파일·에셋이 바뀌었거나 인터프리터가 못 돌리는 구문이거나 바꾼 본문이 예외를 던지면 알아서 전체 루프를 돌고
+이유(`hot.fallback`, 필요하면 그 줄)를 남깁니다.
 
 ## 기존 프로젝트에 붙이기
 
@@ -80,7 +87,7 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
   `CLAUDE.md`/`AGENTS.md`가 없을 때만 `CLAUDE.md`)뿐입니다. `Assets/`와 `ProjectSettings/*.asset`은 건드리지 않고, 어떤 파일도 지우지 않습니다.
   Unity가 새 의존성을 풀면서 `Packages/packages-lock.json`을 갱신합니다(uninstall이 설치 전 내용으로 되돌림).
 - **프로젝트 설정은 그대로**: `harness_setup`은 권장 사항(예: Domain Reload 끄기)만 보여 주고, `{"apply":"domainReload"}`처럼 명시할 때만 바꿉니다.
-  Domain Reload가 켜진 프로젝트에서도 루프가 돌고, 늘어난 시간은 `timings.playEnterSec`으로 보입니다.
+  Domain Reload가 켜진 프로젝트에서도 루프가 돌고, 늘어난 시간은 `timings.playEnterSec`으로 보입니다(핫 루프 `-Hot`만은 Domain Reload를 꺼야 합니다).
 - **출시 빌드에는 하네스가 없습니다**: 하네스 런타임은 `UNITY_EDITOR || DEVELOPMENT_BUILD`에서만 컴파일되고, 하네스 때문에 들어온
   `com.unity.pipeline`의 런타임 DLL·Newtonsoft.Json(·설치가 추가한 Input System)은 출시 빌드에서 빠집니다. 개발 빌드에는 들어갑니다.
 - URP·Built-in 둘 다, Input System 유무와 상관없이 컴파일됩니다. 입력 재생: Input System 게임은 그대로, 구 Input Manager(`Input.GetKey`) 게임은
@@ -92,9 +99,9 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
   아래는 BagelGame에 붙인 뒤 시나리오 한 번(`waitTarget play-button` → `click` → `waitTarget select-button` → `click`)이 찍은 Game 뷰 3컷입니다.
 - 검증: 하네스를 모르는 공개 프로젝트 2개 — [BagelGame](https://github.com/Unity-Technologies/BagelGame)(URP, Unity 6.3, 기존 씬 `Main.unity`)과
   [SebLague/Fluid-Sim](https://github.com/SebLague/Fluid-Sim)(Built-in, 2022.3 → 6.0, 컴퓨트 셰이더). 설치 → 기존 씬으로 루프 3회 녹색 →
-  출시 빌드의 `Managed/` DLL 목록이 하네스 없는 대조 빌드와 같음 → 제거 후 `git status` 깨끗. 절차 전체는 `tools/attach-test.ps1` 한 번(31–68 s).
+  출시 빌드의 `Managed/` DLL 목록이 하네스 없는 대조 빌드와 같음 → 제거 후 `git status` 깨끗. 절차 전체는 `tools/attach-test.ps1` 한 번(30–57 s).
   그리고 비공개 사내 모바일 게임 1개(URP, Addressables, 씬 22개, asmdef 35개, C# 4,400개, 부트 → 로그인 → 타이틀 → 로비): 설치 → 루프 3회 녹색 →
-  제거 후 `git status` 깨끗(100 s). Fluid-Sim은 `HarnessInput`으로 구 Input Manager 입력(스페이스 일시정지, 마우스 궤도)까지.
+  제거 후 `git status` 깨끗(로비까지 도는 시나리오로 135 s). Fluid-Sim은 `HarnessInput`으로 구 Input Manager 입력(스페이스 일시정지, 마우스 궤도)까지.
 
 | BagelGame (URP) 메인 메뉴 | Fluid-Sim (Built-in) 입자 시뮬레이션 |
 |---|---|
@@ -105,8 +112,8 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
 ## 요구 사항
 
 - Windows 10/11 — 도구 스크립트는 Windows PowerShell 5.1 기준
-- Unity **6.0 LTS 이상** + URP. 샘플 프로젝트는 **6000.3.11f1**(Unity 6.3 LTS)로 고정돼 있고, 새 클론에서 6000.0.84f1·6000.3.11f1은 검증 매트릭스 전부,
-  6000.6.3f1은 렌더링 한 가지(소프트 그림자, ROADMAP P-4)를 빼고 녹색이다. 다른 설치 버전으로 열 때는 `tools/open.ps1 -UnityVersion <버전>`.
+- Unity **6.0 LTS 이상** + URP. 샘플 프로젝트는 **6000.3.11f1**(Unity 6.3 LTS)로 고정돼 있고, 새 클론에서 6000.0.84f1·6000.3.11f1·6000.6.3f1 모두
+  검증 매트릭스가 전부 녹색입니다(6.6의 검은 조명은 W4에서 고침, ROADMAP P-4). 다른 설치 버전으로 열 때는 `tools/open.ps1 -UnityVersion <버전>`.
 - Unity CLI (`unity`, beta): `$env:UNITY_CLI_CHANNEL='beta'; irm https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.ps1 | iex`
 - 하네스가 에디터에 붙는 통로는 Unity의 실험 패키지 `com.unity.pipeline`(0.8.0-exp.1)이다. 하네스 패키지의 의존성으로 함께 설치된다.
 - 선택: Visual Studio 2022 MSBuild (`compile-check.ps1`의 msbuild 백엔드). 기본인 `csc` 백엔드는 Unity 설치에 포함된 Roslyn만 쓴다.
@@ -128,7 +135,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1               # 끝낼 �
 사용자 전역 `Editor.log` 하나를 서로 덮어써서, 에디터를 둘 이상 띄우면 로그가 뒤섞입니다.
 
 위 과정 전체(클론 → 열기 → 설정 → 루프 3회 → 종료 → 삭제)를 `tools/fresh-clone-test.ps1` 하나로 검증할 수 있습니다(이 머신에서 ~110 s).
-하네스 자체의 검증 매트릭스(에러 주입·동시 루프·worktree submit/land)는 `tools/selftest.ps1`이 한 번에 돌리고(~4분),
+하네스 자체의 검증 매트릭스(에러 주입·핫 루프·동시 루프·worktree submit/land)는 `tools/selftest.ps1`이 한 번에 돌리고(~5분),
 `fresh-clone-test.ps1 -UnityVersion <버전> -SelfTest`는 그것을 다른 Unity 버전의 새 클론에서 돌립니다.
 
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)
@@ -228,7 +235,7 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
   Packages/com.geuneda.agentharness/       하네스 = UPM 패키지 (git URL: ...unitree.git?path=/AgentHarness/Packages/com.geuneda.agentharness)
     Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioInput · ScenarioRunner ·
                                            HarnessCapture(+CaptureCameras · CaptureUi · ContactSheet) · Procedural/
-    Editor/                                harness_* 에디터 커맨드, BuildContext / IBuildStep, SettingsContext / ISettingsStep, 출시 빌드 필터
+    Editor/                                harness_* 에디터 커맨드(핫 루프 harness_hot 포함), BuildContext / IBuildStep, SettingsContext / ISettingsStep, 출시 빌드 필터
     Tools~/                                loop · submit · land · uc · compile-check · open · quit · install · uninstall · attach-test ·
                                            fresh-clone-test · selftest (.ps1) + templates/ (Unity는 ~ 폴더를 임포트하지 않는다)
   ProjectSettings/AgentHarness.json        하네스 설정: 모듈 폴더, 플레이할 씬, setup 모드
@@ -240,7 +247,7 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
 ## 에이전트와 함께 쓰기
 
 `AgentHarness/CLAUDE.md`에 루프 사용법, report.json 해석, 규칙(YAML 직접 수정 금지, 텍스트 우선 형태, 모듈 폴더 밖 수정 금지,
-에디터 조작은 순서대로), 모듈·빌더 템플릿, 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
+에디터 조작은 순서대로), 모듈·빌더 템플릿(`[CodeReload] Tick` 포함 — 본문만 고치면 `loop.ps1 -Hot`), 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
 병렬 에이전트는 위의 worktree + `submit.ps1` + `land.ps1` 흐름을 씁니다(G5-2, G5-5). 남은 병렬 과제는 루프 직렬화(G5-1)와 `Contracts` 공유 지점(G5-4)입니다.
 
 ## 라이선스

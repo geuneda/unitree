@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
+using UnityEditor.Compilation;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 
@@ -32,9 +33,44 @@ namespace Harness.Editor
         {
             ProjectRoot = Directory.GetCurrentDirectory().Replace('\\', '/');
             Directory.CreateDirectory(StateDir);
+            CompilationPipeline.compilationStarted += _ => { s_EditorAssemblies = null; s_PlayerAssemblies = null; };
+        }
+
+        static UnityEditor.Compilation.Assembly[] s_EditorAssemblies, s_PlayerAssemblies;
+
+        /// <summary>
+        /// CompilationPipeline.GetAssemblies, kept until the next compile: a call costs ~60 ms (the sample's 67 assemblies,
+        /// 4,400 source files) and a build asked twice, the lint once. The set only changes with a compile.
+        /// </summary>
+        public static UnityEditor.Compilation.Assembly[] Assemblies(AssembliesType type)
+        {
+            if (type == AssembliesType.Player) return s_PlayerAssemblies ?? (s_PlayerAssemblies = CompilationPipeline.GetAssemblies(type));
+            if (type == AssembliesType.Editor) return s_EditorAssemblies ?? (s_EditorAssemblies = CompilationPipeline.GetAssemblies(type));
+            return CompilationPipeline.GetAssemblies(type);
         }
 
         public static string Combine(string a, string b) => Path.Combine(a, b).Replace('\\', '/');
+
+        /// <summary>
+        /// Replace a state file that commands read on a request thread (harness_play_status, harness_console): a read holds the
+        /// file for about a millisecond, and a delete or write at that moment fails with a sharing violation (a loop once failed on
+        /// play_state.json). Writes a temp file and moves it into place - readers never see half a file - retrying for ~0.1 s.
+        /// </summary>
+        public static void WriteStateFile(string path, string text)
+        {
+            var tmp = path + ".tmp";
+            File.WriteAllText(tmp, text);
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    if (File.Exists(path)) File.Delete(path);
+                    File.Move(tmp, path);
+                    return;
+                }
+                catch (IOException) when (attempt < 50) { System.Threading.Thread.Sleep(2); }
+            }
+        }
 
         /// <summary>Resolve a user path: absolute stays absolute, relative is taken from the project root.</summary>
         public static string Resolve(string path)

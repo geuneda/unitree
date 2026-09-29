@@ -3,7 +3,9 @@
     "rootNamespace": "Game.Stage",
     "references": [
         "Harness.Runtime",
-        "Game.Contracts"
+        "Game.Contracts",
+        "Unity.Pipeline",
+        "Unity.Pipeline.Attributes"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

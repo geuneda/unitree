@@ -4,7 +4,9 @@
     "references": [
         "Harness.Runtime",
         "Game.Contracts",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "Unity.Pipeline",
+        "Unity.Pipeline.Attributes"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

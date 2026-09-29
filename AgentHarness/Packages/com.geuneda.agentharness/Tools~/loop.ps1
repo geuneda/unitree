@@ -9,6 +9,7 @@
   powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -Scenario tools/scenarios/default.json -Out HarnessOut/latest
   powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -NoPlay      # edit-mode captures only (faster, no gameplay)
   powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -UpdateGolden   # the shots look right: make them the golden images
+  powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -Hot    # edited only [CodeReload] method bodies: ~3 s instead of ~9 s
 
   Exit code 0 = everything green (no compile/build/runtime errors, no blank shots), 1 = see report.json "stage".
   Shots are compared with the golden images (golden/<Unity version>/<scenario>/, report "golden"); a difference is
@@ -22,7 +23,8 @@ param(
     [switch]$NoCompile,
     [int]$TimeoutSec = 180,
     [string]$Golden,           # golden image root (default: goldenRoot of ProjectSettings/AgentHarness.json, "golden")
-    [switch]$UpdateGolden      # write this loop's shots as the golden images of this Unity version (only when green)
+    [switch]$UpdateGolden,     # write this loop's shots as the golden images of this Unity version (only when green)
+    [switch]$Hot               # only [CodeReload] method bodies changed: reload them, no compile/build (else the full loop)
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Harness.psm1') -Force
@@ -42,7 +44,7 @@ if (Test-HarnessWorktree) {
 # One Editor: loops from parallel agents queue here (machine-wide mutex per project).
 $timings['lockWaitSec'] = Enter-HarnessLock
 try {
-    $report = Invoke-HarnessLoop -Scenario $Scenario -OutDir $outAbs -NoPlay:$NoPlay -NoCompile:$NoCompile -TimeoutSec $TimeoutSec -Timings $timings -GoldenRoot $Golden -UpdateGolden:$UpdateGolden
+    $report = Invoke-HarnessLoop -Scenario $Scenario -OutDir $outAbs -NoPlay:$NoPlay -NoCompile:$NoCompile -TimeoutSec $TimeoutSec -Timings $timings -GoldenRoot $Golden -UpdateGolden:$UpdateGolden -Hot:$Hot
     Add-HarnessRecovery $report
 } finally { Exit-HarnessLock }
 Save-HarnessReport $report $outAbs $clock $timings

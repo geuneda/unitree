@@ -52,7 +52,7 @@ namespace Harness.Editor
         {
             var config = HarnessPaths.Config;
             var runtimeAsms = new Dictionary<string, string>(StringComparer.Ordinal); // name → first source
-            foreach (var a in CompilationPipeline.GetAssemblies(AssembliesType.Player))
+            foreach (var a in HarnessPaths.Assemblies(AssembliesType.Player))
             {
                 var src = a.sourceFiles.FirstOrDefault();
                 if (src == null) continue;

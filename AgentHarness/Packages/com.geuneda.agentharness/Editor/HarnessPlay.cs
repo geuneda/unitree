@@ -35,13 +35,7 @@ namespace Harness.Editor
             catch { return null; }
         }
 
-        public void Save()
-        {
-            var tmp = HarnessPaths.PlayStateFile + ".tmp";
-            File.WriteAllText(tmp, JsonUtility.ToJson(this, true));
-            if (File.Exists(HarnessPaths.PlayStateFile)) File.Delete(HarnessPaths.PlayStateFile);
-            File.Move(tmp, HarnessPaths.PlayStateFile);
-        }
+        public void Save() => HarnessPaths.WriteStateFile(HarnessPaths.PlayStateFile, JsonUtility.ToJson(this, true));
 
         public string ResultPath => HarnessPaths.Combine(outDir, "result.json");
     }

@@ -1,6 +1,7 @@
 using System;
 using Game.Contracts;
 using Harness;
+using Unity.Pipeline.CodeReload;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UIElements;
@@ -49,6 +50,7 @@ namespace Game.Smoke
             UpdateHud();
         }
 
+        [CodeReload]
         public void Tick(float dt)
         {
             if (m_Reverse.WasPressedThisFrame())

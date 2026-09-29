@@ -14,7 +14,9 @@
 아래 성질별 항목을 **한 번에 착수·검증·커밋하는 작업 묶음(W1…)**으로 나눴다. 요청은 "W1 진행해"처럼 워크플로우 단위로 한다.
 - 묶는 기준: 같은 파일을 고치거나 같은 검증으로 확인되는 항목. 순서 기준: **검증 도구를 먼저 믿을 수 있게 만들고(W1–W3), 그다음 결과물을 바꾼다(W4~)**.
 - 항목의 현상·방향·완료 기준은 성질별 절에 그대로 두고, 여기에는 묶음·순서·선행·추가로 볼 것만 적는다.
-- 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태 갱신 → 커밋(메시지에 항목 ID).
+- 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태·워크플로우 절 갱신 → 새로 드러난 항목 추가 →
+  **저장소 루트 `README.md`와 `AgentHarness/CLAUDE.md`(필요하면 `Tools~/templates/AgentHarness.md`)에 바뀐 기능·측정값 반영** → 커밋(메시지에 항목 ID).
+  README·ROADMAP 갱신은 워크플로우마다 빠뜨리지 않는다(W2 커밋은 README를 건드리지 않았고, W4 뒤에도 README "요구 사항"에 6.6의 옛 상태가 남아 있었다).
 - 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. 선행이 없는 W5·W7·W9는 앞당겨도 된다.
 - 크기: S = 파일 1–2개 · M = 여러 파일 또는 새 커맨드 · L = 조사가 필요하거나 새 하위 시스템.
 
@@ -24,14 +26,15 @@
 | W2 | 캡처가 화면 전체를 본다 | G3-1, G3-5 | M | W1 | 완료 (2026-09-29) |
 | W3 | 시각 회귀와 움직임 | G3-4, G3-3, G3-7 | L | W1, W2 | 완료 (2026-09-30) |
 | W4 | 렌더 설정을 코드로 | G1-1, P-4, G4-3, G4-2 | L | W3 | 완료 (2026-09-30) |
-| W5 | 루프 속도 | G2-3, G2-1 | L | — | 대기 |
+| W5 | 루프 속도 | G2-3, G2-1 | L | — | 완료 (2026-09-30) |
 | W6 | 콘텐츠 헬퍼(a/b/c로 나눠 진행) | G1-3, G1-4, G4-1, G4-4 | L | W3, W4 (W6b는 W2) | 대기 |
-| W7 | 에디터 밖·여러 에디터 | G2-2, G1-2, G5-1 | L | — | 대기 |
+| W7 | 에디터 밖·여러 에디터 | G2-2, G2-4, G1-2, G5-1 | L | — | 대기 |
 | W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 | L | W1 | 대기 |
 | W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 대기 |
 | W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 대기 |
 | W11 | 백그라운드 에디터의 실제 입력 격리 | G3-9 | S | — | 대기 |
-| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, P-4 신고 | S | 새 버전이 나올 때 | — |
+| W12 | 핫 루프 넓히기 | G2-5 | M | W5 | 대기 |
+| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, P-4·G2-5 신고 | S | 새 버전이 나올 때 | — |
 | 마지막 | macOS | P-3 | L | 실제 Mac | 대기 |
 
 ### W1 시나리오 입력 격리 (G3-6) — 완료 (2026-09-29, 아래 "해결됨")
@@ -77,7 +80,10 @@
 - 추가 검증: RP/Renderer 에셋 삭제 → 루프 1회로 재생성, fingerprint 동일. W3 기준 이미지와 diff(옮기기 전과 동일).
   6.6 새 클론 selftest 1–8 녹색(P-4). attach-test 뒤 기존 프로젝트의 RP 에셋 무변경.
 
-### W5 루프 속도 (G2-3 → G2-1)
+### W5 루프 속도 (G2-3 → G2-1) — 완료 (2026-09-30, 아래 "해결됨")
+- 결과: 핫 루프 `loop.ps1 -Hot`(`[CodeReload]` 본문만 → 인터프리터로 교체, 컴파일·리로드·빌드 없음) ~3.0 s(첫 캡처 1.27 s), 빌드 730 → 390–470 ms.
+  "플레이 상태 유지"는 하지 않았다: 핫 루프도 시나리오를 처음부터 돌아 `play.events`·기준 이미지가 전체 루프와 그대로 비교된다.
+  재측정 결과 리로드 직후 ~2 s의 대부분은 JIT가 아니라 에디터의 리로드 뒤 네이티브 작업(~0.9 s)이었다 → G2-4(W7).
 - 먼저: G2-1 메모의 재측정. 에디터 1개일 때 컴파일 / 도메인 리로드 / Pipeline 재응답 구간을 나눠 잰다(다른 에디터가 떠 있으면 4.7–19s로 흔들렸다).
 - 순서: G2-3(리로드 직후 빌더·fingerprint 워밍업, 작음) → G2-1(`loop.ps1 -Hot`: Pipeline `[CodeReload]`/`reload_file`로 Tick 본문 핫패치, 플레이 상태 유지).
 - 고치는 곳: `Tools~/loop.ps1`, `Tools~/Harness.psm1`, `Editor/Build/HarnessBuild.cs`, 필요하면 `Runtime/GameRoot.cs`.
@@ -98,6 +104,8 @@
 - 고치는 곳: `Tools~/open.ps1`, `Tools~/Harness.psm1`(락·에디터 선택), `Tools~/loop.ps1`.
 - 비용: 에디터마다 라이선스 좌석, 복제마다 `Library/`(디스크·첫 임포트 시간), O-7 같은 전역 자원 충돌.
 - 추가 검증: 루프 2개 동시 실행 시 대기가 사라짐(지금 두 번째가 3.55s 대기). 매트릭스 6의 기대값이 "대기"에서 "병렬"로 바뀌면 selftest도 고친다.
+- G2-4(W5에서 옮겨 옴): batchmode·`-automated` 에디터에서 C# 1줄 루프의 도메인 리로드와 리로드 뒤 ~0.9 s(창 다시 그리기로 보임)를 같은 방법으로 잰다
+  (에디터 로그의 `Domain Reload Profiling` + 첫 두 `EditorApplication.update` 틱 간격). 창이 없으면 사라지는지가 관건.
 
 ### W8 플레이어에서 돌리기 (G3-2, G3-8)
 - 개발 빌드 플레이어 + 런타임 Pipeline 서버로 같은 시나리오를 돌리는 `harness_perf`(fps, 프레임 p95, batches).
@@ -126,8 +134,15 @@
   도중 포커스를 되돌렸을 때 켜지는 장치가 `OnDeviceChange`로 잡히는지(누름이 `isolatedDevices`에 세어지고 `play.events`가 같은지) 본다.
 - 고치는 곳: `Runtime/ScriptedInput.cs`(`RealInputIsolation`), `Tools~/selftest.ps1`(지금은 포커스 없는 시도를 3번까지 다시 한다).
 
-### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, P-4 신고)
-- 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존), Unity에 P-4의 원인
+### W12 핫 루프 넓히기 (G2-5)
+- 하네스 쪽: 핫 판정(`Editor/HarnessHot.cs` `Diff`)이 새 메서드 선언을 "컨텍스트 변경"으로 보고 전체 루프로 돌린다. Pipeline은 교체 본문에서 부르는
+  새 메서드(비제네릭, 인스턴스·static)를 지원한다 → 표식 없는 새 private 메서드의 추가만은 핫으로 받는다(바뀐 컨텍스트가 메서드 선언 추가뿐인지 판정).
+- 핫 루프 동안 `fps`가 인터프리터 비용을 포함한다 → 인터프리터로 돈 메서드와 호출 수를 report에 넣어 전체 루프와 비교할 수 있게 한다.
+- 추가 검증: selftest 3번에 "Tick이 새 헬퍼 메서드를 부름 → 핫" 단계.
+
+### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, P-4·G2-5 신고)
+- 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존)과 G2-5의 인터프리터 2건(`try/catch` 미지원,
+  교체 본문이 던진 예외를 줄 없이 로그하고 원래 본문으로 이어 돌림), Unity에 P-4의 원인
   (`Camera.RenderToCubemap(Cubemap)`: 6.6은 CPU 픽셀을 안 채우고 6.3은 sRGB로 인코딩 — 빈 씬 + 스카이박스 + half 큐브맵 한 개로 재현), O-6 Unity Search 예외.
 - 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
   install의 Input System 추가, `HarnessReleaseBuild`)를 걷어낼 수 있는지 본다. O-9: 새 버전에서 selftest 1번의 HUD 검사(`uiError` 없음)를 보고,
@@ -137,16 +152,20 @@
 - 실제 Apple Silicon Mac이 있을 때 한다. 그 전까지 모든 워크플로우에서 새 코드에 백슬래시 경로·`powershell.exe`·`C:\` 경로를 늘리지 않는다.
 - 결정성 기준("같은 머신 안에서 결정적")은 W3의 기준 이미지 정책을 정할 때 같이 정한다.
 
-## 1차 버전 기준선 (비교용)
+## 기준선 (비교용)
 
-| 항목 | 값 |
-|---|---|
-| 루프: 코드 변경 없음 | 3.5–3.8s (build 0.7s 캐시 적중, play 2.6s) |
-| 루프: 셰이더만 수정 | ~4s (도메인 리로드 없음) |
-| 루프: 모듈 C# 1줄 수정 | ~9.2s (compile+reload 4.1s, build 1.9s, play 2.8s) |
-| 루프: C# 컴파일 에러 보고 | ~1s |
-| compile-check csc / msbuild | 어셈블리당 ~0.1s / 웜 0.5–2s, 콜드 10–75s |
-| 스모크 씬 렌더 | batches ~46, SetPass ~43, tris ~60만 |
+1차 버전(2026-09-28)과 W5 뒤(2026-09-30, 새로 연 에디터에서 각 3회, 이 머신). 워크플로우가 루프 시간을 바꾸면 열을 더한다.
+
+| 항목 | 1차 버전 | W5 |
+|---|---|---|
+| 루프: 코드 변경 없음 | 3.5–3.8s (build 0.7s 캐시 적중, play 2.6s) | 3.47–3.68s (build 0.47s, play 2.4–2.6s, 첫 캡처 1.75s) |
+| 루프: 셰이더만 수정 | ~4s (도메인 리로드 없음) | 3.79–3.83s |
+| 루프: 모듈 C# 1줄 수정 | ~9.2s (compile+reload 4.1s, build 1.9s, play 2.8s) | 8.84–9.08s (compile 4.7–4.9s = Tundra 0.35s + 리로드 ~2.5s + 리로드 뒤 에디터 ~0.9s, build 0.93–1.0s, play 2.55s) |
+| 루프: `-Hot`(Tick 본문 1줄) | — | 3.00–3.06s (판정+교체 0.14s, 첫 캡처 1.27s); 도메인 리로드 뒤 첫 번째 3.81–3.89s (교체 0.9s) |
+| 루프: C# 컴파일 에러 보고 | ~1s | 0.94–1.14s |
+| 빌드 단계(lint + `harness_build` + 셰이더; 웜 / 리로드 직후) | ~0.9s / 1.9s | 0.47s / 0.93–1.0s (리로드 뒤 에디터 ~0.9s는 이제 compile 쪽에서 기다림) |
+| compile-check csc / msbuild | 어셈블리당 ~0.1s / 웜 0.5–2s, 콜드 10–75s | 어셈블리당 0.13–0.16s / 웜 0.45–0.63s, 콜드 4–13s |
+| 스모크 씬 렌더 | batches ~46, SetPass ~43, tris ~60만 | 같음 (45.8 / 42.8 / 59만) |
 
 ---
 
@@ -177,19 +196,28 @@
 
 ## 성질 2 — 루프가 초 단위
 
-- [ ] **G2-1 C# 1줄 수정에 ~9초 (컴파일 + 도메인 리로드 ~4초가 고정비)**
-  - 현상: Vite HMR(~0.1s) 수준은 불가. 루프 시간의 절반이 Unity 컴파일/리로드다.
-  - 방향: Pipeline 패키지의 `[CodeReload]` / `reload_file`(메서드 본문 핫패치, 도메인 리로드 없음)을 `loop.ps1 -Hot` 모드로 통합. 플레이 중 상태를 유지한 채 Tick 본문만 교체하고 캡처.
-  - 완료 기준: 모듈 Tick 본문 수정 → 2초 이내에 반영된 캡처.
-  - 2026-09-29 관측: 다른 프로젝트의 Unity 에디터가 함께 떠 있을 때 `compileSec`이 4.7–19s로 흔들렸다. 구간을 재 보니 컴파일 ~1.7s,
-    도메인 리로드부터 Pipeline 서버가 다시 응답할 때까지 ~7s(Unity 로그의 `Domain Reload Profiling`은 ~3s). 에디터 1개일 때 다시 잴 것.
+- **G2-1 C# 1줄 수정에 ~9초 (컴파일 + 도메인 리로드 ~4초가 고정비)** → 2026-09-30 해결(W5, 아래 "해결됨"): `[CodeReload]` 본문만 바꿨으면 `loop.ps1 -Hot` ~3.0 s.
+  그 밖의 C# 변경은 여전히 ~9 s → G2-4(고정비), G2-5(핫 범위).
 
 - [ ] **G2-2 GUI 에디터가 떠 있어야 하고, 모달 다이얼로그가 뜨면 멈춘다**
   - 현상: 에디터가 `-automated`로 실행되지 않아 다이얼로그가 메인 스레드를 막을 수 있다(Pipeline descriptor의 `info` 경고). 라이선스 좌석도 점유.
   - 방향: `tools/open-editor.ps1`로 `-automated` 실행, 또는 상주 batchmode 에디터에서 GPU 렌더·캡처가 되는지 검증.
 
-- [ ] **G2-3 도메인 리로드 직후 첫 `harness_build`가 ~2초 (JIT 워밍업)**
-  - 방향: 리로드 직후 빌더/fingerprint 코드를 미리 한 번 실행(워밍업), 또는 fingerprint 비용 축소.
+- **G2-3 도메인 리로드 직후 첫 `harness_build`가 ~2초 (JIT 워밍업)** → 2026-09-30 해결(W5, 아래 "해결됨"). 대부분이 JIT가 아니라 에디터의 리로드 뒤 작업이었다(G2-4).
+
+- [ ] **G2-4 전체 루프의 고정비는 Unity 쪽이다** (2026-09-30, W5에서 드러남)
+  - 현상: C# 1줄 루프 ~8.9 s 중 도메인 리로드 ~2.5 s(`Domain Reload Profiling`: `CreateAndSetChildDomain` ~0.5 s, `[InitializeOnLoad]` ~0.4 s,
+    `AwakeInstancesAfterBackupRestoration` ~0.46 s, …)와 리로드 뒤 첫 두 에디터 틱 사이의 네이티브 작업 ~0.9 s(관리 코드 `update`·`delayCall` 콜백은 모두
+    20 ms 미만 — 창 다시 그리기로 보인다), 리로드 직후 빌드가 웜보다 ~0.5 s 더 든다(Unity·패키지 쪽 JIT; 하네스 코드만 미리 JIT하면 ~75 ms). 리로드는 에디터를
+    오래 띄워 둘수록 늘었다(2.5 → 3.5 s, 재시작하면 돌아옴).
+  - 방향: 하네스가 줄일 수 있는 건 거의 없다. W7에서 batchmode·`-automated` 에디터(창 없음)로 같은 구간을 잰다. 루프가 에디터 세션의 나이를 보고(리로드 시간 추세)
+    재시작을 권하는 것도 검토. Unity의 CoreCLR 에디터가 나오면 다시 잰다.
+
+- [ ] **G2-5 핫 루프는 `[CodeReload]` 메서드 본문만 받는다** (2026-09-30, W5)
+  - 현상: 새 메서드·필드·시그니처, `try/catch`(Pipeline 인터프리터가 못 돌림), 표식 없는 메서드는 전체 루프(~9 s)다. 교체 본문이 던진 예외는 Pipeline이 줄 없이
+    로그하고 원래 본문을 이어 돌려서 하네스가 전체 루프로 다시 돈다. 인터프리터로 도는 동안 그 메서드는 느리다.
+  - 방향: 새 헬퍼 메서드 추가를 핫으로(W12, Pipeline이 지원). 인터프리터 `try/catch`·예외 줄 번호는 Pipeline 신고(상시). 공개 멤버만 쓰는 모듈이면 Assembly.Load
+    백엔드(`reload_file`)도 선택지 — 쓰는 조건을 판정할 수 있다.
 
 
 ## 성질 3 — 에이전트가 화면을 본다
@@ -318,6 +346,9 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
     `HarnessReleaseBuild`로 우회 중. 둘 다 Pipeline 쪽에 신고할 것(최신 0.8.0-exp.1, 레지스트리 확인).
   - 2026-09-29(P-5): 이미 옛 Pipeline(0.6.0-exp.1)을 직접 의존하는 프로젝트가 있었다(사내 프로젝트 A). install이 하네스가 요구하는 버전으로 올리고
     `installReplaced`에 남긴다. 그 프로젝트의 다른 Pipeline 사용처(에이전트 도구 등)는 0.8로 돈다.
+  - 2026-09-30(W5): 핫 루프가 Pipeline에 더 기댄다 — 번들 Roslyn(`UnityPipeline.Microsoft.CodeAnalysis*`, 토큰 비교·워밍업), `CommandRegistry.DiscoverCommands()`로
+    찾은 `reload_file_editor_interpreter`의 인자 이름(`filename`)과 응답 속성(`Success`·`Items`·`Diagnostics`·`Error`·`ErrorDetails`), `CodeReloadRegistry.GetStats/
+    ClearAllOverrides`, 교체 본문의 예외 메시지 접두어 `CodeReload:`(루프가 전체 루프로 다시 도는 기준). 올릴 때 selftest 3번의 핫 단계가 이것들을 확인한다.
   - 할 일: 패키지를 업그레이드할 때마다 loop 검증 매트릭스(아래)를 다시 돌린다.
 - **O-2 스크립트가 Windows PowerShell 5.1 전용** → P-3으로 옮겼다(2026-09-29).
 - **O-3 하네스 자체의 자동 테스트가 없다** → 2026-09-29 해결(`tools/selftest.ps1`, 아래 "해결됨"). PNG 눈 확인만 사람·에이전트 몫으로 남았다.
@@ -334,7 +365,7 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
-**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~4분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
+**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~5분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
 (새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~5분), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
 
@@ -354,7 +385,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    `AmbientProbe`가 균일 환경을 Flat 앰비언트와 같게·쓰레기 텍셀은 거부(G4-2); `ctx.Material`이 오타·옛 URP 이름·토글 없는 이미션을 경고,
    `ctx.LitMaterial`이 이미션·알파 클립을 켬(G4-3)
 2. C# 컴파일 에러 주입 → `stage=compile`, file/line/module 정확 → 원복 후 녹색
-3. 런타임 예외 주입 → `stage=runtime`, 정확한 줄 → 원복 후 녹색
+3. 런타임 예외 주입 → `stage=runtime`, 정확한 줄 → 원복 후 녹색. 핫 루프(G2-1): `[CodeReload] Tick` 본문 수정 → `loop.ps1 -Hot`이 컴파일·빌드·도메인 리로드
+   없이 반영(events 같음, golden `changed`) → 되돌리면 교체 해제·`same` → 필드 추가는 전체 루프(fallback에 그 줄) → 핫 본문의 예외는 전체 루프가 주입한 줄로 보고
 4. HLSL 에러 주입 → `stage=shader`, 재임포트 없는 다음 루프에서도 검출 → 원복 후 녹색(그 샷을 이 항목의 기준 이미지로). 셰이더 한 줄(스펙큘러 절반, G3-4)
    → 루프 녹색, golden `changed` + `rect` + diff PNG. 파이프라인이 못 그리는 머티리얼(받침대 → `Standard`, G3-5)
    → 샷 `magenta` + `hint`에 `Smoke/Pedestal` + golden `changed`, 루프는 녹색 → 원복 후 마젠타 없음·golden `same`
@@ -385,6 +417,53 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G2-3 도메인 리로드 직후 첫 `harness_build`가 ~2초 (JIT 워밍업)** · **G2-1 C# 1줄 수정에 ~9초** (2026-09-30, W5)
+  - 재측정(G2-1 메모의 숙제, 에디터 1개): C# 1줄 루프 9.42 s = compile 4.18 s(Tundra 1.13 s + `Domain Reload Profiling` 2.53 s + 폴링) + build 2.12 s + play 2.55 s.
+    "빌드 ~2 s"를 나눠 보니 **리로드 뒤 첫 메인 스레드 명령이 무엇이든 ~0.85–0.95 s**(`harness_ping`도 887 ms, 2 s 쉬고 보내면 15 ms)였고 빌드 자체의 콜드 비용은
+    ~0.35 s(1.07 s vs 웜 0.73 s)였다. 임시 `[InitializeOnLoad]` 탐침으로 리로드 뒤 update 틱을 재니 첫 두 틱 사이가 916 ms이고 그동안 `update`·`delayCall` 콜백
+    (Pipeline·Input System·URP 등 30여 개)은 모두 20 ms 미만 → Unity 네이티브 작업(창 다시 그리기로 보임)이라 하네스가 줄일 수 없다 → G2-4. 프로파일러
+    (`ProfilerDriver.profileEditor`)로 보려던 시도는 autotick과 겹쳐 수만 프레임이 쌓이고 리로드 뒤 명령이 8 s 걸려 버렸다.
+  - 방법(G2-3, 빌드 자체): `harness_build`에 단계별 시간 `build.phases`(check/settings/steps/cleanup/save/lighting/fingerprint)를 넣고 재서 둘을 고쳤다.
+    - fingerprint 245 ms 중 ~225 ms가 메시 정점을 `ToString("R")`로 문자열화하는 데 들었다(지형 40,401 + 매듭 10,593 정점) → 정점·인덱스의 원시 바이트를 SHA-1
+      (`SceneFingerprint.HashAsset`) → 28–40 ms. **fingerprint 값이 바뀌었다**(해시 입력이 바뀜; 6.3 `4dc9c80b…` → `78354e2e…`, 아래 매트릭스).
+    - `CompilationPipeline.GetAssemblies`가 호출마다 ~60 ms인데 빌드가 두 번(`IBuildStep`·`ISettingsStep` 찾기), lint가 한 번 불렀다 → 다음 컴파일까지 캐시
+      (`HarnessPaths.Assemblies`, `compilationStarted`에 비움): check 64 → 3.5 ms, settings 113 → 14 ms.
+    - 웜 빌드 730 → 390–420 ms, 변경 없는 루프 3.8 → 3.5 s. 플레이 상태 폴링 200 → 100 ms(`harness_play_status`는 메인 스레드 밖이라 게임에 영향 없음).
+  - 해 보고 넣지 않은 것: 하네스 어셈블리를 리로드 직후 백그라운드에서 미리 JIT. Mono의 `RuntimeHelpers.PrepareMethod`는 아무것도 하지 않았고(612개 5 ms),
+    `RuntimeMethodHandle.GetFunctionPointer`는 JIT해서(55 ms) 콜드 빌드를 ~75 ms 줄였지만(check 150 → 76 ms), JIT가 `beforefieldinit` static 초기화를 그 스레드에서
+    돌릴 수 있어 Unity API를 부르는 초기화가 백그라운드에서 실패하면 그 타입이 도메인 끝까지 망가진다 — 75 ms와 바꿀 위험이 아니다.
+  - 방법(G2-1, 핫 루프 — `Editor/HarnessHot.cs` `harness_hot`, `Invoke-HarnessLoop -Hot`, `loop.ps1 -Hot`):
+    - Pipeline의 `[CodeReload]`(컴파일 때 표식 메서드에 "교체본이 있으면 그것을 호출" 프롤로그를 짜 넣음)를 쓴다. 두 백엔드 중 `reload_file`(Assembly.Load)은
+      `SmokeModule.Tick`을 "accessibility violation 9건"으로 거부했다(교체 본문은 public 멤버만) → `reload_file_editor_interpreter`(IlInterpreter, private 가능).
+      편집 모드에서 적용한 교체가 Domain Reload 없는 플레이 모드까지 유지되는 것을 확인했고(0.8.0 변경 사항), 같은 로직을 인터프리터로 돌린 루프가 기준 이미지와
+      **픽셀까지 같았다**(3장 meanDiff 0, maxDiff 0, events 같음).
+    - "플레이 상태를 유지한 채 교체"(원래 방향)는 하지 않았다: 핫 루프도 교체 뒤 시나리오를 처음부터 돈다 → 결정성·`play.events`·기준 이미지 비교가 전체 루프와 같다.
+      그래도 첫 캡처까지 1.27 s라 완료 기준(2 s)을 넘지 않는다.
+    - 무엇이 컴파일돼 있나: 전체 루프가 컴파일 직전 `Assets/`(생성물·빌드 씬 제외)·`ProjectSettings/`·`Packages/`의 크기·시각과 `CodeReload`가 든 .cs 텍스트를 찍고
+      (prepare, 이전 교체도 지움) 컴파일이 성공하면 확정한다(commit; 그 사이 import가 만든 `.meta`는 받아들이고 그 사이 바뀐 .cs는 옛 상태로 둬서 다음 핫 루프가
+      바뀐 것으로 본다). 핫 판정은 번들 Roslyn(`UnityPipeline.Microsoft.CodeAnalysis`)으로 두 텍스트를 파싱해(그 어셈블리의 define으로) 표식 메서드 본문 밖의 토큰
+      열이 같으면 본문이 다른 메서드만 교체한다. 스냅샷에 에디터 세션 id와 도메인 리로드 수를 넣어, 에디터 재시작·루프 밖 컴파일 뒤에는 전체 루프로.
+    - 폴백: 컨텍스트 변경(첫 차이의 줄), 추가·삭제·표식 없던 파일·에셋, 문법 오류, 인터프리터 미지원(`try/catch` → "No Methods Applied" 진단을 그대로 사유로),
+      Domain Reload 켜짐. 교체 본문이 플레이 중 던지면 Pipeline이 `CodeReload: Error invoking override`로 줄 없이(선언 55행으로) 로그하고 원래 본문을 이어 돌렸다
+      (`SpinDirectionChanged` 1 → 2) → 루프가 그 접두어를 보면 전체 루프를 다시 돌아 정확한 줄(64·70행)로 보고한다.
+    - 도메인 리로드 뒤 첫 교체가 1.46–1.49 s(Roslyn 적재·JIT)였다 → `[CodeReload]`가 있는 프로젝트는 리로드 직후 워커 스레드에서 번들 Roslyn으로 몇 줄을 컴파일
+      (Unity API 없음) → 0.9 s(eval로 Pipeline 경로까지 데우면 0.6 s라 나머지는 Pipeline 내부).
+    - 샘플: `SmokeModule.Tick`·`StageModule.Tick`에 표식, 두 모듈 asmdef에 `Unity.Pipeline`·`Unity.Pipeline.Attributes`(CLAUDE.md 템플릿도). `Harness.Editor`가
+      `Unity.Pipeline`을 참조(`CodeReloadRegistry`, `CommandRegistry`). 주입 표식 줄이 61/68 → 63/70행으로.
+  - 매트릭스가 드러낸 것: selftest 8번 "land kill 뒤 루프"가 `stage=play`로 빨갰다 — `PlayState.Save`가 `play_state.json`을 지우는 순간 `harness_play_status`(요청 스레드)가
+    그 파일을 읽고 있어 IOException(원래 있던 경합, 폴링 간격을 줄여 잦아짐). `compile.json` 쓰기도 같은 경합을 조용히 삼키고 있었다 → `HarnessPaths.WriteStateFile`
+    (임시 파일 → 제자리 이동, 공유 위반이면 2 ms씩 최대 50번 재시도).
+  - 검증(이 머신, 에디터를 하나씩): 새로 연 에디터에서 각 3회 — 변경 없음 3.47–3.68 s, 셰이더 3.79–3.83 s, C# 1줄 8.84–9.08 s, **`-Hot` 3.00–3.06 s(교체 0.14 s,
+    첫 캡처 1.27 s)**, 리로드 뒤 첫 `-Hot` 3.81–3.89 s, 컴파일 에러 0.94–1.14 s(위 "기준선"). 스냅샷 10–20 ms(샘플 170개 파일).
+    - selftest 1–8 녹색 318.1 s(`78354e2e…`, 줄 63/70/87, 3번 77.7 s에 핫 단계 6개: 본문 교체·도메인 리로드 수 그대로·golden `changed`, 되돌림 `same`, 필드 → 전체 루프
+      "(line 31)", 핫 본문 예외 → 전체 루프 70행).
+    - 9: 새 클론(최종 코드) 6000.3.11f1 녹색 380.3 s(`78354e2e…` = 메인 트리, 첫 루프부터 기준 이미지 `same=3`), 6000.0.84f1 녹색 364.8 s(`d6e6d71b…`),
+      6000.6.3f1 녹색 387.5 s(`df34f931…`, 샷 60.4/55.7/45.7 = W4, 플레이 진입 0.12 s로 6.3의 0.4 s보다 빠름) — 세 버전 모두 핫 단계 포함 녹색, `git status`는 버전 전환 파일뿐.
+    - 10: BagelGame 녹색 56.5 s(`619be553…` = W4, 65.5, 스냅샷 24–81 ms, 출시 빌드 `Managed/` 132개·`Harness.*` 0개), Fluid-Sim 녹색 30.5 s(`54880f05…`,
+      23.0/14.9/22.2, 103개·0개), 사내 프로젝트 A 녹색 134.7 s(`6664b723…`, `brd-lobby-w3.json` 37.7/91.2/120.3/145.7, Domain Reload가 켜져 있어 스냅샷을 건너뜀,
+      서버 선택 PlayerPrefs 0 유지).
+  - 남은 것: 전체 루프의 고정비(리로드 2.5 s + 리로드 뒤 에디터 0.9 s)는 Unity 쪽 → G2-4(W7). 핫 범위(새 헬퍼 메서드, `try/catch`, 예외 줄) → G2-5(W12·상시).
 
 - [x] **G1-1 프로젝트 설정과 URP 에셋이 여전히 YAML** · **P-4 Unity 6.6에서 샘플 씬의 조명이 검게 나온다** · **G4-3 코드로 만든 URP Lit 머티리얼은
   키워드를 수동으로 켜야 한다** · **G4-2 스카이박스 앰비언트는 라이팅 베이크가 필요해서 Trilight로 우회 중** (2026-09-30, W4)

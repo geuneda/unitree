@@ -180,7 +180,7 @@ namespace Harness.Editor
             {
                 string json;
                 lock (s_Lock) json = JsonUtility.ToJson(s_Compile ?? new CompileState(), true);
-                File.WriteAllText(HarnessPaths.CompileFile, json);
+                HarnessPaths.WriteStateFile(HarnessPaths.CompileFile, json);
             }
             catch { }
         }

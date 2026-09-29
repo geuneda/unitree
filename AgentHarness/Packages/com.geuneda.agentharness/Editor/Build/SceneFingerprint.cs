@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using UnityEditor;
@@ -243,11 +244,14 @@ namespace Harness.Editor
                 var full = HarnessPaths.Combine(HarnessPaths.ProjectRoot, path);
                 if (main is Mesh mesh)
                 {
-                    var sbm = new StringBuilder();
-                    sbm.Append(mesh.vertexCount).Append('|').Append(mesh.bounds.ToString("R")).Append('|');
-                    foreach (var v in mesh.vertices) sbm.Append(v.x.ToString("R")).Append(',').Append(v.y.ToString("R")).Append(',').Append(v.z.ToString("R")).Append(';');
-                    foreach (var i in mesh.triangles) sbm.Append(i).Append(',');
-                    return Sha1(sbm.ToString());
+                    // The raw bits of positions and indices (little-endian everywhere Unity's Editor runs). Formatting every
+                    // float as text took ~0.2 s per build for the sample's 51k vertices.
+                    var vertices = mesh.vertices;
+                    var triangles = mesh.triangles;
+                    var bytes = new byte[vertices.Length * 12 + triangles.Length * 4];
+                    MemoryMarshal.AsBytes(vertices.AsSpan()).CopyTo(bytes);
+                    MemoryMarshal.AsBytes(triangles.AsSpan()).CopyTo(bytes.AsSpan(vertices.Length * 12));
+                    return mesh.vertexCount + "|" + mesh.bounds.ToString("R") + "|" + Sha1(bytes);
                 }
                 return File.Exists(full) ? Sha1(File.ReadAllBytes(full)) + "|" + ImporterSummary(path) : "missing";
             }
