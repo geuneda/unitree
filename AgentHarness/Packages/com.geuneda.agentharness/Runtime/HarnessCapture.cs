@@ -28,15 +28,35 @@ namespace Harness
         public int colorBuckets; // distinct 4-bit/channel colors (4096 max)
         public bool blank;       // stdLuma < 2 or colorBuckets < 8
         public bool dark;        // darkRatio >= 0.98: almost all black (e.g. lighting missing). Suspicious, not a failure
+        public float magentaRatio; // fraction of pixels in the error shader's magenta
+        public bool magenta;     // magentaRatio >= 0.0005: a material the render pipeline cannot draw (see hint). Not a failure
+        public string[] ui;      // screen-space UI composited over the camera render, bottom to top ("ugui:<canvas>", "uitk:<PanelSettings>")
+        public string uiError;   // the UI could not be composited (the shot is the camera render, plus the layers before the error)
         public string error;
-        public string hint;      // why a blank shot may be expected, e.g. a screen made of overlay UI (use preset "screen")
+        public string hint;      // what explains a blank or magenta shot (other cameras on screen, the renderers drawn magenta)
     }
 
-    /// <summary>Offscreen capture of a camera pose to PNG (edit mode and play mode).</summary>
+    /// <summary>
+    /// Offscreen capture of a camera pose to PNG (edit mode and play mode), with the screen-space UI laid out at the
+    /// capture size and composited over it (<see cref="CaptureUi"/>).
+    /// </summary>
     public static class HarnessCapture
     {
         public const int DefaultWidth = 1280;
         public const int DefaultHeight = 720;
+        public const float MagentaThreshold = 0.0005f;   // ~460 pixels of 1280x720
+
+        /// <summary>
+        /// Size for a capture that sets none (0): "captureSize" of the config, else 1280x720. The Editor also turns it for a
+        /// portrait project before a scenario starts (HarnessPaths.CaptureSize).
+        /// </summary>
+        public static void DefaultSize(ref int width, ref int height)
+        {
+            if (width > 0 && height > 0) return;
+            var c = HarnessConfig.Current.captureSize;
+            if (c.Length == 2) { width = c[0]; height = c[1]; }
+            else { width = DefaultWidth; height = DefaultHeight; }
+        }
 
         public static Camera FindMainCamera()
         {
@@ -49,15 +69,17 @@ namespace Harness
 
         /// <summary>
         /// Render <paramref name="template"/>'s settings from the given pose. The template camera itself is never moved.
+        /// <paramref name="ui"/>: composite the screen-space UI over it (what the Game view would show at this size).
         /// </summary>
         public static ShotResult Capture(Camera template, Vector3 position, Quaternion rotation, float fov,
-            int width, int height, string path)
+            int width, int height, string path, bool ui = true)
         {
-            var result = new ShotResult { path = path, width = width, height = height };
+            var result = new ShotResult { path = path, width = width, height = height, ui = Array.Empty<string>() };
             var sw = Stopwatch.StartNew();
             GameObject go = null;
             RenderTexture rt = null;
             Texture2D tex = null;
+            CaptureUi screenUi = null;
             try
             {
                 go = new GameObject("[HarnessCaptureCamera]") { hideFlags = HideFlags.HideAndDontSave };
@@ -91,6 +113,21 @@ namespace Harness
                 };
                 rt = RenderTexture.GetTemporary(desc);
 
+                if (ui)
+                {
+                    try
+                    {
+                        screenUi = CaptureUi.Collect(template);
+                        screenUi.AttachSceneCanvases(cam, rt);
+                    }
+                    catch (Exception e)
+                    {
+                        result.uiError = e.GetType().Name + ": " + e.Message;
+                        screenUi?.Dispose();
+                        screenUi = null;
+                    }
+                }
+
                 var request = new RenderPipeline.StandardRequest { destination = rt };
                 if (RenderPipeline.SupportsRenderRequest(cam, request))
                 {
@@ -111,7 +148,15 @@ namespace Harness
                 tex.Apply(false, false);
                 RenderTexture.active = prev;
 
-                Analyze(tex.GetPixels32(), result);
+                var pixels = tex.GetPixels32();
+                if (screenUi != null)
+                {
+                    try { result.ui = screenUi.Composite(pixels, width, height).ToArray(); }
+                    catch (Exception e) { result.uiError = e.GetType().Name + ": " + (e.InnerException ?? e).Message; }
+                    tex.SetPixels32(pixels);
+                    tex.Apply(false, false);
+                }
+                Analyze(pixels, result);
 
                 var dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
@@ -124,6 +169,8 @@ namespace Harness
             }
             finally
             {
+                try { screenUi?.Dispose(); }
+                catch (Exception e) { UnityEngine.Debug.LogException(e); }
                 if (rt != null) RenderTexture.ReleaseTemporary(rt);
                 DestroySafe(tex);
                 DestroySafe(go);
@@ -132,17 +179,17 @@ namespace Harness
             return result;
         }
 
-        public static ShotResult Capture(Camera template, ShotPreset preset, int width, int height, string path)
+        public static ShotResult Capture(Camera template, ShotPreset preset, int width, int height, string path, bool ui = true)
         {
-            var r = Capture(template, preset.transform.position, preset.transform.rotation, preset.fieldOfView, width, height, path);
+            var r = Capture(template, preset.transform.position, preset.transform.rotation, preset.fieldOfView, width, height, path, ui);
             r.preset = preset.presetName;
             return r;
         }
 
-        public static ShotResult Capture(Camera template, ShotPose pose, int width, int height, string path)
+        public static ShotResult Capture(Camera template, ShotPose pose, int width, int height, string path, bool ui = true)
         {
             var fov = pose.fieldOfView > 0f ? pose.fieldOfView : template != null ? template.fieldOfView : 60f;
-            var r = Capture(template, pose.position, pose.rotation, fov, width, height, path);
+            var r = Capture(template, pose.position, pose.rotation, fov, width, height, path, ui);
             r.preset = pose.name;
             return r;
         }
@@ -176,7 +223,7 @@ namespace Harness
         public static void Analyze(Color32[] px, ShotResult r)
         {
             double sum = 0, sumSq = 0;
-            long dark = 0;
+            long dark = 0, magenta = 0;
             var buckets = new HashSet<int>();
             for (var i = 0; i < px.Length; i++)
             {
@@ -184,6 +231,7 @@ namespace Harness
                 var l = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
                 sum += l; sumSq += l * l;
                 if (l < 8) dark++;
+                if (IsErrorMagenta(c)) magenta++;
                 if ((i & 3) == 0) buckets.Add(((c.r >> 4) << 8) | ((c.g >> 4) << 4) | (c.b >> 4));
             }
             var n = Math.Max(1, px.Length);
@@ -194,20 +242,136 @@ namespace Harness
             r.colorBuckets = buckets.Count;
             r.blank = r.stdLuma < 2f || r.colorBuckets < 8;
             r.dark = r.darkRatio >= 0.98f;
+            r.magentaRatio = (float)magenta / n;
+            r.magenta = r.magentaRatio >= MagentaThreshold;
         }
 
         /// <summary>
-        /// For a blank camera shot: the loaded scenes draw screen-space UI (overlay canvases or UI Toolkit panels), which an
-        /// offscreen camera render leaves out - the screen may well be all UI (a boot, title or menu scene).
+        /// The error shader's color (1, 0, 1), as it comes out of post-processing: bright, red = blue within 15%, green under
+        /// 10% of them. Measured on the sample: 253,0,238 after ACES + color adjustments; none of 3 clean shots (a pink-rimmed
+        /// knot with bloom) has such a pixel.
         /// </summary>
-        public static string BlankHint()
+        public static bool IsErrorMagenta(Color32 c)
         {
-            var overlay = 0;
-            foreach (var c in UnityCompat.FindObjects<Canvas>(FindObjectsInactive.Exclude))
-                if (c.isRootCanvas && c.renderMode == RenderMode.ScreenSpaceOverlay) overlay++;
-            var panels = UnityCompat.FindObjects<UnityEngine.UIElements.UIDocument>(FindObjectsInactive.Exclude).Length;
-            if (overlay == 0 && panels == 0) return null;
-            return $"camera render excludes screen-space UI ({overlay} overlay canvas(es), {panels} UI Toolkit document(s) here): capture preset \"screen\" shows it";
+            int r = c.r, b = c.b;
+            var hi = Math.Max(r, b);
+            var lo = Math.Min(r, b);
+            return lo >= 128 && c.g * 10 <= hi && (hi - lo) * 100 <= hi * 15;
+        }
+
+        /// <summary>Fill <see cref="ShotResult.hint"/> for a blank or magenta shot (<paramref name="template"/>: the camera it copied, or null).</summary>
+        public static void AddHints(ShotResult r, Camera template, bool uiIncluded)
+        {
+            if (!string.IsNullOrEmpty(r.error)) return;
+            var hints = new List<string>();
+            if (r.blank)
+            {
+                var h = BlankHint(template, uiIncluded);
+                if (h != null) hints.Add(h);
+            }
+            if (r.magenta) hints.Add(MagentaHint());
+            if (hints.Count > 0) r.hint = string.Join("; ", hints);
+        }
+
+        /// <summary>
+        /// For a blank camera shot: what the render left out - screen-space UI when the capture excluded it, and the other
+        /// cameras that draw to the screen (a capture renders one camera).
+        /// </summary>
+        public static string BlankHint(Camera template, bool uiIncluded)
+        {
+            if (template == null) return null;
+            var parts = new List<string>();
+            if (!uiIncluded)
+            {
+                var overlay = 0;
+                foreach (var c in UnityCompat.FindObjects<Canvas>(FindObjectsInactive.Exclude))
+                    if (c.isRootCanvas && c.renderMode != RenderMode.WorldSpace) overlay++;
+                var panels = UnityCompat.FindObjects<UnityEngine.UIElements.UIDocument>(FindObjectsInactive.Exclude).Length;
+                if (overlay > 0 || panels > 0)
+                    parts.Add($"the capture left out screen-space UI (\"ui\": false; {overlay} canvas(es), {panels} UI Toolkit document(s) here)");
+            }
+            var others = new List<string>();
+            foreach (var c in UnityCompat.FindObjects<Camera>(FindObjectsInactive.Exclude))
+            {
+                if (c == template || !c.isActiveAndEnabled || c.cameraType != CameraType.Game || c.targetTexture != null || c.targetDisplay != 0) continue;
+                if ((c.hideFlags & HideFlags.HideInHierarchy) != 0) continue;   // capture cameras
+                others.Add(HierarchyPath(c.transform));
+            }
+            if (others.Count > 0)
+            {
+                others.Sort(string.CompareOrdinal);
+                parts.Add($"only camera '{template.name}' is rendered, {others.Count} other camera(s) draw to the screen too ({string.Join(", ", others.GetRange(0, Math.Min(5, others.Count)))}): " +
+                    "capture with \"camera\": \"<name>\", or preset \"screen\" for the Game view");
+            }
+            return parts.Count == 0 ? null : string.Join("; ", parts);
+        }
+
+#if AGENTHARNESS_URP
+        static readonly ShaderTagId LightModeTag = new ShaderTagId("LightMode");
+#endif
+
+        /// <summary>For a magenta shot: the enabled renderers whose material the active render pipeline draws with its error shader.</summary>
+        public static string MagentaHint()
+        {
+            var found = new List<string>();
+            var total = 0;
+            var reasons = new Dictionary<Shader, string>();
+            foreach (var r in UnityCompat.FindObjects<Renderer>(FindObjectsInactive.Exclude))
+            {
+                if (!r.enabled) continue;
+                foreach (var m in r.sharedMaterials)
+                {
+                    var why = CannotDraw(m, reasons);
+                    if (why == null) continue;
+                    if (found.Count < 5) found.Add($"{HierarchyPath(r.transform)} ({why})");
+                    total++;
+                    break;
+                }
+            }
+            if (total == 0)
+                return "magenta pixels, but no renderer has a material the render pipeline cannot draw: magenta art, or a broken shader in UI or procedural draws";
+            found.Sort(string.CompareOrdinal);
+            return $"drawn magenta - material the render pipeline cannot draw: {string.Join(", ", found)}{(total > found.Count ? $" (+{total - found.Count} more)" : "")}";
+        }
+
+        static string CannotDraw(Material m, Dictionary<Shader, string> reasons)
+        {
+            if (m == null) return "no material";
+            var s = m.shader;
+            if (s == null) return "no shader";
+            if (reasons.TryGetValue(s, out var why)) return why;
+            why = null;
+            if (!s.isSupported || s.name == "Hidden/InternalErrorShader") why = $"shader '{s.name}' is missing, broken or not supported here";
+            else if (DrawnAsError(s)) why = $"shader '{s.name}' is a Built-in render pipeline shader";
+            reasons[s] = why;
+            return why;
+        }
+
+        /// <summary>
+        /// URP draws objects whose passes have only Built-in pipeline light modes (ForwardBase, Always, Vertex...) with its
+        /// error material, e.g. a material made with Shader.Find("Standard") in a URP project.
+        /// </summary>
+        static bool DrawnAsError(Shader s)
+        {
+#if AGENTHARNESS_URP
+            if (!(GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset)) return false;
+            var legacy = false;
+            for (var i = 0; i < s.passCount; i++)
+            {
+                var mode = s.FindPassTagValue(i, LightModeTag).name ?? "";
+                switch (mode.ToLowerInvariant())
+                {
+                    case "always": case "forwardbase": case "prepassbase": case "vertex": case "vertexlmrgbm": case "vertexlm":
+                        legacy = true; break;
+                    case "": case "srpdefaultunlit": case "universalforward": case "universalforwardonly": case "universalgbuffer":
+                    case "universal2d": case "lightweightforward":
+                        return false;   // a pass URP draws
+                }
+            }
+            return legacy;
+#else
+            return false;
+#endif
         }
 
         static void DestroySafe(UnityEngine.Object o)

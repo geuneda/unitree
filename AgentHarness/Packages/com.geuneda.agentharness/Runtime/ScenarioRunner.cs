@@ -135,6 +135,7 @@ namespace Harness
             m_Captures = (ScenarioCapture[])(m_Scenario.captures ?? Array.Empty<ScenarioCapture>()).Clone();
             Array.Sort(m_Captures, (a, b) => a.t.CompareTo(b.t));
 
+            HarnessCapture.DefaultSize(ref m_Scenario.width, ref m_Scenario.height);   // the Editor has set it already
             if (m_Scenario.fixedDeltaTime > 0f) Time.captureDeltaTime = m_Scenario.fixedDeltaTime;
             // Keep playing while the Editor is in the background, for this session only (the project's Player setting
             // is not changed; an attached project may ship with Run In Background off).
@@ -513,23 +514,23 @@ namespace Harness
             else if (pose != null)
             {
                 if (pose.source != "scenario") m_UsedPresets.Add(pose.name);
-                r = HarnessCapture.Capture(template, pose, m_Scenario.width, m_Scenario.height, path);
+                r = HarnessCapture.Capture(template, pose, m_Scenario.width, m_Scenario.height, path, c.ui);
                 if (pose.source == "scenario") r.preset = "pose";
             }
             else
             {
                 var tr = template.transform;
-                r = HarnessCapture.Capture(template, tr.position, tr.rotation, template.fieldOfView, m_Scenario.width, m_Scenario.height, path);
+                r = HarnessCapture.Capture(template, tr.position, tr.rotation, template.fieldOfView, m_Scenario.width, m_Scenario.height, path, c.ui);
                 r.preset = string.IsNullOrEmpty(c.camera) ? "main" : "camera";
             }
             r.name = label;
             r.t = st;
-            if (r.blank && string.IsNullOrEmpty(r.error)) r.hint = HarnessCapture.BlankHint();
+            HarnessCapture.AddHints(r, template, c.ui);
             m_Shots.Add(r);
             m_CapturedLastFrame = true;
         }
 
-        // "screen": what the Game view shows, including screen-space UI (UI Toolkit / overlay canvases).
+        // "screen": what the Game view shows, at the Game view's size (the other presets lay the UI out at the capture size).
         // Needs a rendering Game view; if end-of-frame never arrives the shot is reported as an error.
         int m_PendingScreen;
         double m_ScreenRequestedAt;
@@ -551,6 +552,7 @@ namespace Harness
                 r.width = tex.width;
                 r.height = tex.height;
                 HarnessCapture.Analyze(tex.GetPixels32(), r);
+                HarnessCapture.AddHints(r, null, true);
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
                 File.WriteAllBytes(path, tex.EncodeToPNG());
             }

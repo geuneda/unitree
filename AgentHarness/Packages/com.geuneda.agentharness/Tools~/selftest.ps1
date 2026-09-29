@@ -3,15 +3,19 @@
   Harness self-test (O-3): the verification matrix of docs/ROADMAP.md as one script. Run it on the Editor tree after
   changing the harness, and per Unity version in a fresh clone (tools/fresh-clone-test.ps1 -SelfTest, P-1).
 
-  1 loop x3: green, same build.fingerprint and play.events (-ExpectFingerprint), no blank shots; compile-check of
-    every assembly (csc, the Editor's response files); one more loop with the scenario tools of P-5 (waitScene,
-    waitTarget, a UI Toolkit click by name, KeyCode key names, a capture from a pose and one from a named camera);
-    real input (G3-6): Space pressed on the real keyboard during a loop leaves play.events as they were, and the real
-    devices, disabled while a scenario plays, are enabled again after it, after a failed play and after a stopped one
+  1 loop x3: green, same build.fingerprint and play.events (-ExpectFingerprint), no blank/dark/magenta shots, every
+    shot 1280x720 with the HUD composited (G3-1); compile-check of every assembly (csc, the Editor's response files);
+    one more loop with the scenario tools of P-5 (waitScene, waitTarget, a UI Toolkit click by name, KeyCode key names,
+    a capture from a pose and one from a named camera); screen-space uGUI (G3-1) on a fixture that is never saved: an
+    overlay, a Screen Space - Camera canvas of the main camera and one of another camera composited in order, blended
+    in linear space, and put back; real input (G3-6): Space pressed on the real keyboard during a loop leaves
+    play.events as they were, and the real devices, disabled while a scenario plays, are enabled again after it, after
+    a failed play and after a stopped one
   2 C# compile error in Smoke -> stage=compile at the injected file/line, module Smoke; reverted -> green
   3 runtime exception in Smoke -> stage=runtime at the injected line; reverted -> green
   4 HLSL error in the Smoke shader -> stage=shader at the injected line, again in the next loop (no reimport);
-    reverted -> green
+    reverted -> green. A material the pipeline cannot draw (Standard in URP, G3-5) -> magenta shots whose hint names
+    the renderer, loop still green; reverted -> no magenta
   5 mutable static without a reset -> stage=lint (static-reset); removed -> green
   6 two loops at once -> both green, one of them waited for the lock
   7 worktrees + submit.ps1: the compile-check gate refuses a broken module without touching the Editor tree; a forced
@@ -64,6 +68,9 @@ $RuntimeBroken = 'if (laps == 1) throw new InvalidOperationException("selftest: 
 $ShaderMarker = 'float3 n = normalize(i.normalWS);'   # the first one in the forward pass's fragment function
 $ShaderAnchor = 'half4 Frag(Varyings i) : SV_Target'
 $ShaderBroken = 'float3 n = normalize(i.selftestMissing);'
+$SmokeBuilder = 'Assets/Game/Smoke/Builders/SmokeBuildStep.cs'
+$MagentaMarker = '"PedestalStone", "Universal Render Pipeline/Lit"'
+$MagentaBroken = '"PedestalStone", "Standard"'   # a Built-in pipeline shader: URP draws it with its error material
 
 $report = [ordered]@{ ok = $false; stage = ''; project = $root.Replace('\', '/'); projectVersion = (Get-HarnessProjectVersion); unityVersion = $null
     items = @(); fingerprint = $null; events = $null; lines = [ordered]@{}; shots = @() }
@@ -324,6 +331,98 @@ $ScenarioToolsText = @'
 }
 '@
 
+# Item 1's screen-space uGUI check (G3-1), an eval_file body: opens the play scene, adds canvases of the three kinds a
+# capture composites (an overlay, a Screen Space - Camera canvas of the main camera, one of another camera), captures the
+# main camera with and without UI and reopens the scene (the fixture is never saved).
+$UiFixtureText = @'
+var scenePath = Harness.Editor.HarnessPaths.ResolvePlayScene("", out var sceneError);
+if (scenePath == null) throw new System.InvalidOperationException("no play scene: " + sceneError);
+UnityEditor.SceneManagement.EditorSceneManager.OpenScene(scenePath);
+var main = Harness.HarnessCapture.FindMainCamera();
+var made = new List<UnityEngine.GameObject>();
+System.Func<string, UnityEngine.Transform, UnityEngine.GameObject> make = (name, parent) =>
+{
+    var go = new UnityEngine.GameObject(name, typeof(UnityEngine.RectTransform));
+    go.layer = 5;
+    if (parent != null) go.transform.SetParent(parent, false); else made.Add(go);
+    return go;
+};
+System.Func<string, UnityEngine.RenderMode, UnityEngine.Camera, UnityEngine.Color, UnityEngine.Vector2, UnityEngine.Vector2, UnityEngine.Canvas> canvas = (name, mode, cam, color, anchor, size) =>
+{
+    var go = make(name, null);
+    var c = go.AddComponent<UnityEngine.Canvas>();
+    c.renderMode = mode; c.worldCamera = cam; c.planeDistance = 1f;
+    var s = go.AddComponent<UnityEngine.UI.CanvasScaler>();
+    s.uiScaleMode = UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize; s.referenceResolution = new UnityEngine.Vector2(1920, 1080); s.matchWidthOrHeight = 0.5f;
+    var img = make("Image", go.transform);
+    img.AddComponent<UnityEngine.UI.Image>().color = color;
+    var rt = (UnityEngine.RectTransform)img.transform;
+    rt.anchorMin = rt.anchorMax = rt.pivot = anchor;
+    rt.anchoredPosition = new UnityEngine.Vector2(anchor.x > 0.5f ? -40f : 40f, anchor.y > 0.5f ? -40f : 40f);
+    rt.sizeDelta = size;
+    return c;
+};
+System.Func<UnityEngine.Canvas, string> describe = c => c.renderMode + "|" + (c.worldCamera != null ? c.worldCamera.name : "-") + "|" + c.planeDistance + "|" + ((UnityEngine.RectTransform)c.transform).rect.size;
+var result = new Dictionary<string, object>();
+try
+{
+    var camGo = make("[selftest ui camera]", null);
+    var other = camGo.AddComponent<UnityEngine.Camera>();
+    other.depth = 10; other.clearFlags = UnityEngine.CameraClearFlags.Depth; other.cullingMask = 1 << 5;
+    // (1053, 60) red at 50% over the scene, (1153, 643) green drawn with the scene, (127, 77) blue over the scene (x, y from the bottom left of 1280x720)
+    var canvases = new[]
+    {
+        canvas("[selftest overlay]", UnityEngine.RenderMode.ScreenSpaceOverlay, null, new UnityEngine.Color(1f, 0f, 0f, 0.5f), new UnityEngine.Vector2(1f, 0f), new UnityEngine.Vector2(600f, 300f)),
+        canvas("[selftest main camera canvas]", UnityEngine.RenderMode.ScreenSpaceCamera, main, UnityEngine.Color.green, new UnityEngine.Vector2(1f, 1f), new UnityEngine.Vector2(300f, 150f)),
+        canvas("[selftest camera canvas]", UnityEngine.RenderMode.ScreenSpaceCamera, other, UnityEngine.Color.blue, new UnityEngine.Vector2(0f, 0f), new UnityEngine.Vector2(300f, 150f)),
+    };
+    UnityEngine.Canvas.ForceUpdateCanvases();
+    var before = string.Join("; ", System.Array.ConvertAll(canvases, c => describe(c)));
+    var doc = UnityEngine.Object.FindFirstObjectByType<UnityEngine.UIElements.UIDocument>();
+    var ps = doc != null ? doc.panelSettings : null;
+    var panelBefore = ps != null ? (ps.targetTexture != null) + "|" + ps.clearColor + "|" + ps.colorClearValue : "";
+
+    var dir = "HarnessOut/selftest/ui-fixture";
+    System.IO.Directory.CreateDirectory(dir);
+    var t = main.transform;
+    var plain = Harness.HarnessCapture.Capture(main, t.position, t.rotation, main.fieldOfView, 1280, 720, dir + "/no-ui.png", false);
+    var shot = Harness.HarnessCapture.Capture(main, t.position, t.rotation, main.fieldOfView, 1280, 720, dir + "/ui.png", true);
+
+    System.Func<string, UnityEngine.Texture2D> load = f => { var x = new UnityEngine.Texture2D(2, 2); UnityEngine.ImageConversion.LoadImage(x, System.IO.File.ReadAllBytes(f)); return x; };
+    var a = load(dir + "/no-ui.png");
+    var b = load(dir + "/ui.png");
+    UnityEngine.Color32 under = a.GetPixel(1053, 60), red = b.GetPixel(1053, 60), green = b.GetPixel(1153, 643), blue = b.GetPixel(127, 77);
+    UnityEngine.Object.DestroyImmediate(a);
+    UnityEngine.Object.DestroyImmediate(b);
+    // 50% red over the pixel without UI, blended in linear space (on the stored values in a Gamma color space project)
+    var linear = UnityEngine.QualitySettings.activeColorSpace == UnityEngine.ColorSpace.Linear;
+    System.Func<float, byte, int> over = (src, dst) => linear
+        ? UnityEngine.Mathf.RoundToInt(UnityEngine.Mathf.LinearToGammaSpace(UnityEngine.Mathf.Clamp01(src + UnityEngine.Mathf.GammaToLinearSpace(dst / 255f) * 0.5f)) * 255f)
+        : UnityEngine.Mathf.RoundToInt(UnityEngine.Mathf.Clamp01(src + dst / 255f * 0.5f) * 255f);
+    var redDiff = System.Math.Max(System.Math.Abs(red.r - over(0.5f, under.r)), System.Math.Max(System.Math.Abs(red.g - over(0f, under.g)), System.Math.Abs(red.b - over(0f, under.b))));
+    result["ui"] = shot.ui;
+    result["colorSpace"] = linear ? "linear" : "gamma";
+    result["uiError"] = shot.uiError ?? "";
+    result["error"] = (plain.error ?? "") + (shot.error ?? "");
+    result["size"] = shot.width + "x" + shot.height;
+    result["red"] = red.ToString() + " over " + under;
+    result["redDiff"] = redDiff;
+    result["green"] = green.ToString();
+    result["greenOk"] = green.g > 100 && green.g > green.r + 40 && green.g > green.b + 40;
+    result["blue"] = blue.ToString();
+    result["blueOk"] = blue.b > 200 && blue.r < 40 && blue.g < 40;
+    result["canvasesRestored"] = before == string.Join("; ", System.Array.ConvertAll(canvases, c => describe(c)));
+    result["panelRestored"] = ps == null || panelBefore == (ps.targetTexture != null) + "|" + ps.clearColor + "|" + ps.colorClearValue;
+    result["renderMs"] = UnityEngine.Mathf.Round(shot.renderMs);
+}
+finally
+{
+    foreach (var o in made) if (o != null) UnityEngine.Object.DestroyImmediate(o);
+    UnityEditor.SceneManagement.EditorSceneManager.OpenScene(scenePath);
+}
+return result;
+'@
+
 # Item 1's real input checks (G3-6), eval_file bodies (no usings). The first one presses and releases Space on every real
 # (native) keyboard every few input updates of the next play session - queued on the Input System device, the path the
 # OS's key events take - like a person typing in another window. It disarms itself when play mode exits (or unused, after 120 s).
@@ -407,8 +506,11 @@ function Invoke-Item1 {
     Test-Check 'same build.fingerprint' ($fps.Count -eq 1 -and [bool]$fps[0]) ($fps -join ', ')
     Test-Check 'same play.events' ($evs.Count -eq 1) ($evs -join ' | ')
     if ($ExpectFingerprint) { Test-Check "fingerprint $ExpectFingerprint" ([bool]$fps[0] -and $fps[0].StartsWith($ExpectFingerprint)) $fps[0] }
-    $blank = @($runs | ForEach-Object { @($_.shotStats | Where-Object { $_.blank -or $_.dark -or $_.error }) })
-    Test-Check 'shots taken, none blank or dark' (@($runs[-1].shots).Count -gt 0 -and $blank.Count -eq 0) "$(@($runs[-1].shots).Count) shots, $($blank.Count) blank/dark"
+    $blank = @($runs | ForEach-Object { @($_.shotStats | Where-Object { $_.blank -or $_.dark -or $_.magenta -or $_.error }) })
+    Test-Check 'shots taken, none blank, dark or magenta' (@($runs[-1].shots).Count -gt 0 -and $blank.Count -eq 0) "$(@($runs[-1].shots).Count) shots, $($blank.Count) blank/dark/magenta"
+    # G3-1: the offscreen shots show the screen-space UI (the HUD), laid out at the capture size.
+    $noHud = @($runs | ForEach-Object { @($_.shotStats) } | Where-Object { "$($_.width)x$($_.height)" -ne '1280x720' -or @($_.ui) -notcontains 'uitk:SmokeHudPanel' -or $_.uiError })
+    Test-Check 'shots 1280x720 with the HUD composited (ui)' ($noHud.Count -eq 0) (@($noHud | ForEach-Object { "$($_.name) $($_.width)x$($_.height) ui=[$(@($_.ui) -join ',')] $($_.uiError)" }) -join ' | ')
     $report.fingerprint = $fps[0]
     $report.events = $evs[0]
     $report.shots = @($runs[-1].shots)
@@ -431,6 +533,18 @@ function Invoke-Item1 {
     $shots = @($r.shotStats | ForEach-Object { "$($_.name):$($_.preset)$(if ($_.blank) { ':BLANK' })$(if ($_.error) { ":$($_.error)" })" })
     Test-Check 'pose shot + named camera shot' (($shots -join ',') -eq 'top:pose,cam:camera') ($shots -join ',')
     $state.item['scenarioTools'] = [ordered]@{ waits = $w; clicks = @($c | ForEach-Object { "$($_.target) $($_.via)" }); shots = $shots }
+
+    # Screen-space uGUI (G3-1), in edit mode on a fixture that is never saved: an overlay (red at 50%), a Screen Space -
+    # Camera canvas of the main camera (green, drawn with the scene) and one of another camera (blue, over the scene).
+    $fixture = (Join-Path $outAbs 'ui-fixture.cs').Replace('\', '/')
+    Write-TextFile $fixture $UiFixtureText
+    $u = Invoke-Eval $fixture
+    $order = @($u.ui) -join ','
+    Test-Check 'uGUI: drawn in order (main camera canvas, other camera canvas, overlay, HUD)' ($order -eq 'ugui:[selftest main camera canvas],ugui:[selftest camera canvas],ugui:[selftest overlay],uitk:SmokeHudPanel' -and -not $u.uiError -and -not $u.error) "$order $($u.uiError) $($u.error)"
+    Test-Check 'uGUI: 1280x720, the overlay blended in linear space (red within 2 of the expected)' ($u.size -eq '1280x720' -and [int]$u.redDiff -le 2) "$($u.size) $($u.red) diff=$($u.redDiff)"
+    Test-Check 'uGUI: main camera canvas drawn with the scene (green), the other camera canvas over it (blue)' ([bool]$u.greenOk -and [bool]$u.blueOk) "green $($u.green) blue $($u.blue)"
+    Test-Check 'uGUI: canvases and the HUD panel put back' ([bool]$u.canvasesRestored -and [bool]$u.panelRestored) "canvases=$($u.canvasesRestored) panel=$($u.panelRestored)"
+    $state.item['uiFixture'] = [ordered]@{ ui = @($u.ui); red = $u.red; green = $u.green; blue = $u.blue; renderMs = $u.renderMs }
 
     # Real input (G3-6): Space pressed on the real keyboard during a loop does not reach the game; the real devices are
     # disabled only while a scenario plays, also when the play fails or is stopped.
@@ -509,7 +623,7 @@ function Invoke-Item3 {
 }
 
 function Invoke-Item4 {
-    Start-Item 4 'HLSL error'
+    Start-Item 4 'shader errors: HLSL, magenta material'
     Protect-EditorFile $SmokeShader
     $line = Edit-Line (Get-Abs $root $SmokeShader) $ShaderMarker $ShaderBroken -After $ShaderAnchor
     $report.lines['shader'] = $line
@@ -522,6 +636,20 @@ function Invoke-Item4 {
     }
     Restore-EditorFiles
     [void](Test-GreenAgain '4-restored')
+
+    # A material the render pipeline cannot draw (G3-5): URP draws the Built-in Standard shader magenta, without an error.
+    Protect-EditorFile $SmokeBuilder
+    [void](Edit-Line (Get-Abs $root $SmokeBuilder) $MagentaMarker $MagentaBroken)
+    $r = Invoke-Loop '4-magenta'
+    $m = @($r.shotStats | Where-Object { $_.magenta })
+    $named = @($m | Where-Object { "$($_.hint)" -like '*Smoke/Pedestal*Standard*' })
+    $shots = @($r.shotStats | ForEach-Object { "$($_.name) magenta=$($_.magenta) $($_.magentaRatio) $($_.hint)" }) -join ' | '
+    Test-Check 'magenta material: loop green (reported, not a failure)' ([bool]$r.ok) (Get-Summary $r)
+    Test-Check 'magenta material: magenta shots, hint names Smoke/Pedestal (Standard)' ($m.Count -gt 0 -and $named.Count -eq $m.Count) $shots
+    Restore-EditorFiles
+    $r = Test-GreenAgain '4-magenta-restored'
+    Test-Check 'no magenta after the revert' (@($r.shotStats | Where-Object { $_.magenta }).Count -eq 0) (@($r.shotStats | ForEach-Object { "$($_.name) $($_.magentaRatio)" }) -join ' | ')
+    $state.item['magenta'] = @($m | ForEach-Object { "$($_.name) $($_.magentaRatio)" })
     Complete-Item
 }
 

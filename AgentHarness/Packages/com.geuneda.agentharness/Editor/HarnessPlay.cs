@@ -177,6 +177,7 @@ namespace Harness.Editor
                     case PlayModeStateChange.EnteredPlayMode when st.state == "entering":
                     {
                         var scenario = JsonUtility.FromJson<Scenario>(st.scenarioJson);
+                        HarnessPaths.CaptureSize(ref scenario.width, ref scenario.height);
                         var hookNames = new System.Collections.Generic.List<string>();
                         var hookErrors = new System.Collections.Generic.List<string>();
                         var hook = HarnessInputHooks.Find(hookNames, hookErrors);

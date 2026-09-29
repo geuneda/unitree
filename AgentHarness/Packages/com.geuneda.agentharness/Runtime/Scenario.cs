@@ -16,8 +16,9 @@ namespace Harness
         public float fixedDeltaTime = 1f / 60f;   // 0 = real time
         public float readyTimeoutSec = 10f;
         public float warmupSec = 0.25f;           // excluded from fps stats (shader warmup hitches)
-        public int width = HarnessCapture.DefaultWidth;
-        public int height = HarnessCapture.DefaultHeight;
+        // Capture size; 0 = the project's: "captureSize" of the config, else 720x1280 for a portrait project, else 1280x720.
+        public int width;
+        public int height;
         /// <summary>
         /// Units of x, y in mousePos/click/mouseMove: "pixels" (Game view pixels, origin bottom left) or "normalized"
         /// (0..1 of the Game view, whose size is the user's Editor layout - use this for positions that must hit the same spot).
@@ -57,9 +58,10 @@ namespace Harness
 
     /// <summary>
     /// preset: a shot name (ShotPreset in the scene, or "shots" of ProjectSettings/AgentHarness.json), "main" (the main
-    /// camera as-is), "auto" (next unused shot by name, else the main camera) or "screen" (the Game view with its UI).
+    /// camera as-is), "auto" (next unused shot by name, else the main camera) or "screen" (the Game view as it is, at its size).
     /// camera: render from this camera (GameObject name or path) instead of the main camera.
     /// pos (+ lookAt or rot as Euler angles, fov): render from this pose, with the settings of the main camera (or camera).
+    /// ui: composite the screen-space UI (overlay canvases, UI Toolkit panels) laid out at the capture size (default true).
     /// </summary>
     [Serializable]
     public sealed class ScenarioCapture
@@ -72,6 +74,7 @@ namespace Harness
         public float[] lookAt;
         public float[] rot;
         public float fov;
+        public bool ui = true;
     }
 
     /// <summary>A scene that finished loading during the scenario (t = scenario clock, -1 before it started).</summary>

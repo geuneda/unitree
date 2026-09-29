@@ -71,6 +71,12 @@ namespace Harness
         public ConfigShot[] shots = Array.Empty<ConfigShot>();
 
         /// <summary>
+        /// [width, height] of captures that set no size (scenarios, harness_capture). Empty = the project's screen shape:
+        /// 720x1280 when Player Settings' default orientation is portrait, else 1280x720 (never the Game view's size).
+        /// </summary>
+        public int[] captureSize = Array.Empty<int>();
+
+        /// <summary>
         /// Regular expressions for errors this project is known to log (e.g. an SDK whose desktop library is not in the
         /// repository). Matching runtime errors are reported as knownErrors and do not fail a loop.
         /// </summary>
@@ -157,6 +163,7 @@ namespace Harness
             installAdded = Array.FindAll(installAdded ?? Array.Empty<string>(), a => !string.IsNullOrWhiteSpace(a));
             shots = Array.FindAll(shots ?? Array.Empty<ConfigShot>(), s => s != null && !string.IsNullOrWhiteSpace(s.name));
             knownErrors = Array.FindAll(knownErrors ?? Array.Empty<string>(), k => !string.IsNullOrWhiteSpace(k));
+            if (captureSize == null || captureSize.Length != 2 || captureSize[0] <= 0 || captureSize[1] <= 0) captureSize = Array.Empty<int>();
             generatedRoot = N(generatedRoot);
             buildScene = N(buildScene);
             playScene = string.IsNullOrWhiteSpace(playScene) ? "first" : playScene.Trim().Replace('\\', '/');

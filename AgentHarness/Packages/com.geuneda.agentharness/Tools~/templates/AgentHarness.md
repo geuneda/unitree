@@ -16,8 +16,9 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   `compileErrors`/`runtimeErrors`(file·line·module)를 본다. `editorErrors`는 Unity·패키지 내부 에러라 실패로 치지 않는다.
   `knownErrors`(설정의 `knownErrors` 정규식에 맞은 에러)와 `teardownErrors`(시나리오가 끝난 뒤 플레이 모드를 나가며 난 에러, 예: 끝나지 않은 부트의 취소)도
   실패는 아니지만 읽어 본다.
-- **매 루프 후 `shots`의 PNG를 Read 툴로 직접 연다.** `shotStats[].blank`(평평한 화면)는 실패, `dark`(98% 검정)는 의심. `hint`가 있으면 이유다
-  (예: 화면이 오버레이 UI뿐이라 카메라 렌더가 비었다 → 캡처를 `"screen"`으로).
+- **매 루프 후 `shots`의 PNG를 Read 툴로 직접 연다.** `shotStats[].blank`(평평한 화면)는 실패, `dark`(98% 검정)는 의심,
+  `magenta`는 렌더 파이프라인이 못 그리는 머티리얼(URP에서 Built-in 셰이더, 없는·깨진 셰이더)일 가능성이 크다. `hint`가 있으면 이유다
+  (마젠타로 그린 렌더러, 화면에 그리는 다른 카메라). 샷에는 스크린 공간 UI가 합성돼 있다(`shotStats[].ui`, 아래 "캡처").
 - `play`: `probeReady`, `frames`, `events`(하네스 모듈의 EventBus 발행 수), `scenes`(로드된 씬과 시각), `waits`, `clicks`, `inputBackends`,
   `isolatedDevices`(시나리오 동안 끈 실제 장치와 막은 키·버튼 누름 수 — 사람이 그 사이 키보드를 만져도 결과가 같다).
   `fps`는 에디터 플레이 모드 값이라 변경 전후 비교용.
@@ -43,8 +44,8 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
     { "t": 0.1, "type": "click", "target": "PlayButton" },                          // uGUI/씬 오브젝트 이름·경로 또는 UI Toolkit 요소 이름
     { "t": 0.3, "type": "waitScene", "scene": "Level1", "timeoutSec": 60 },         // 그 씬이 로드될 때까지 시계 정지
     { "t": 1.0, "type": "keyTap", "key": "Space", "hold": 0.1 } ],
-  "captures": [ { "t": 0.05, "preset": "screen", "name": "menu" },                  // Game 뷰 그대로(스크린 공간 UI 포함)
-                { "t": 1.5, "preset": "main" },                                      // 메인 카메라(오프스크린 1280x720, UI 없음)
+  "captures": [ { "t": 0.05, "preset": "main", "name": "menu" },                    // 메인 카메라 + 스크린 공간 UI(캡처 크기로 배치)
+                { "t": 1.5, "preset": "screen" },                                    // Game 뷰 그대로(Game 뷰 크기)
                 { "t": 2.5, "name": "top", "pos": [0, 30, -0.1], "lookAt": [0, 0, 0], "fov": 50 } ] }
 ```
 - `t`는 첫 씬 로드 뒤 **게임 시간**(초). `fixedDeltaTime`이면 매번 같은 프레임에서 캡처한다. 로딩(네트워크, Addressables)은 벽시계로 걸려서
@@ -64,6 +65,11 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   옛 `HarnessInput.cs`가 새 버전으로 바뀐다(고친 사본은 경고만).
 - 캡처 `preset`: `"auto"`(샷이 없으면 메인 카메라) · `"main"` · `"screen"`(Game 뷰 그대로, Game 뷰 탭이 보여야 함) · 샷 이름(설정 `shots`) ·
   `"camera": "<카메라 이름>"` · `"pos"` + `"lookAt"`/`"rot"` + `"fov"`(그 자리에서, 메인 카메라 설정으로).
+- `"screen"` 말고는 카메라를 오프스크린으로 렌더하고 **스크린 공간 UI(uGUI 캔버스, UI Toolkit 패널)를 캡처 크기로 다시 배치해 합성**한다 → 메뉴·HUD·팝업이
+  사람의 Game 뷰 크기와 상관없이 같은 모양으로 찍힌다. 합성한 것은 `shotStats[].ui`(아래부터). 메인 카메라의 Screen Space - Camera 캔버스는 씬과 함께
+  (후처리 포함), 다른 카메라의 캔버스는 그 위, 오버레이 캔버스·UI Toolkit 패널은 맨 위에(sortingOrder 순). 캔버스 모드·패널 타깃을 잠깐 바꿨다 같은 프레임에
+  되돌린다 — UI 코드가 크기 변화에 반응해 게임이 이상해지면 그 캡처에 `"ui": false`. 카메라 스택의 다른 카메라가 그리는 3D는 빠진다(`"screen"`, `"camera"`).
+- 캡처 크기: 시나리오 `"width"`/`"height"` → 설정 `captureSize` → 세로 게임(Player Settings 기본 방향)이면 720x1280, 아니면 1280x720.
 
 ## 규칙 (기존 프로젝트)
 
@@ -90,6 +96,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   "contracts": "",                         // 모듈 간 공유 이벤트 폴더(추가만)
   "shots": [ { "name": "overview", "scene": "Level1", "pos": [0, 20, -20], "lookAt": [0, 0, 0], "fov": 50 } ],   // 이름 있는 캡처 포즈
   "knownErrors": [ "^\\[Analytics\\] init failed" ],   // 이 프로젝트가 원래 내는 에러(정규식): knownErrors로 보고, 루프를 막지 않음
+  "captureSize": [ 720, 1560 ],            // 크기를 주지 않은 캡처의 크기(없으면 세로 게임 720x1280, 그 외 1280x720)
   "generatedRoot": "Assets/AgentHarness/Generated", "buildScene": "Assets/AgentHarness/Main.unity",   // 코드 빌더(IBuildStep)를 쓸 때
   "installAdded": [], "installReplaced": []   // 설치가 더한/올린 의존성(uninstall이 되돌림) - 손대지 않는다
 }
@@ -100,7 +107,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
 - `open.ps1`의 `dialog`: 에디터가 모달 대화상자(Safe Mode, 이용 약관 등)에 막혀 있다 → 사람에게 답을 부탁하고 `open.ps1`을 다시 부른다(그 에디터를 기다린다).
   `deprecatedPackages`가 함께 나오면 Unity가 열 때마다 묻는 지원 종료 패키지다 → `Packages/manifest.json`에서 빼거나 바꾼다.
 - `stage=editor`: 에디터가 없거나 응답이 없다 → `tools/open.ps1`. 시작 시 컴파일 에러면 Safe Mode다(`Logs/Editor.log`의 `error CS`).
-- `stage=shots`(`blank`): 화면이 비었다. `hint`를 본다. 메뉴·타이틀처럼 UI뿐인 화면은 `"screen"`으로 찍는다. 편집 모드(`-NoPlay`)에서는 플레이 중에만
+- `stage=shots`(`blank`): 화면이 비었다. `hint`를 본다(화면에 그리는 카메라가 따로 있으면 `"camera"`로). 편집 모드(`-NoPlay`)에서는 플레이 중에만
   그리는 게임이 검게 나온다. 카메라가 런타임에 생기는 게임이면 메인 카메라가 없다고 나온다.
 - `stage=play` + `waitScene/waitTarget ... after Ns`: 그 씬·요소가 제한 시간 안에 나오지 않았다. 에러 메시지의 로드된 씬 목록과 `Logs/Editor.log`를 본다
   (게임이 로그인·입력을 기다리는 중일 수 있다 → 그 버튼을 `waitTarget` + `click`).

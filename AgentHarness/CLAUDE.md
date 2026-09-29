@@ -44,7 +44,9 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 
 **매 루프 후 반드시**: `report.json`의 `ok/stage`를 보고, `shots`의 PNG를 **Read 툴로 직접 열어** 눈으로 확인한다.
 `shotStats[].blank=true`(평평/검은 화면)면 렌더가 깨진 것이다. `dark=true`(픽셀 98% 이상이 거의 검정)는 실패로 치지 않지만
-조명이 빠진 화면일 가능성이 크다 — PNG를 열어 본다.
+조명이 빠진 화면일 가능성이 크다 — PNG를 열어 본다. `magenta=true`(에러 셰이더의 마젠타가 0.05% 이상)도 실패로 치지 않지만 거의 항상
+렌더 파이프라인이 못 그리는 머티리얼이다(URP 프로젝트에서 `Shader.Find("Standard")` 같은 Built-in 셰이더, 없는·깨진 셰이더) — `hint`가 그 렌더러를 짚는다.
+샷에는 스크린 공간 UI(uGUI 캔버스·UI Toolkit 패널)가 캡처 크기로 다시 배치돼 합성돼 있다(`shotStats[].ui`, 아래 "시나리오").
 
 옵션: `-Scenario tools/scenarios/x.json`, `-Out HarnessOut/x`, `-NoPlay`(편집 모드 캡처만), `-NoCompile`.
 **여러 에이전트가 동시에 작업하면** 이 폴더를 직접 고치지 말고 각자 worktree에서 `tools/submit.ps1`을 쓰고, 끝나면 커밋해서
@@ -72,7 +74,9 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
            "activeScene", "scenes":[{"name","mode","t","wallSec"}],      // 로드된 씬(Start = 처음부터 있던 씬, t = 시나리오 시계)
            "waits":[{"type","target","t","waitedSec","frames"}], "clicks":[{"target","t","x","y","via"}]},
   "render": {"batches","setPassCalls","drawCalls","triangles","vertices"},
-  "shotStats": [{"name","preset","t","meanLuma","stdLuma","blank","dark","error","hint"}],   // hint: blank의 이유 추정(화면이 오버레이 UI뿐 → "screen")
+  "shotStats": [{"name","preset","t","width","height","meanLuma","stdLuma","blank","dark","magenta","magentaRatio",
+                 "ui":["ugui:<캔버스 경로>","uitk:<PanelSettings>"],   // 합성한 UI(아래부터), 합성 실패는 "uiError"
+                 "error","hint"}],   // hint: blank·magenta의 이유(화면에 그리는 다른 카메라, 마젠타로 그린 렌더러)
   "lint": [{"rule","module","file","message"}], "warningCount": 0,
   "submit": {"phase","synced","kept","reverted","written","deleted","contractsAdded","metaWrittenBack",   // submit.ps1만.
              "errorModules","restore","check","owner","takeover"},   // timings에 checkSec/syncSec/restoreSec 추가
@@ -113,7 +117,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 ```
 Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json: com.unity.pipeline 의존)
   Runtime/                     런타임 계약: GameRoot, IGameModule, EventBus, HarnessProbe, HarnessConfig, ShotPreset(+ShotPose), ScriptedInput,
-                               ScenarioInput(KeyNames, InputHookReplay), ScenarioRunner, HarnessCapture
+                               ScenarioInput(KeyNames, InputHookReplay), ScenarioRunner, HarnessCapture(+CaptureUi: 스크린 공간 UI 합성)
                                (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
   Runtime/Procedural/          MeshBuilder, Noise(Perlin/fBm/Ridged/Worley/Rng), TextureBaker, PMath
   Editor/                      [CliCommand] harness_* 와 BuildContext/IBuildStep, HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
@@ -202,7 +206,7 @@ public sealed class FooBuildStep : IBuildStep
 | 커맨드 | 하는 일 |
 |---|---|
 | `harness_build` | Builders의 IBuildStep을 Order 순으로 빈 씬에 실행 → `buildScene` 저장. `{ok, fingerprint, steps[], cacheHits, deletedAssets}`. `dry_run`, `no_cache`. 빌드 스텝이 없고 `playScene`이 build가 아니면(기존 프로젝트) 플레이 씬을 열고 에셋 기준 fingerprint만(`skipped`) |
-| `harness_capture` | `{"preset":"all"\|"<name>"\|"main","out":"HarnessOut/capture","scene":""}` 편집 모드 오프스크린 1280x720 PNG + `meanLuma/stdLuma/blank`. 샷 = 씬의 ShotPreset + 설정 `shots`. 플레이 씬을 먼저 연다(`"scene":"open"`이면 열린 씬 그대로) |
+| `harness_capture` | `{"preset":"all"\|"<name>"\|"main","out":"HarnessOut/capture","scene":"","ui":true}` 편집 모드 오프스크린 PNG(프로젝트 캡처 크기, 스크린 공간 UI 합성) + `meanLuma/stdLuma/blank/dark/magenta/ui`. 샷 = 씬의 ShotPreset + 설정 `shots`. 플레이 씬을 먼저 연다(`"scene":"open"`이면 열린 씬 그대로) |
 | `harness_play` | `{"scenario":"tools/scenarios/default.json"\|"{...inline}","out":"HarnessOut/play"}` 즉시 반환 → `harness_play_status` 폴링 |
 | `harness_play_status` | `entering\|running\|exiting\|done\|failed` + 끝나면 `result`(result.json) |
 | `harness_console` | `{"since":<mark>,"until":<seq>}` 최신 컴파일 에러(file,line,msg,module) + mark 이후 런타임 에러/경고 수. `until` 뒤의 에러는 `teardownErrors`, 설정 `knownErrors`에 맞으면 `knownErrors`. 응답의 `mark`를 다음에 넘긴다 |
@@ -249,10 +253,22 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
   끈 마우스 등)는 건드리지 않는다. 구 Input Manager를 `Input.`으로 직접 읽는 코드는 막을 수 없다 — `HarnessInput`을 거쳐야 한다.
 - 캡처는 그 프레임의 모든 `LateUpdate` 뒤에 찍는다(LateUpdate에서 카메라를 움직이거나 `Graphics.DrawMesh*`로 그리는 게임도 그대로 찍힌다).
 - 캡처 `preset`: 샷 이름(씬의 ShotPreset 또는 설정 `shots`) · `"auto"`(이름순 다음 샷, 없으면 메인 카메라) · `"main"`(메인 카메라 그대로) ·
-  `"screen"`(Game 뷰 그대로 = **UI 오버레이 포함**, 해상도는 Game 뷰 크기, Game 뷰 탭이 보여야 함).
+  `"screen"`(Game 뷰 그대로, 해상도는 Game 뷰 크기 = 사용자 레이아웃, Game 뷰 탭이 보여야 함).
   `"camera": "<이름>"`이면 그 카메라로, `"pos": [x,y,z]` + `"lookAt": [x,y,z]`(또는 `"rot"` 오일러) + `"fov"`면 그 자리에서 찍는다(설정은 메인 카메라).
-  나머지는 오프스크린 렌더라 **스크린 공간 UI가 안 찍힌다**. HUD 확인은 `"screen"`을 쓴다(`tools/scenarios/screen.json`). UI뿐인 화면이
-  `blank`로 나오면 `shotStats[].hint`가 알려 준다.
+- `"screen"` 말고는 오프스크린 렌더에 **스크린 공간 UI를 캡처 크기로 다시 배치해 합성**한다(G3-1, `Runtime/CaptureUi.cs`) → HUD·메뉴·팝업이 Game 뷰 크기와
+  상관없이 같은 모양으로 찍힌다. 합성한 것은 `shotStats[].ui`(아래부터 그린 순서):
+  - 템플릿 카메라(메인 카메라, `"camera"`면 그 카메라)의 Screen Space - Camera 캔버스 → 캡처 카메라가 씬과 함께 그린다(게임처럼 후처리 포함).
+  - 화면에 그리는 다른 카메라의 Screen Space - Camera 캔버스 → 씬 위(카메라 depth 순), 그 위에 Screen Space - Overlay 캔버스와 UI Toolkit
+    패널(sortingOrder 순, 같으면 UI Toolkit이 위). 레이어마다 투명 RT에 그려 프리멀티플라이드 알파로 합성(프로젝트 색 공간, 선형이면 선형 공간).
+  - 캔버스의 렌더 모드·카메라·plane distance, PanelSettings의 타깃 텍스처를 잠깐 바꿨다가 같은 프레임에 되돌린다(레이아웃 포함). 그 사이 UI 코드의
+    `OnRectTransformDimensionsChange`·`GeometryChangedEvent`가 캡처 크기와 Game 뷰 크기로 한 번씩 더 불린다. `Screen.width`를 직접 읽어 배치한
+    UI는 Game 뷰 기준 그대로다. 게임이 그걸로 이상해지면 캡처에 `"ui": false`(`harness_capture {"ui":false}`).
+  - 빠지는 것: 타깃 텍스처가 있는 패널(게임의 render-to-texture UI), 다른 디스플레이, 카메라 스택의 다른 카메라가 그리는 3D(무기 오버레이, 미니맵) →
+    `"screen"`이나 `"camera"`. 캡처가 비었는데(`blank`) 화면에 그리는 다른 카메라가 있으면 `hint`가 알려 준다.
+  - UI Toolkit 패널은 내부 API(`RuntimePanel.Update`, `UIElementsRuntimeUtility.RepaintPanel/RenderPanel`, 리플렉션)로 즉시 그린다. 없는 Unity 버전이면
+    `uiError`로 보고한다(selftest 1번이 버전마다 HUD를 확인).
+- 캡처 크기: 시나리오 `"width"`·`"height"` → 설정 `captureSize` → 프로젝트 방향(Player Settings 기본 방향이 세로, 또는 세로만 허용한 자동 회전이면
+  720x1280) → 1280x720. Game 뷰 크기는 쓰지 않는다.
 - 새 게임플레이를 넣으면 `default.json`의 입력/캡처와 기대 이벤트 수를 같이 갱신한다.
 
 ## 병렬 에이전트: worktree + submit + land (남의 컴파일 에러에 막히지 않기)
@@ -362,10 +378,11 @@ powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                     
 powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 977545a7
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
-- 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark 없음) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
+- 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark/magenta 없음, 모든 샷 1280x720에 HUD 합성) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
+  uGUI 합성(편집 모드, 저장하지 않는 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·다른 카메라의 캔버스 → 순서, 선형 공간 블렌드 오차 ≤ 2, 되돌림) +
   실제 입력 격리(플레이 동안 실제 키보드 장치에 스페이스를 넣어도 events 그대로·`isolatedDevices` 누름 > 0, 실패·중단한 플레이 뒤에도 실제 장치가 다시 켜짐) +
   `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 ·
-  4 HLSL 에러(재임포트 없는 다음 루프에서도) · 5 리셋 없는 static(lint) · 6 루프 2개 동시 · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
+  4 HLSL 에러(재임포트 없는 다음 루프에서도) + 파이프라인이 못 그리는 머티리얼(받침대를 `Standard`로 → 샷 `magenta`, `hint`에 `Smoke/Pedestal`, 루프는 녹색) · 5 리셋 없는 static(lint) · 6 루프 2개 동시 · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
   다른 worktree의 새 모듈·계약은 락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부) ·
   8 land(fast-forward + 그 사이 submit 락 대기, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
   병합 직후 kill → `recoveredLand`). 에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
@@ -420,6 +437,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - `shots`: `[{"name","scene","pos":[x,y,z],"lookAt":[x,y,z]|"rot":[x,y,z],"fov"}]` 이름 있는 캡처 포즈. 기존 씬에 ShotPreset을 넣지 않고 쓴다
   (`scene`이 있으면 그 씬이 로드됐을 때만). 시나리오 `"preset"`·`"auto"`와 `harness_capture`가 ShotPreset과 함께 쓴다.
 - `knownErrors`: 정규식 목록. 프로젝트가 원래 내는 에러(예: 저장소에 없는 SDK 데스크톱 라이브러리)를 `knownErrors`로 돌려 루프를 막지 않게 한다.
+- `captureSize`: `[w, h]` 크기를 주지 않은 캡처(시나리오·`harness_capture`)의 크기. 없으면 세로 프로젝트 720x1280, 그 외 1280x720.
 
 - `attach`에서 `harness_build`는 하네스가 만든 적 없는 씬·에셋(`AgentHarnessGenerated` 라벨 없음)을 덮어쓰거나 지우지 않고, Build Settings를 바꾸지 않는다.
 - 씬에 저장 안 한 변경이 있으면 play/capture/build는 씬을 바꾸지 않고 실패한다(`unsaved changes in ...`). 생성된 buildScene은 예외.
@@ -501,6 +519,8 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   다른 창에서 누른 키가 게임 이벤트가 됐다(루프 ~25회에 1회 `play.events`가 달랐다, G3-6) → 시나리오 동안 실제 장치를 끈다. Input System의
   `LeavePlayMode`는 백그라운드 때문에 꺼진 장치만 켜고 `DisableDevice`로 끈 장치는 그대로 두므로, 끈 쪽이 반드시 다시 켜야 한다(러너 `Finish`,
   에디터의 `EnteredEditMode`). 실제 장치는 플레이 진입·에디터 포커스 때 상태 이벤트(sync)를 보내므로 "막은 입력"은 이벤트 수가 아니라 누름으로 센다.
+- `Object.FindObjectsByType`은 `HideFlags.DontSave` 오브젝트를 돌려주지 않는다. 캡처·클릭 대상 탐색도 그걸 쓰므로, 에디터 테스트 픽스처는 일반 오브젝트로
+  만들고(편집 모드에서 스크립트로 만든 오브젝트는 씬을 dirty로 만들지 않았다) 끝나면 씬을 다시 연다(selftest 1번의 uGUI 픽스처).
 - Input System 패키지가 있는 프로젝트의 Active Input Handling을 Old로 바꾸면 Input System이 "백엔드를 켤까요?" 모달을 띄워 에디터 메인 스레드가 멈춘다.
 - **클론·worktree도 원본 프로젝트와 PlayerPrefs를 공유한다**(에디터에서는 company/product별 레지스트리). 사내 프로젝트 클론의 시나리오가 개발용 로그인
   대화상자를 건너뛰자 원본에 저장된 선택(라이브 서버)으로 로그인했다. 서버 선택 같은 버튼은 시나리오에서 명시적으로 누르고, 바꾼 PlayerPrefs는 되돌린다.

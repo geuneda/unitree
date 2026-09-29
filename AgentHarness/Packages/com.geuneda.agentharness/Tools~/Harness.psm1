@@ -941,7 +941,17 @@ function Invoke-HarnessLoop {
     $report.runtimeErrors = $runtimeErrors
     $report['warningCount'] = $warningCount
     $report.shots = @($shotObjs | Where-Object { $_.path } | ForEach-Object { $_.path })
-    $report['shotStats'] = @($shotObjs | ForEach-Object { [ordered]@{ name = $_.name; preset = $_.preset; t = $_.t; meanLuma = [math]::Round($_.meanLuma, 1); stdLuma = [math]::Round($_.stdLuma, 1); blank = $_.blank; dark = [bool]$_.dark; error = $_.error; hint = $(if ($_.PSObject.Properties.Name -contains 'hint') { $_.hint } else { $null }) } })
+    $report['shotStats'] = @($shotObjs | ForEach-Object {
+        # Fields a result of an older package version does not have are left out.
+        $has = @($_.PSObject.Properties.Name)
+        $s = [ordered]@{ name = $_.name; preset = $_.preset; t = $_.t; width = $_.width; height = $_.height; meanLuma = [math]::Round($_.meanLuma, 1); stdLuma = [math]::Round($_.stdLuma, 1); blank = $_.blank; dark = [bool]$_.dark }
+        if ($has -contains 'magenta') { $s['magenta'] = [bool]$_.magenta; $s['magentaRatio'] = [math]::Round([double]$_.magentaRatio, 4) }
+        if ($has -contains 'ui') { $s['ui'] = @($_.ui | Where-Object { $_ }) }
+        if ($has -contains 'uiError' -and $_.uiError) { $s['uiError'] = $_.uiError }
+        $s['error'] = $_.error
+        $s['hint'] = $(if ($has -contains 'hint') { $_.hint } else { $null })
+        $s
+    })
     if ($stats -and $stats.success -and $stats.result.ok) {
         $f = $stats.result.fps
         $report.fps = [ordered]@{ avg = [math]::Round($f.avg, 1); min = [math]::Round($f.min, 1); p95ms = [math]::Round($f.p95ms, 2); p99ms = [math]::Round($f.p99ms, 2); hitches = $f.hitches; cpuMainAvgMs = [math]::Round($f.cpuMainAvgMs, 2); samples = $f.samples; editorFocused = $stats.result.editorFocused }

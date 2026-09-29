@@ -21,7 +21,7 @@
 | 순서 | 워크플로우 | 항목 | 크기 | 선행 | 상태 |
 |---|---|---|---|---|---|
 | W1 | 시나리오 입력 격리 | G3-6 | S | — | 완료 (2026-09-29) |
-| W2 | 캡처가 화면 전체를 본다 | G3-1, G3-5 | M | W1 | 대기 |
+| W2 | 캡처가 화면 전체를 본다 | G3-1, G3-5 | M | W1 | 완료 (2026-09-29) |
 | W3 | 시각 회귀와 움직임 | G3-4, G3-3 | M | W1, W2 | 대기 |
 | W4 | 렌더 설정을 코드로 | G1-1, P-4, G4-3, G4-2 | L | W3 | 대기 |
 | W5 | 루프 속도 | G2-3, G2-1 | L | — | 대기 |
@@ -40,7 +40,7 @@
   시나리오 재생 중에는 실제 입력을 빼도록 훅에 시작·끝을 알린다. shim은 게임 소유 파일(uninstall이 남김)이라 이미 붙인 프로젝트의 갱신 방법도 정한다.
 - 추가 검증: 루프 도중 실제 키보드로 스페이스 연타 → `play.events` 매번 같음. 플레이가 실패·중단돼도 장치가 다시 켜지는지(수동 플레이에서 키보드가 죽지 않는지).
 
-### W2 캡처가 화면 전체를 본다 (G3-1 → G3-5)
+### W2 캡처가 화면 전체를 본다 (G3-1 → G3-5) — 완료 (2026-09-29, 아래 "해결됨")
 - 왜: 기존 프로젝트는 UI가 화면의 전부인 경우가 많은데(P-5, 사내 프로젝트 A) 지금은 `"screen"`으로만 찍히고 크기가 사용자 레이아웃을 따른다.
   W3의 기준 이미지 비교도 고정 해상도·UI 포함 캡처가 있어야 된다.
 - 고치는 곳: `Runtime/HarnessCapture.cs`(UI 합성, 이미지 통계), `Runtime/ShotPreset.cs`, `Editor/HarnessCaptureCommand.cs`.
@@ -53,7 +53,8 @@
 - 고치는 곳: `Tools~/loop.ps1`·`Tools~/Harness.psm1`(report.json에 diff 점수), 샘플의 `golden/`,
   `Runtime/ScenarioRunner.cs`·`Runtime/HarnessCapture.cs`(N프레임 연속 캡처 → 스프라이트 시트/GIF).
 - 먼저 정할 것: 기준 이미지는 Unity 버전별로 둔다(P-4처럼 버전마다 렌더가 다르다). 머신·GPU 차이 허용치(P-3의 부동소수점 문제와 같은 기준).
-  의도한 변경일 때 기준 이미지를 갱신하는 명령.
+  의도한 변경일 때 기준 이미지를 갱신하는 명령. 캡처에 스크린 공간 UI가 합성되므로(W2) 기준 이미지에 HUD가 들어간다 — 시간·네트워크 값처럼 매번 다른
+  글자가 있는 게임은 비교에서 뺄 영역이나 `"ui": false` 샷을 정한다.
 - 추가 검증: 같은 코드로 3회 → diff가 허용치 안. 셰이더 한 줄 수정 → 점수가 움직이고 report에 보임.
 - W4 전에 하는 이유: W4는 렌더 설정을 통째로 코드로 옮긴다. "옮기기 전과 같게 나오는지"를 이걸로 확인한다.
 
@@ -165,12 +166,7 @@
 
 ## 성질 3 — 에이전트가 화면을 본다
 
-- [ ] **G3-1 오프스크린 캡처에 스크린 공간 UI가 안 찍힌다**
-  - 현상: 프리셋 캡처는 카메라 오프스크린 렌더라 UI Toolkit/오버레이 UI가 빠진다. `"screen"` 캡처는 Game 뷰 탭이 보일 때만 되고 해상도가 Game 뷰 크기를 따른다(1차 검증 때 568x562).
-  - 방향: `PanelSettings.targetTexture`로 UI를 RT에 렌더해 합성한다. Game 뷰 해상도 고정은 쓰지 않는다(Game 뷰 크기는 사용자 전역 설정이라 코드로 바꾸면 사용자 레이아웃이 바뀐다).
-  - 완료 기준: `"auto"` 프리셋 캡처에도 HUD가 1280x720으로 찍힌다.
-  - 2026-09-29(P-5): 기존 프로젝트는 UI가 화면의 전부인 경우가 많다(사내 프로젝트 A의 부트·로그인·타이틀·로비). 그 화면은 `"screen"`으로만 찍히고, 크기는
-    사용자 레이아웃의 Game 뷰(그때 366x415)라 샷 통계·픽셀 좌표가 레이아웃마다 달라진다. 좌표는 `"mouseSpace": "normalized"`와 `click`의 `target`으로 피했다.
+- **G3-1 오프스크린 캡처에 스크린 공간 UI가 안 찍힌다** → 2026-09-29 해결(W2, 아래 "해결됨").
 
 - [ ] **G3-2 에디터 플레이 모드 FPS는 실제 성능을 대표하지 못한다**
   - 현상: 에디터 오버헤드, autotick, Debug 코드 최적화가 섞인다. 지금은 변경 전후 비교에만 쓸 수 있다.
@@ -183,9 +179,8 @@
 - [ ] **G3-4 시각 회귀 검사가 없다**
   - 방향: `golden/` 기준 이미지와 픽셀 diff(SSIM 등) 점수를 report.json에 포함.
 
-- [ ] **G3-5 이미지 판정이 휴리스틱이다**
-  - 현상: `blank`는 밝기 표준편차·색 버킷 수로만 판정. 셰이더 실패로 인한 마젠타(핑크) 머티리얼은 따로 잡지 못한다(컴파일 에러는 `harness_shaders`가 잡음).
-  - 방향: 마젠타 픽셀 비율 통계 추가.
+- **G3-5 이미지 판정이 휴리스틱이다(마젠타 머티리얼)** → 2026-09-29 해결(W2, 아래 "해결됨"). `blank`·`dark`는 여전히 휴리스틱이다
+  (기준 이미지 비교는 G3-4).
 
 - **G3-6 실제 키보드·게임패드 입력이 시나리오 재생에 섞인다** → 2026-09-29 해결(W1, 아래 "해결됨").
 
@@ -309,13 +304,16 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
 (새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~5분), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
 
-1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark 샷 없음 + `compile-check -IncludeHarness`
+1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark·magenta 샷 없음, 모든 샷 1280x720에
+   HUD 합성(`ui`) + `compile-check -IncludeHarness`
    + 시나리오 도구 루프 한 번: `waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처
+   + uGUI 합성(G3-1, 편집 모드 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·다른 카메라의 캔버스 → 순서, 색 공간 블렌드 오차 ≤ 2, 되돌림)
    + 실제 입력 격리(G3-6): 플레이 동안 실제 키보드 장치에 스페이스를 넣어도 `play.events` 그대로·`isolatedDevices` 누름 > 0, 실패한 플레이·중간에
    멈춘 플레이 뒤에도 실제 장치가 다시 켜짐)
 2. C# 컴파일 에러 주입 → `stage=compile`, file/line/module 정확 → 원복 후 녹색
 3. 런타임 예외 주입 → `stage=runtime`, 정확한 줄 → 원복 후 녹색
-4. HLSL 에러 주입 → `stage=shader`, 재임포트 없는 다음 루프에서도 검출 → 원복 후 녹색
+4. HLSL 에러 주입 → `stage=shader`, 재임포트 없는 다음 루프에서도 검출 → 원복 후 녹색. 파이프라인이 못 그리는 머티리얼(받침대 → `Standard`, G3-5)
+   → 샷 `magenta` + `hint`에 `Smoke/Pedestal`, 루프는 녹색 → 원복 후 마젠타 없음
 5. 리셋 없는 static 추가 → `stage=lint` → 원복
 6. 루프 2개 동시 실행 → 두 번째가 대기 후 성공
 7. worktree 격리(G5-2): 에이전트 worktree 2개. A가 깨진 코드를 `submit.ps1 -SkipCheck` → `stage=compile` + `reverted` + `restore.ok`,
@@ -332,7 +330,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
    `tools/attach-test.ps1 -Project <클론> [-Scene ...] [-Module ...]` 녹색 — install → 설치분만 바뀜 → 기존 씬으로 루프 3회 녹색(fingerprint·events 동일)
    → 출시 빌드에 `Harness.*` 없음 → uninstall 뒤 `git status` 비어 있음. `shots/`를 Read로 확인. 지금 쓰는 클론(`../ah-p2`, 기준선 커밋 포함):
    BagelGame(`-Module Game=Assets/Game,UI=Assets/UI`), Fluid-Sim(`-Scene "Assets/Scenes/Fluid Particles.unity"`), 사내 프로젝트 A(비공개 클론, 이 머신에만;
-   `-Scenario`로 부트 대화상자를 기다리는 시나리오, `-KnownErrors`, `-NoBuild`). 배포 경로를 바꿨으면
+   `-Scenario ../ah-p2/brd-attach.json`(부트 대화상자까지) 또는 `brd-lobby-auto.json`(테스트 서버로 로비까지, `"auto"`·`"screen"` 나란히 — 끝나면 에디터
+   PlayerPrefs `dev.force_login.server_environment`를 0으로), `-KnownErrors '^\[Firebase\] Dependency'`, `-NoBuild`). 배포 경로를 바꿨으면
    `-Source git+file:///<저장소>?path=/AgentHarness/Packages/com.geuneda.agentharness#<브랜치>`(커밋된 것, 부트스트랩 포함)로도.
 
 ---
@@ -340,6 +339,51 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G3-1 오프스크린 캡처에 스크린 공간 UI가 안 찍힌다** · **G3-5 마젠타 머티리얼을 따로 잡지 못한다** (2026-09-29, W2)
+  - 현상(전): 프리셋 캡처는 카메라 오프스크린 렌더라 UI Toolkit 패널·오버레이 캔버스가 빠졌다. `"screen"`은 Game 뷰 탭이 보일 때만 되고 크기가 사용자
+    레이아웃(1차 568x562, P-5 때 366x415)을 따랐다. 기존 프로젝트는 UI가 화면의 전부인 경우가 많다(사내 프로젝트 A의 부트·로그인·타이틀·로비).
+    셰이더를 못 쓰는 머티리얼(URP 프로젝트에서 `Shader.Find("Standard")`)은 에러 없이 마젠타로 그려져 루프가 그대로 녹색이었다.
+  - 방법(G3-1, `Runtime/CaptureUi.cs`): `"screen"` 말고 모든 캡처가 스크린 공간 UI를 **캡처 크기로 다시 배치해** 카메라 렌더 위에 합성한다.
+    - uGUI: 템플릿 카메라의 Screen Space - Camera 캔버스는 캡처 카메라로 옮겨 씬과 함께 그린다(게임처럼 후처리 포함). 화면에 그리는 다른 카메라의
+      캔버스와 Screen Space - Overlay 캔버스는 잠깐 Screen Space - Camera(숨은 직교 UI 카메라, 씬에서 먼 y=-100000, 캔버스 레이어만)로 바꿔 투명 RT에
+      그린다. 카메라의 `targetTexture`를 먼저 정하고 `Canvas.ForceUpdateCanvases()` → `CanvasScaler`(`Canvas.renderingDisplaySize`)와 텍스트 메시가
+      캡처 크기로 다시 계산된다(순서를 거꾸로 하면 글자가 Game 뷰 배율로 래스터돼 흐렸다). 같은 밴드·카메라·정렬 레이어의 연속 캔버스는 한 번에 그린다.
+    - UI Toolkit: 패널마다 `PanelSettings.targetTexture`를 투명 RT로 바꾸고(색·깊이 지움) 내부 API로 즉시 그린다 — `RuntimePanel.Update()`(타깃 크기로
+      패널 크기·배율·레이아웃; 이것 없이 `RepaintPanel`만 부르면 Game 뷰 레이아웃 그대로), `UIElementsRuntimeUtility.RepaintPanel` + `RenderPanel(panel, true)`
+      (`RepaintPanel`만으로는 아무것도 그려지지 않았다). 공개 API로는 패널을 지금 그릴 방법이 없다. 6.0/6.3/6.6 모두 같은 이름이고, 없으면 `uiError`.
+    - 합성: 두 UI 모두 투명 RT에 **선형 공간 프리멀티플라이드 색 + 커버리지 알파**를 남긴다(측정: UI Toolkit `rgba(6,9,20,0.62)` → (4,6,14,158),
+      uGUI 50% 빨강 → (188,0,0,128), 그 위 50% 파랑 → (137,0,188,192)). CPU에서 `dst = src + dst·(1-a)`를 선형 프로젝트는 선형 공간(sRGB LUT)으로,
+      감마 프로젝트는 저장값으로 계산한다. 순서: 씬과 함께 그린 캔버스 → 다른 카메라의 캔버스(카메라 depth) → 오버레이 캔버스·UI Toolkit(sortingOrder,
+      같으면 UI Toolkit이 위). 바꾼 것(캔버스 모드·카메라·plane distance, 패널 타깃·지우기)은 같은 프레임에 되돌리고 레이아웃도 다시 계산한다.
+    - 보고: `shotStats[].width/height`, `ui`(그린 순서), `uiError`. `"ui": false`(캡처)·`harness_capture {"ui":false}`로 끈다. 빈 샷의 `hint`는 이제
+      "화면에 그리는 다른 카메라"를 알려 준다(UI는 이미 합성되므로 `"screen"` 권유는 `ui:false`일 때만).
+    - **캡처 크기**: 시나리오 `width`/`height` → 설정 `captureSize` → 프로젝트 방향(Player Settings 기본 방향이 세로, 또는 세로만 허용한 자동 회전이면
+      720x1280) → 1280x720. 사내 프로젝트 A가 세로 게임이라 1280x720 가로로는 게임에 없는 레이아웃이 찍혔다(로비가 가로로 펼쳐짐). Game 뷰 크기는 쓰지 않는다.
+  - 방법(G3-5): `shotStats[].magentaRatio`·`magenta`(≥ 0.05%). 판정 = 밝고(r·b ≥ 128) r ≈ b(15% 안) g가 그 10% 이하 — 에러 셰이더 (1,0,1)은 샘플의 ACES +
+    색 보정 뒤 (253,0,238); 깨끗한 샘플 샷 3장(블룸 받은 분홍 테두리 매듭 포함)은 0픽셀(느슨한 기준 g ≤ 15%는 closeup에서 313픽셀 오탐). `magenta`면
+    `hint`에 파이프라인이 못 그리는 머티리얼을 쓴 렌더러(없는 머티리얼·셰이더, `!isSupported`, URP에서 Built-in LightMode 패스만 있는 셰이더)를 최대 5개.
+    `dark`처럼 실패로 치지는 않는다(분홍 아트·기존 프로젝트의 오래된 머티리얼이 루프를 막지 않게) — CLAUDE.md "매 루프 후 반드시"에 적었다.
+  - 검증(이 머신, 에디터를 하나씩):
+    - 샘플: 기본 루프 3샷 모두 1280x720 + `uitk:SmokeHudPanel`, HUD가 게임 상태(LAPS 1, CCW)를 보여 줌. fingerprint `977545a7…` 그대로, 샷 밝기
+      64.8/60.1/50.0(전 65.1/60.5/50.3 — HUD 배경만큼). 포즈 캡처(`top`)에도 HUD. 캡처 비용: 편집 모드 샷당 75–80 → 93–100 ms(UI Toolkit 패널 1개),
+      uGUI 3개 + HUD 픽스처 127–159 ms. 루프 시간은 그대로(play 2.1–2.7 s).
+    - uGUI 픽스처(편집 모드, selftest 1번): 오버레이 50% 빨강이 합성 전 픽셀로 계산한 기대값과 채널 차 1, 메인 카메라 캔버스 초록이 후처리를 받음
+      (17,210,0), 다른 카메라 캔버스 파랑 (0,0,255), 캔버스·패널 설정과 크기 원상, 씬 dirty 아님. 같은 픽스처를 붙인 프로젝트에서도: BagelGame(URP, **감마**)
+      채널 차 1, Fluid-Sim(**Built-in**, 선형) 0 — 둘 다 제거 뒤 `git status` 비어 있음.
+    - 마젠타: 받침대 머티리얼을 `Standard`로 → 세 샷 모두 `magenta`(0.085/0.0224/0.0014), `hint` = `Smoke/Pedestal (shader 'Standard' is a Built-in render
+      pipeline shader)`, 루프 녹색. 되돌리면 0. selftest 4번에 넣었다.
+    - **사내 프로젝트 A**(세로, uGUI 로비 + UI Toolkit 개발용 대화상자): 부트 → 로그인 대화상자 → 타이틀 → 로비 흐름에서 같은 순간을 `"auto"`와 `"screen"`으로
+      나란히 찍음(`../ah-p2/brd-lobby-auto.json`). `"auto"` = 720x1280에 uGUI 캔버스 7–8개 + UI Toolkit 패널 1개, 밝기 37.7/91.6/120.3/145.7
+      (`"screen"` 1440x3040은 37.3/90.0/118.0) — 로그인 대화상자·타이틀·로비 위 첫 구매 팝업(반투명 딤 포함)이 PNG로 확인됨. 3회 모두 같은 값.
+      서버 선택 PlayerPrefs(`dev.force_login.server_environment`)는 끝난 뒤 0으로 되돌렸다.
+    - 한계: 카메라 스택의 다른 카메라가 그리는 3D(무기 오버레이, 미니맵)는 빠진다. 캡처 동안 UI가 캡처 크기로 한 번 다시 배치된다(크기 변화에 반응하는
+      UI 코드가 한 번 더 불림). `Screen.width`를 직접 읽어 배치한 UI는 Game 뷰 기준. 플레이 모드 uGUI는 기존 프로젝트(사내 프로젝트 A)로만 확인했다
+      (샘플은 UI Toolkit만 쓰는 규칙이라 uGUI 픽스처는 편집 모드).
+    - 매트릭스: 샘플 selftest 1–8 녹색 206.7 s(`977545a7…`, 줄 61/68/87). 9: 새 클론 6000.3.11f1 녹색 304.8 s(`977545a7…` = 메인 트리), 6000.0.84f1 녹색
+      286.4 s(`d9a6d092…`), 6000.6.3f1 2–8 녹색·1 빨강 307.6 s(`0ba32228…`; P-4의 `dark` 25.5/15.3/1.0 — HUD를 합성해도 `dark`가 잡힘, HUD 검사는 통과)
+      — 세 버전 모두 UI Toolkit 내부 API 동작. 10: BagelGame 녹색 47.8 s(`619be553…`, `ui` = 스크린 공간 패널 1개, `Managed/` 132개·`Harness.*` 0개),
+      Fluid-Sim 녹색 26.3 s(`54880f05…`, 23.0/15.0/22.1, 103개·0개), 사내 프로젝트 A 녹색 117.1 s(`6664b723…`, 위 흐름 시나리오, `-NoBuild`).
 
 - [x] **G3-6 실제 키보드·게임패드 입력이 시나리오 재생에 섞인다** (2026-09-29, W1)
   - 재현: 에디터 안에서 실제(native) 키보드 장치에 스페이스 누름·뗌을 입력 업데이트 6번마다 넣는 eval(플레이 동안만; OS 키 입력이 Input System에 들어온

@@ -73,6 +73,32 @@ namespace Harness.Editor
         }
 
         /// <summary>
+        /// Size of a capture that sets none (0): "captureSize" of the config, else the project's screen shape - 720x1280
+        /// when Player Settings' default orientation is portrait (or auto-rotation to portrait only), else 1280x720.
+        /// Never the Game view's size, which is the user's Editor layout.
+        /// </summary>
+        public static void CaptureSize(ref int width, ref int height)
+        {
+            if (width > 0 && height > 0) return;
+            if (Config.captureSize.Length == 2)
+            {
+                width = Config.captureSize[0];
+                height = Config.captureSize[1];
+                return;
+            }
+            var portrait = PlayerSettings.defaultInterfaceOrientation switch
+            {
+                UIOrientation.Portrait => true,
+                UIOrientation.PortraitUpsideDown => true,
+                UIOrientation.AutoRotation => (PlayerSettings.allowedAutorotateToPortrait || PlayerSettings.allowedAutorotateToPortraitUpsideDown)
+                    && !PlayerSettings.allowedAutorotateToLandscapeLeft && !PlayerSettings.allowedAutorotateToLandscapeRight,
+                _ => false,
+            };
+            width = portrait ? HarnessCapture.DefaultHeight : HarnessCapture.DefaultWidth;
+            height = portrait ? HarnessCapture.DefaultWidth : HarnessCapture.DefaultHeight;
+        }
+
+        /// <summary>
         /// Loaded scenes with unsaved changes that opening another scene would throw away. The generated buildScene is
         /// not counted (it is rebuilt from code); untitled scenes are counted only in an attached project.
         /// </summary>
