@@ -129,24 +129,16 @@
 Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고, 버전 범위(semver)로 의존하며, OS를 가리지 않는다.
 이 하네스는 이제 UPM 패키지(`com.geuneda.agentharness`, git URL `?path=`)이고 **설치 스크립트 한 번으로 기존 프로젝트에 붙였다 뗄 수 있다**(P-2).
 붙인 뒤의 격차(구 Input Manager 입력, `Assembly-CSharp` 검사, 부트 → 메뉴 → 레벨 흐름, 캡처 포즈, 머신 간 제거)는 P-5에서 메웠고, 공개 프로젝트 2개와
-사내 대형 프로젝트 1개에서 검증했다(출시 빌드는 공개 2개만 — P-6).
+사내 대형 프로젝트 1개에서 검증했다.
 Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000.6.3f1에서 렌더링 한 가지를 빼고 녹색 — P-1, P-4), OS는 Windows 하나에서만 검증했다.
 
-순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트, 2026-09-29 해결) → P-5(붙인 뒤의 격차, 2026-09-29 해결) → P-6(사내 출시 빌드) → P-3(macOS, 나중)**.
+순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트, 2026-09-29 해결) → P-5(붙인 뒤의 격차, 2026-09-29 해결) → P-3(macOS, 나중)**.
 버전은 `tools/fresh-clone-test.ps1 -SelfTest -UnityVersion <v>`, 기존 프로젝트는 `tools/attach-test.ps1 -Project <클론>`으로 검증한다.
 
 - **P-1 Unity 버전이 6000.3.11f1로 고정돼 있다** → 2026-09-29 해결(아래 "해결됨"). 6.6에서 남은 렌더링 문제는 P-4.
 - **P-2 기존 Unity 프로젝트에 붙일 수 없다** → 2026-09-29 해결(아래 "해결됨"). 붙인 뒤에도 남은 것은 P-5.
 
-- **P-5 기존 프로젝트에 붙였을 때 아직 안 되는 것** → 2026-09-29 해결(아래 "해결됨"). 사내 프로젝트에서 남은 것은 P-6.
-
-- [ ] **P-6 사내 프로젝트의 출시 빌드(IL2CPP·모바일)를 아직 안 돌려 봤다** (2026-09-29, P-5에서 정리)
-  - 현상: 사내 프로젝트 A(Android, IL2CPP, 커스텀 키스토어)에서 attach-test를 `-NoBuild`로 돌렸다. Android 빌드는 키스토어 비밀번호가 필요하고,
-    Windows IL2CPP 모듈은 이 머신에 없으며, Standalone으로 바꾸면 5.6 GB Library가 다시 임포트된다. `HarnessReleaseBuild`(IFilterBuildAssemblies)가
-    IL2CPP 변환 전에 하네스 어셈블리를 빼는지, 개발 빌드에서 `Harness.Runtime`이 IL2CPP로 도는지는 확인하지 않았다.
-  - 방향: Android는 `exportAsGoogleAndroidProject`(서명 없이 IL2CPP까지)로 출시·개발 빌드를 한 번씩 만들어 `Managed`/IL2CPP 입력 목록을 대조 빌드와 비교.
-    attach-test에 `-BuildTarget`을 둔다.
-  - 완료 기준: 사내 프로젝트 A의 출시 IL2CPP 빌드에 `Harness.*`·하네스만 쓰는 DLL이 없고, 개발 빌드가 시작된다.
+- **P-5 기존 프로젝트에 붙였을 때 아직 안 되는 것** → 2026-09-29 해결(아래 "해결됨").
 
 - [ ] **P-4 Unity 6.6(URP 17.6)에서 샘플 씬의 조명이 검게 나온다** (2026-09-29, P-1 검증 중 발견)
   - 현상: 6000.6.3f1로 연 새 클론에서 에디터 세션의 **첫 플레이만** 정상이고(overview meanLuma 48.3, 6.3은 50.3), 그 뒤의 플레이와
@@ -237,7 +229,7 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
    `tools/attach-test.ps1 -Project <클론> [-Scene ...] [-Module ...]` 녹색 — install → 설치분만 바뀜 → 기존 씬으로 루프 3회 녹색(fingerprint·events 동일)
    → 출시 빌드에 `Harness.*` 없음 → uninstall 뒤 `git status` 비어 있음. `shots/`를 Read로 확인. 지금 쓰는 클론(`../ah-p2`, 기준선 커밋 포함):
    BagelGame(`-Module Game=Assets/Game,UI=Assets/UI`), Fluid-Sim(`-Scene "Assets/Scenes/Fluid Particles.unity"`), 사내 프로젝트 A(비공개 클론, 이 머신에만;
-   `-Scenario`로 부트 대화상자를 기다리는 시나리오, `-KnownErrors`, `-NoBuild` — P-6). 배포 경로를 바꿨으면
+   `-Scenario`로 부트 대화상자를 기다리는 시나리오, `-KnownErrors`, `-NoBuild`). 배포 경로를 바꿨으면
    `-Source git+file:///<저장소>?path=/AgentHarness/Packages/com.geuneda.agentharness#<브랜치>`(커밋된 것, 부트스트랩 포함)로도.
 
 ---
@@ -298,7 +290,6 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
       C# 4,400개, Android IL2CPP; 원본의 Library 5.6 GB를 복사한 로컬 클론): 처음 설치해 열기 113 s. attach-test `-NoBuild -Scenario <부트 대화상자 대기>
       -KnownErrors <SDK 초기화 에러 정규식>` 녹색 99.6 s(install 0.5 / open 50.9 / setup 2.4 / 루프 14.9·13.1·13.0 — Domain Reload가 켜져 있어 플레이 진입 7.6–8.3 s /
       quit 3.6 / uninstall 0.5), fingerprint `6664b723…` 3회 동일, 루프마다 knownErrors 1·teardownErrors 1, 제거 뒤 `git status` 비어 있음.
-      출시 빌드는 P-6.
     - 주의(겪은 것): 클론은 원본과 PlayerPrefs를 공유한다 → 첫 시도에서 로그인 대화상자의 저장된 선택(라이브 서버)으로 로그인했다. 이후 시나리오는 테스트 서버를
       명시적으로 누르고, 끝난 뒤 그 PlayerPrefs 값을 원래대로(0) 되돌렸다.
     - 매트릭스: 샘플 selftest 1–8 녹색 209.8 s(fingerprint `977545a7…`, 줄 61/68/87, 샷 65.1/60.5/50.3 그대로; 1번에 시나리오 도구 루프를 더함). 9: 새 클론(최종 커밋) 6000.3.11f1 녹색 294.8 s(`977545a7…` = 메인 트리), 6000.0.84f1 녹색 290.0 s(`d9a6d092…`), 6000.6.3f1 2–8 녹색·1 빨강 279.5 s (P-4의 `dark` 25.0/15.6/0.5 그대로, `0ba32228…`) — 세 버전 모두 줄 61/68/87, 1번의 시나리오 도구 검사 통과. 10: Fluid-Sim 녹색 31.3 s(fingerprint `54880f05…` = P-2, 출시 빌드 `Managed/` 103개·`Harness.*` 0개), BagelGame 녹색 59.1 s(`619be553…` = P-2, `Managed/` 132개·`Harness.*` 0개), 사내 프로젝트 A 녹색 94.3 s(`6664b723…`, 대기 0.61–0.66 s).
