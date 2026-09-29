@@ -165,7 +165,7 @@ submit한 파일은 에디터 트리에 미커밋 사본으로 남아 있어서,
 ```
 AgentHarness/
   CLAUDE.md                 에이전트용 사용법·규칙 (먼저 읽을 것)
-  docs/ROADMAP.md           아직 남은 격차 (성질 1~5별) + 검증 매트릭스
+  docs/ROADMAP.md           아직 남은 격차 (성질 1~5 + 이식성: 버전·기존 프로젝트·macOS) + 검증 매트릭스
   Assets/Harness/Runtime/   GameRoot · IGameModule · EventBus · HarnessProbe · ShotPreset · ScriptedInput · ScenarioRunner
   Assets/Harness/Runtime/Procedural/   MeshBuilder · Noise · TextureBaker · PMath
   Assets/Harness/Editor/    harness_* 에디터 커맨드, BuildContext / IBuildStep

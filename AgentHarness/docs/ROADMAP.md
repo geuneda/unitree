@@ -1,6 +1,6 @@
 # ROADMAP — Three.js 환경 대비 아직 남은 격차
 
-하네스 1차 버전(2026-09-28) 기준으로 **아직 해결하지 못한 문제**를 성질 1~5별로 기록한다.
+하네스 1차 버전(2026-09-28) 기준으로 **아직 해결하지 못한 문제**를 성질 1~5와 이식성(P, 다른 버전·기존 프로젝트·macOS)별로 기록한다.
 하네스를 고치는 작업을 시작하기 전에 여기서 고르고, 해결하면 체크하고 **검증 방법과 측정값**을 남긴다.
 
 - 표기: `[ ]` 미해결 · `[~]` 부분 해결 · `[x]` 해결(아래 "해결됨"으로 옮김)
@@ -112,12 +112,98 @@
   - 방향: 이벤트 파일을 발행 모듈별로 분리하는 규칙 강제(lint), 이름 충돌 검사. owners.json처럼 계약 파일도 추가한 worktree를 기록해
     병합 전까지는 그 worktree만 고칠 수 있게.
 
+## 이식성 — `npm install three`처럼 어디에나 붙는다
+
+Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고, 버전 범위(semver)로 의존하며, OS를 가리지 않는다.
+이 하네스는 지금 **"이 저장소를 클론해서 그 안에서 시작"하는 방식만** 된다. Unity 버전은 6000.3.11f1 하나, OS는 Windows 하나에서만 검증했다.
+
+순서: **P-1(버전) → P-2(기존 프로젝트) → P-3(macOS, 나중)**. 기존 프로젝트는 저마다 다른 6.x 버전을 쓰므로 P-2는 P-1이 먼저 필요하다.
+세 항목 모두 검증은 O-8(새 클론 검증 자동화)을 버전·OS·대상 프로젝트별로 돌리는 방식이라 O-8을 같이 진행한다.
+
+- [ ] **P-1 Unity 버전이 6000.3.11f1로 고정돼 있다**
+  - 현상:
+    - 검증한 버전이 하나뿐이다. `ProjectVersion.txt`와 `manifest.json`(URP 17.3.0, Input System 1.19.0)이 이 버전 기준이고,
+      기준선 표와 검증 매트릭스 기대값(fingerprint `b012cf35…`, 컴파일 61행·런타임 68행·셰이더 87행)도 이 버전에서 잰 값이다.
+    - 하한: `com.unity.pipeline` 0.8.0-exp.1의 `package.json`이 `"unity": "6000.0"`이다. 2022.3 LTS 같은 Unity 6 미만 버전은
+      에디터 연결 방식(Pipeline HTTP 서버 + `[CliCommand]`)을 바꾸지 않는 한 지원할 수 없다.
+    - 도구: `compile-check.ps1`은 `ProjectVersion.txt`의 버전으로 에디터를 찾고(Hub 기본 경로 → `unity editors --installed`),
+      `Library/Bee/artifacts/*/<Asm>.rsp` 형식에 기댄다. 버전마다 rsp 형식이 같은지 확인하지 않았다.
+    - 코드: 이미 버전 차이를 한 곳 우회했다(`enterPlayModeOptionsEnabled`가 6.x에서 obsolete → 리플렉션). 다른 버전에서 컴파일되고 동작하는지는 확인하지 않았다.
+    - O-1의 recompile 상태 레이스 우회는 Pipeline 0.8.0-exp.1의 동작에 맞춘 것이다.
+    - 프로젝트를 다른 버전 에디터로 열면 업그레이드 확인 모달이 뜬다(G2-2와 같은 문제). `unity open`만으로는 끝까지 진행되지 않을 수 있다.
+  - 방향:
+    - 지원 범위를 "Unity 6.0 LTS 이상"으로 선언하고 검증 대상 목록을 둔다(예: 6.0 LTS 최신 패치, 6.3 LTS, 최신 정식).
+    - 버전별 API 차이는 `#if UNITY_6000_x_OR_NEWER`와 asmdef `versionDefines`(URP 17.0–17.x)로 가른다.
+    - 샘플 프로젝트(이 저장소)는 한 버전으로 고정해 두되, `Assets/Harness/`와 `tools/`에는 버전 문자열을 하드코딩하지 않는다.
+      compile-check는 실행 중인 에디터 프로세스의 경로를 먼저 쓴다(실제로 컴파일하는 버전이 그 에디터다).
+    - 매트릭스 기대값은 버전별로 기록한다. 줄 번호는 모든 버전에서 같아야 한다. fingerprint는 버전마다 달라도 되지만, 같은 버전 안에서는 3회 동일해야 한다.
+    - O-8 스크립트에 `-UnityVersion`을 두고 목록의 버전마다 반복한다.
+  - 완료 기준: 목록의 각 버전에서 새 클론(해당 버전으로 업그레이드) → `harness_setup` → 매트릭스 1–8 녹색.
+    `Assets/Harness/`·`tools/`에서 `6000.` 검색 결과 0건.
+
+- [ ] **P-2 기존 Unity 프로젝트에 붙일 수 없다**
+  - 현상: 하네스는 "이 저장소 = 프로젝트"를 전제한다. `Assets/Harness/`와 `tools/`를 기존 프로젝트에 복사하는 방법은 검증하지 않았고, 그대로 복사하면 다음과 부딪친다.
+    - 배포 형태: 소스 폴더를 복사하는 것뿐이다. 하네스 버전을 추적하거나 업데이트할 경로가 없다.
+    - 필수 의존: `com.unity.pipeline`(실험판), URP, Input System. `Harness.Runtime`이 URP(`HarnessCapture`의 `UniversalAdditionalCameraData`)와
+      Input System(`ScriptedInput`)을 직접 참조하므로 Built-in·HDRP 프로젝트나 구 Input Manager만 쓰는 프로젝트에서는 컴파일되지 않는다.
+    - **`harness_setup`이 파괴적이고 전역 설정을 바꾼다.** URP 템플릿 샘플(`Assets/Scenes/SampleScene.unity`, `Assets/Readme.asset`,
+      `Assets/TutorialInfo`, `Assets/Settings/SampleSceneProfile.asset`)을 지우는데, 기존 프로젝트에 같은 경로가 있으면 사용자 파일이 지워진다.
+      `PlayerSettings.runInBackground`·`enableFrameTimingStats`는 출시 빌드 설정까지 바꾼다. Domain Reload off는 프로젝트 전체에 적용되므로,
+      static을 초기화하지 않는 기존 코드가 두 번째 플레이부터 오동작한다(규칙 5를 기존 코드는 지키지 않는다).
+    - 런타임 주입: `Harness.Runtime`은 모든 플랫폼에 포함되고, `GameRoot.Boot`가 `AfterSceneLoad`에서 무조건 `[GameRoot]`를 만든다.
+      기존 게임의 모든 씬과 출시 빌드에도 들어간다.
+    - 씬: `harness_play`·`harness_capture`는 빌더가 만든 `Assets/Scenes/Main.unity`만 연다. 손으로 만든 씬, 여러 씬, 부트 씬부터 시작하는 흐름은 돌릴 수 없다.
+    - 경로·모듈 규약이 하드코딩돼 있다: `HarnessPaths`(`Assets/Game`, `Assets/Generated`, `Main.unity`), `HarnessLogParse.ModuleOf`(에러의 `module`),
+      `HarnessBuild`(빌더는 `Assets/Game/*/Builders/`만 찾음), lint·submit·land 모두 `Assets/Game/<Module>/` 기준.
+      기존 코드(대개 `Assembly-CSharp`)는 에러에 `module`이 빈 값으로 나오고 submit할 수 없다.
+    - 규칙: "YAML 직접 수정 금지"와 "uGUI 프리팹 금지"를 그대로 두면 기존 프로젝트의 씬·프리팹·uGUI를 다룰 수 없다.
+      기존 자산은 에디터 API로만 고친다는 식의 규칙과 기존 프로젝트용 CLAUDE.md 템플릿이 필요하다.
+    - Windows 경로 60자 제한(F-5) 때문에 긴 경로에 있는 기존 프로젝트는 위치를 옮기라고 요구하게 된다.
+  - 방향:
+    - `Assets/Harness/`를 UPM 패키지로 분리한다(예: `com.geuneda.agentharness`, git URL `?path=`). 이 저장소의 샘플 프로젝트도 그 패키지를 쓴다(도그푸딩).
+      도구 스크립트는 패키지의 `Tools~/`에 넣어 패키지 버전과 함께 움직이게 하고, 프로젝트에는 얇은 진입점만 둔다.
+    - 설치 스크립트(`install.ps1 -Project <경로>`)가 패키지 추가, 진입점, `.gitignore` 항목(`HarnessOut/`, 생성물), 설정 파일을 만든다.
+      `-WhatIf`로 바꿀 목록부터 보여 주고, 제거 스크립트로 원상 복구할 수 있게 한다.
+    - 텍스트 설정 파일(예: `ProjectSettings/AgentHarness.json`)에 모듈 루트, 생성물 경로, 플레이할 씬(빌드 씬 / 기존 씬 경로 / 빌드 설정의 첫 씬),
+      Domain Reload 정책을 둔다. `HarnessPaths` 상수를 이 설정으로 바꾼다.
+    - `harness_setup`을 둘로 나눈다. 새 프로젝트용은 지금처럼 동작하고, 붙이기용은 아무것도 지우지 않으며 전역 설정은 보고만 하고 동의할 때만 바꾼다.
+      Domain Reload가 켜진 상태에서도 루프가 돌게 하고, 느려진 만큼은 `timings`로 보고한다.
+    - URP·Input System 의존은 `versionDefines`로 선택 사항으로 만든다. 없으면 해당 기능(카메라 데이터 복사, 입력 재생)만 꺼지고 컴파일은 된다.
+    - 런타임 주입을 막는다. `GameRoot`는 등록된 모듈이 있을 때만 만들고, 출시 빌드에서는 하네스가 빠지게 한다(Editor·Development 빌드 한정 또는 define).
+    - 모듈 개념을 "설정한 폴더 = 모듈"로 일반화해서 기존 코드 폴더도 에러 `module` 귀속, lint, submit/land 대상이 되게 한다.
+  - 완료 기준: 하네스를 모르는 기존 프로젝트 2개(템플릿이 아닌 URP 게임 1개 + Built-in 프로젝트 1개)에 설치 스크립트를 한 번 실행한다.
+    기존 파일 삭제·변경이 없어야 하고(`git status`에 설치가 추가한 파일만), 기존 씬으로 루프가 녹색이어야 한다(캡처·콘솔·FPS).
+    출시 빌드에 `Harness.*` 어셈블리가 없어야 하고, 제거 스크립트를 돌리면 `git status`가 깨끗해야 한다.
+
+- [ ] **P-3 Windows에서만 동작한다 (macOS 지원은 나중)** — 기존 O-2를 옮겨 왔다.
+  - 작업 방식: P-1·P-2를 Windows에서 끝낸 뒤 실제 Mac에서 진행한다. 그 전까지 Windows 작업에서는 새 코드에
+    백슬래시 경로 리터럴이나 Windows 전용 호출(`powershell.exe`, `C:\...`, `.exe` 경로)을 늘리지 않는 것만 지킨다.
+  - 현상:
+    - 모든 도구가 Windows PowerShell 5.1 전용이다. 5.1은 BOM 없는 UTF-8을 깨뜨리므로 스크립트를 ASCII로만 쓴다.
+      `submit.ps1`은 compile-check 게이트를 `powershell.exe`로 직접 실행한다.
+    - 경로: `Join-Path $root 'Library\Harness\submit'`처럼 백슬래시 리터럴이 흔하고, 그 결과를 `[IO.File]::ReadAllText` 같은 .NET API에 그대로 넘긴다
+      (예: Pipeline 디스크립터 `Library\Pipeline\.unity-pipeline-port`). macOS에서는 `\`가 경로 구분자가 아니다.
+      `compile-check.ps1`은 `C:\Program Files\Unity\Hub\Editor\<ver>\Editor\Unity.exe`, `Data\NetCoreRuntime\dotnet.exe`,
+      `Data\DotNetSdkRoslyn\csc.dll`을 가정한다(macOS는 `Unity.app/Contents/...` 아래).
+    - 락: `Global\AgentHarnessEditor_<id>` 이름 있는 Mutex를 쓴다. .NET은 Unix에서도 이름 있는 뮤텍스를 지원하지만,
+      보유 프로세스가 죽었을 때 `AbandonedMutexException`이 오는지 확인하지 않았다. submit/land 저널 복구가 이 동작에 기댄다.
+    - msbuild 백엔드(vswhere)는 Windows 전용이다. macOS에서는 csc 백엔드만 쓴다.
+    - 에디터: Metal에서 셰이더 에러 형식이 `harness_shaders` 파싱과 맞는지, 포커스 없는 에디터(App Nap)에서도 플레이·캡처가 진행되는지
+      (F-1과 같은 종류의 문제) 확인해야 한다.
+    - 결정성: Apple Silicon(ARM64) JIT의 부동소수점 결과가 x64와 달라서 fingerprint가 OS·CPU마다 다를 수 있다(F-6처럼 절차적 베이크 결과가 바뀜).
+      기준을 "같은 머신 안에서 결정적"으로 둘지 먼저 정해야 한다.
+    - README에 macOS용 Unity CLI 설치 방법이 없다.
+  - 방향: 도구를 PowerShell 7(pwsh, 크로스플랫폼)로 옮긴다. Windows에서도 pwsh 7을 요구할지, 5.1 호환을 유지할지 정해야 한다.
+    경로는 `/`와 다단 `Join-Path`로 통일하고, 에디터·dotnet·csc 경로는 `unity editors --installed`나 실행 중인 에디터 프로세스에서 얻는다.
+    Unix에서는 락을 파일 락(배타 핸들)으로 바꾸는 것도 검토한다.
+  - 완료 기준: Apple Silicon Mac에서 새 클론 → `harness_setup` → 매트릭스 1–8 녹색(macOS 기준값은 따로 기록). 같은 스크립트로 Windows 매트릭스도 녹색.
+
 ## 하네스 자체
 
 - [ ] **O-1 Pipeline 패키지 0.8.0-exp.1(실험판) 의존**
   - 현상: `recompile` 상태 레이스(직전 실패 후 옛 실패 보고 / `triggered` 고착)를 `Invoke-HarnessRecompile`의 컴파일 세대 번호 + idle 판정으로 우회 중.
   - 할 일: 패키지를 업그레이드할 때마다 loop 검증 매트릭스(아래)를 다시 돌린다.
-- [ ] **O-2 스크립트가 Windows PowerShell 5.1 전용** (ASCII 제약, `C:\Program Files` 경로 가정). pwsh 7 / macOS 지원.
+- **O-2 스크립트가 Windows PowerShell 5.1 전용** → P-3으로 옮겼다(2026-09-29).
 - [ ] **O-3 하네스 자체의 자동 테스트가 없다.** 아래 매트릭스를 스크립트(`tools/selftest.ps1`)로 만든다.
 - [ ] **O-4 Pipeline `quit` 커맨드가 편집 모드에서 실패한다** (`PipelineQuitScheduler`가 DontDestroyOnLoad 호출).
   에디터를 코드로 닫는 믿을 만한 방법이 없다. `EditorApplication.delayCall` 경유 `Exit`도 백그라운드 에디터에선 실행되지 않는다.
@@ -132,6 +218,7 @@
   원인 미확인. 에디터마다 `-logFile`을 따로 주는 실행 스크립트로 막는다.
 - [ ] **O-8 새 클론 검증을 자동화한다.** 짧은 경로에 클론 → 에디터 실행 → `harness_setup` → loop 3회를 스크립트로(`tools/fresh-clone-test.ps1`).
   사람이 수동으로 돌려서 아래 해결됨 항목들을 찾았다.
+  P-1~P-3 검증도 이 스크립트를 버전(`-UnityVersion`)·OS·대상 프로젝트별로 돌리는 방식이라 먼저 만들어 둘 것.
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
