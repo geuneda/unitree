@@ -219,7 +219,7 @@ submit한 파일은 에디터 트리에 미커밋 사본으로 남아 있어서,
 ```
 AgentHarness/                              샘플 프로젝트 (하네스 패키지를 임베드해서 씀)
   CLAUDE.md                                에이전트용 사용법·규칙 (먼저 읽을 것)
-  docs/ROADMAP.md                          아직 남은 격차 (성질 1~5 + 이식성: 버전·기존 프로젝트·macOS) + 검증 매트릭스
+  docs/ROADMAP.md                          아직 남은 격차 (워크플로우별 작업 순서 + 성질 1~5 + 이식성) + 검증 매트릭스
   Packages/com.geuneda.agentharness/       하네스 = UPM 패키지 (git URL: ...unitree.git?path=/AgentHarness/Packages/com.geuneda.agentharness)
     Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioInput · ScenarioRunner · Procedural/
     Editor/                                harness_* 에디터 커맨드, BuildContext / IBuildStep, 출시 빌드 필터
@@ -233,7 +233,7 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
 ## 에이전트와 함께 쓰기
 
 `AgentHarness/CLAUDE.md`에 루프 사용법, report.json 해석, 규칙(YAML 직접 수정 금지, 텍스트 우선 형태, 모듈 폴더 밖 수정 금지,
-에디터 조작은 순서대로), 모듈·빌더 템플릿, 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`에서 항목을 고르세요.
+에디터 조작은 순서대로), 모듈·빌더 템플릿, 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
 병렬 에이전트는 위의 worktree + `submit.ps1` + `land.ps1` 흐름을 씁니다(G5-2, G5-5). 남은 병렬 과제는 루프 직렬화(G5-1)와 `Contracts` 공유 지점(G5-4)입니다.
 
 ## 라이선스

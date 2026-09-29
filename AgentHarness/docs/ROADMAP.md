@@ -1,13 +1,117 @@
 # ROADMAP — Three.js 환경 대비 아직 남은 격차
 
 하네스 1차 버전(2026-09-28) 기준으로 **아직 해결하지 못한 문제**를 성질 1~5와 이식성(P, 다른 버전·기존 프로젝트·macOS)별로 기록한다.
-하네스를 고치는 작업을 시작하기 전에 여기서 고르고, 해결하면 체크하고 **검증 방법과 측정값**을 남긴다.
+하네스를 고치는 작업은 아래 "작업 순서"에서 다음 워크플로우를 골라 시작하고, 항목을 해결하면 체크하고 **검증 방법과 측정값**을 남긴다.
 
 - 표기: `[ ]` 미해결 · `[~]` 부분 해결 · `[x]` 해결(아래 "해결됨"으로 옮김)
 - 기준: 각 항목은 "Three.js 환경의 어떤 성질을 복원하는가"로 판단한다.
 - 측정 기준 머신/상태: Unity 6000.3.11f1, URP 17.3, Code Optimization=Debug, 에디터 GUI 1개. 버전별 기대값은 CLAUDE.md "Unity 버전".
 - 하네스를 고친 뒤에는 아래 "검증 매트릭스"를 돌린다: 1–8 = `tools/selftest.ps1`, 9 = `tools/fresh-clone-test.ps1 -SelfTest`(버전별 `-UnityVersion`),
   10 = `tools/attach-test.ps1`(기존 프로젝트 클론별).
+
+## 작업 순서 — 워크플로우 단위
+
+아래 성질별 항목을 **한 번에 착수·검증·커밋하는 작업 묶음(W1…)**으로 나눴다. 요청은 "W1 진행해"처럼 워크플로우 단위로 한다.
+- 묶는 기준: 같은 파일을 고치거나 같은 검증으로 확인되는 항목. 순서 기준: **검증 도구를 먼저 믿을 수 있게 만들고(W1–W3), 그다음 결과물을 바꾼다(W4~)**.
+- 항목의 현상·방향·완료 기준은 성질별 절에 그대로 두고, 여기에는 묶음·순서·선행·추가로 볼 것만 적는다.
+- 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태 갱신 → 커밋(메시지에 항목 ID).
+- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. 선행이 없는 W5·W7·W9는 앞당겨도 된다.
+- 크기: S = 파일 1–2개 · M = 여러 파일 또는 새 커맨드 · L = 조사가 필요하거나 새 하위 시스템.
+
+| 순서 | 워크플로우 | 항목 | 크기 | 선행 | 상태 |
+|---|---|---|---|---|---|
+| W1 | 시나리오 입력 격리 | G3-6 | S | — | 대기 |
+| W2 | 캡처가 화면 전체를 본다 | G3-1, G3-5 | M | W1 | 대기 |
+| W3 | 시각 회귀와 움직임 | G3-4, G3-3 | M | W1, W2 | 대기 |
+| W4 | 렌더 설정을 코드로 | G1-1, P-4, G4-3, G4-2 | L | W3 | 대기 |
+| W5 | 루프 속도 | G2-3, G2-1 | L | — | 대기 |
+| W6 | 콘텐츠 헬퍼(a/b/c로 나눠 진행) | G1-3, G1-4, G4-1, G4-4 | L | W3, W4 (W6b는 W2) | 대기 |
+| W7 | 에디터 밖·여러 에디터 | G2-2, G1-2, G5-1 | L | — | 대기 |
+| W8 | 실제 성능 측정 | G3-2 | M | W1 | 대기 |
+| W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 대기 |
+| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, P-4 신고 | S | 새 버전이 나올 때 | — |
+| 마지막 | macOS | P-3 | L | 실제 Mac | 대기 |
+
+### W1 시나리오 입력 격리 (G3-6)
+- 왜 먼저: `play.events`가 매번 같아야 매트릭스 1과 W3의 기준 이미지가 의미 있다. 지금은 루프 ~25회에 1회 어긋난다.
+- 고치는 곳: `Runtime/ScriptedInput.cs`(시나리오 동안 가상 장치 밖의 장치를 `InputSystem.DisableDevice`, 끝나면 복구),
+  `Runtime/ScenarioRunner.cs`(걸러 낸 실제 입력 수를 `play`에 보고).
+- 같이 볼 것: 구 Input Manager shim(`Tools~/templates/HarnessInput.cs`)도 `Input.GetKey(key) || Held(key)`라 실제 입력이 섞인다.
+  시나리오 재생 중에는 실제 입력을 빼도록 훅에 시작·끝을 알린다. shim은 게임 소유 파일(uninstall이 남김)이라 이미 붙인 프로젝트의 갱신 방법도 정한다.
+- 추가 검증: 루프 도중 실제 키보드로 스페이스 연타 → `play.events` 매번 같음. 플레이가 실패·중단돼도 장치가 다시 켜지는지(수동 플레이에서 키보드가 죽지 않는지).
+
+### W2 캡처가 화면 전체를 본다 (G3-1 → G3-5)
+- 왜: 기존 프로젝트는 UI가 화면의 전부인 경우가 많은데(P-5, 사내 프로젝트 A) 지금은 `"screen"`으로만 찍히고 크기가 사용자 레이아웃을 따른다.
+  W3의 기준 이미지 비교도 고정 해상도·UI 포함 캡처가 있어야 된다.
+- 고치는 곳: `Runtime/HarnessCapture.cs`(UI 합성, 이미지 통계), `Runtime/ShotPreset.cs`, `Editor/HarnessCaptureCommand.cs`.
+- 주의: UI Toolkit은 `PanelSettings.targetTexture`로 되지만 uGUI Screen Space - Overlay 캔버스는 다른 방법이 필요하다(기존 프로젝트는 대부분 uGUI).
+  Game 뷰 크기는 사용자 전역 설정이라 코드로 바꾸지 않는다.
+- 추가 검증: 스모크 씬 `"auto"` 캡처에 HUD가 1280x720으로 찍힘. attach-test에서 사내 프로젝트 A의 부트·로비 화면이 `"auto"`로 찍힘.
+  셰이더 없는 머티리얼 주입 → `shotStats`에 마젠타 판정(selftest 항목으로 추가).
+
+### W3 시각 회귀와 움직임 (G3-4, G3-3)
+- 고치는 곳: `Tools~/loop.ps1`·`Tools~/Harness.psm1`(report.json에 diff 점수), 샘플의 `golden/`,
+  `Runtime/ScenarioRunner.cs`·`Runtime/HarnessCapture.cs`(N프레임 연속 캡처 → 스프라이트 시트/GIF).
+- 먼저 정할 것: 기준 이미지는 Unity 버전별로 둔다(P-4처럼 버전마다 렌더가 다르다). 머신·GPU 차이 허용치(P-3의 부동소수점 문제와 같은 기준).
+  의도한 변경일 때 기준 이미지를 갱신하는 명령.
+- 추가 검증: 같은 코드로 3회 → diff가 허용치 안. 셰이더 한 줄 수정 → 점수가 움직이고 report에 보임.
+- W4 전에 하는 이유: W4는 렌더 설정을 통째로 코드로 옮긴다. "옮기기 전과 같게 나오는지"를 이걸로 확인한다.
+
+### W4 렌더 설정을 코드로 (G1-1 → P-4 → G4-3 → G4-2)
+- 순서: G1-1(`ISettingsStep`: RP·Renderer 에셋을 코드로 생성, 설정값을 fingerprint에) → P-4(프레임 디버거로 6.3과 주광 그림자 패스 비교,
+  우회가 필요하면 그 설정을 G1-1 코드에 버전 조건으로 둔다) → G4-3(`ctx.LitMaterial`이 키워드 자동 설정) →
+  G4-2(반사 큐브맵 → SH → `RenderSettings.ambientProbe`, Trilight 우회 제거).
+- 고치는 곳: `Editor/Build/BuildContext.cs`, `Editor/Build/HarnessBuild.cs`, `Editor/Build/SceneFingerprint.cs`, `Editor/HarnessSetup.cs`,
+  샘플 `Assets/Game/Stage/Builders/`.
+- 먼저 정할 것: `Assets/Settings/*.asset`을 생성물(gitignore)로 둘지, 커밋된 채 코드가 덮어쓸지. 새 클론에서 에디터가 처음 열릴 때 RP 에셋이
+  없어도 되는지가 관건(매트릭스 9).
+- 주의: 기존 프로젝트(`setup: attach`)의 RP 에셋은 덮어쓰지 않는다. 설정 스텝은 `setup: harness`에서만 적용하고 attach에서는 `recommendations`만.
+- 추가 검증: RP/Renderer 에셋 삭제 → 루프 1회로 재생성, fingerprint 동일. W3 기준 이미지와 diff(옮기기 전과 동일).
+  6.6 새 클론 selftest 1–8 녹색(P-4). attach-test 뒤 기존 프로젝트의 RP 에셋 무변경.
+
+### W5 루프 속도 (G2-3 → G2-1)
+- 먼저: G2-1 메모의 재측정. 에디터 1개일 때 컴파일 / 도메인 리로드 / Pipeline 재응답 구간을 나눠 잰다(다른 에디터가 떠 있으면 4.7–19s로 흔들렸다).
+- 순서: G2-3(리로드 직후 빌더·fingerprint 워밍업, 작음) → G2-1(`loop.ps1 -Hot`: Pipeline `[CodeReload]`/`reload_file`로 Tick 본문 핫패치, 플레이 상태 유지).
+- 고치는 곳: `Tools~/loop.ps1`, `Tools~/Harness.psm1`, `Editor/Build/HarnessBuild.cs`, 필요하면 `Runtime/GameRoot.cs`.
+- 주의: 핫패치 API는 실험판 Pipeline(O-1)에 있다. 패키지를 올리면 깨질 수 있으니 매트릭스에 `-Hot` 루프를 넣는다. W3과 `loop.ps1`을 같이 고치므로 둘은 이어서 한다.
+- 추가 검증: 모듈 Tick 본문 수정 → 2초 안에 반영된 캡처. "1차 버전 기준선" 표를 다시 재서 갱신.
+
+### W6 콘텐츠 헬퍼 (W6a G1-3 · W6b G1-4 · W6c G4-1 → G4-4)
+- W6a 파티클·애니메이션: `ctx.Particles`, 코드로 만든 AnimationClip, Playables 재생 헬퍼. 스모크 씬에서 움직임을 W3 연속 캡처로 확인.
+- W6b UI 킷: `UI/`에 공용 USS 변수·버튼·게이지·토스트, 폰트, 바인딩 예제. HUD가 `"auto"` 캡처에 찍혀야 확인할 수 있으므로 W2 뒤.
+- W6c 절차적 생성: GPU 베이크 경로(Blit/Compute → RT → PNG)를 먼저 두고, 그 위에 SDF·스플라인/튜브·스캐터·데칼·절차적 스카이.
+  GPU 베이크 결과는 GPU·드라이버마다 다를 수 있다 → fingerprint에 무엇을 넣을지 정한다.
+- 공통: 셋 다 `Editor/Build/BuildContext.cs`에 헬퍼를 더한다. 따로 진행하려면 헬퍼별 파일(`partial class`)로 나눈다.
+  새 콘텐츠는 W4의 `ctx.LitMaterial`을 쓰고, 기존 샷 회귀가 없는지 W3 기준 이미지로 본다.
+
+### W7 에디터 밖·여러 에디터 (G2-2 → G1-2 → G5-1) — 조사부터
+- 순서: G2-2 조사(상주 batchmode 에디터에서 GPU 렌더·캡처가 되는가. 안 되면 GUI 에디터를 `-automated`로 띄워 모달만 막는다)가 먼저다.
+  batchmode 렌더가 안 되면 G1-2(복제 프로젝트 + batchmode 빌더)와 G5-1(에디터 풀로 루프 분산)은 GUI 에디터 N개가 된다.
+- 고치는 곳: `Tools~/open.ps1`, `Tools~/Harness.psm1`(락·에디터 선택), `Tools~/loop.ps1`.
+- 비용: 에디터마다 라이선스 좌석, 복제마다 `Library/`(디스크·첫 임포트 시간), O-7 같은 전역 자원 충돌.
+- 추가 검증: 루프 2개 동시 실행 시 대기가 사라짐(지금 두 번째가 3.55s 대기). 매트릭스 6의 기대값이 "대기"에서 "병렬"로 바뀌면 selftest도 고친다.
+
+### W8 실제 성능 측정 (G3-2)
+- 개발 빌드 플레이어 + 런타임 Pipeline 서버로 같은 시나리오를 돌리는 `harness_perf`(fps, 프레임 p95, batches).
+- 고치는 곳: `Editor/HarnessReleaseBuild.cs`(개발 빌드 + `AGENTHARNESS_RUNTIME`), `Runtime/ScenarioRunner.cs`, `Tools~/`에 새 진입점.
+- 추가 검증: 에디터 플레이 FPS와 플레이어 FPS를 나란히 기록. 출시 빌드에는 여전히 `Harness.*`가 없음(매트릭스 10).
+
+### W9 병렬 작업의 공유 지점 (G5-4 → G5-3)
+- G5-4: 이벤트 파일을 발행 모듈별로 나누는 lint(`Editor/HarnessLint.cs`)와 이름 충돌 검사. 계약 파일도 owners.json처럼 추가한 worktree를 기록해
+  병합 전까지는 그 worktree만 고치게 한다(`Tools~/submit.ps1`, `Tools~/land.ps1`).
+- G5-3: 남은 부분(검사 집합 밖 모듈은 에디터 DLL 기준)이 worktree 흐름에서 실제로 문제가 되는지부터 본다. 아니면 `[~]`인 채로 닫는다.
+- 추가 검증: 매트릭스 7·8에 "두 worktree가 같은 이벤트 이름을 추가 → 두 번째 submit/land 거부"를 더한다.
+- 에이전트 여럿을 붙여 쓰기 시작하면 앞당긴다.
+
+### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, P-4 신고)
+- 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존), Unity에 P-4 최소 재현(W4 조사 결과로),
+  O-6 Unity Search 예외.
+- 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
+  install의 Input System 추가, `HarnessReleaseBuild`)를 걷어낼 수 있는지 본다.
+
+### 마지막: macOS (P-3)
+- 실제 Apple Silicon Mac이 있을 때 한다. 그 전까지 모든 워크플로우에서 새 코드에 백슬래시 경로·`powershell.exe`·`C:\` 경로를 늘리지 않는다.
+- 결정성 기준("같은 머신 안에서 결정적")은 W3의 기준 이미지 정책을 정할 때 같이 정한다.
 
 ## 1차 버전 기준선 (비교용)
 
@@ -63,7 +167,7 @@
 
 - [ ] **G3-1 오프스크린 캡처에 스크린 공간 UI가 안 찍힌다**
   - 현상: 프리셋 캡처는 카메라 오프스크린 렌더라 UI Toolkit/오버레이 UI가 빠진다. `"screen"` 캡처는 Game 뷰 탭이 보일 때만 되고 해상도가 Game 뷰 크기를 따른다(1차 검증 때 568x562).
-  - 방향: `PanelSettings.targetTexture`로 UI를 RT에 렌더해 합성하거나, Game 뷰 해상도를 1280x720으로 고정.
+  - 방향: `PanelSettings.targetTexture`로 UI를 RT에 렌더해 합성한다. Game 뷰 해상도 고정은 쓰지 않는다(Game 뷰 크기는 사용자 전역 설정이라 코드로 바꾸면 사용자 레이아웃이 바뀐다).
   - 완료 기준: `"auto"` 프리셋 캡처에도 HUD가 1280x720으로 찍힌다.
   - 2026-09-29(P-5): 기존 프로젝트는 UI가 화면의 전부인 경우가 많다(사내 프로젝트 A의 부트·로그인·타이틀·로비). 그 화면은 `"screen"`으로만 찍히고, 크기는
     사용자 레이아웃의 Game 뷰(그때 366x415)라 샷 통계·픽셀 좌표가 레이아웃마다 달라진다. 좌표는 `"mouseSpace": "normalized"`와 `click`의 `target`으로 피했다.
