@@ -262,11 +262,11 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
     패널(sortingOrder 순, 같으면 UI Toolkit이 위). 레이어마다 투명 RT에 그려 프리멀티플라이드 알파로 합성(프로젝트 색 공간, 선형이면 선형 공간).
   - 캔버스의 렌더 모드·카메라·plane distance, PanelSettings의 타깃 텍스처를 잠깐 바꿨다가 같은 프레임에 되돌린다(레이아웃 포함). 그 사이 UI 코드의
     `OnRectTransformDimensionsChange`·`GeometryChangedEvent`가 캡처 크기와 Game 뷰 크기로 한 번씩 더 불린다. `Screen.width`를 직접 읽어 배치한
-    UI는 Game 뷰 기준 그대로다. 게임이 그걸로 이상해지면 캡처에 `"ui": false`(`harness_capture {"ui":false}`).
+    UI는 Game 뷰 기준 그대로다. 게임이 그걸로 이상해지면 캡처에 `"ui": false`(`harness_capture {"ui":false}`). (ROADMAP G3-8, W8의 플레이어 캡처로)
   - 빠지는 것: 타깃 텍스처가 있는 패널(게임의 render-to-texture UI), 다른 디스플레이, 카메라 스택의 다른 카메라가 그리는 3D(무기 오버레이, 미니맵) →
-    `"screen"`이나 `"camera"`. 캡처가 비었는데(`blank`) 화면에 그리는 다른 카메라가 있으면 `hint`가 알려 준다.
+    `"screen"`이나 `"camera"`. 캡처가 비었는데(`blank`) 화면에 그리는 다른 카메라가 있으면 `hint`가 알려 준다. (카메라 스택: ROADMAP G3-7, W3)
   - UI Toolkit 패널은 내부 API(`RuntimePanel.Update`, `UIElementsRuntimeUtility.RepaintPanel/RenderPanel`, 리플렉션)로 즉시 그린다. 없는 Unity 버전이면
-    `uiError`로 보고한다(selftest 1번이 버전마다 HUD를 확인).
+    `uiError`로 보고한다(selftest 1번이 버전마다 HUD를 확인, ROADMAP O-9).
 - 캡처 크기: 시나리오 `"width"`·`"height"` → 설정 `captureSize` → 프로젝트 방향(Player Settings 기본 방향이 세로, 또는 세로만 허용한 자동 회전이면
   720x1280) → 1280x720. Game 뷰 크기는 쓰지 않는다.
 - 새 게임플레이를 넣으면 `default.json`의 입력/캡처와 기대 이벤트 수를 같이 갱신한다.
