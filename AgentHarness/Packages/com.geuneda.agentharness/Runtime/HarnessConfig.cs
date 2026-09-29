@@ -13,6 +13,18 @@ namespace Harness
         public string path;
     }
 
+    /// <summary>A named capture pose in the config (existing projects have no ShotPreset objects in their scenes).</summary>
+    [Serializable]
+    public sealed class ConfigShot
+    {
+        public string name;
+        public string scene;      // listed only while this scene (name or path) is loaded; "" = any
+        public float[] pos;       // x, y, z
+        public float[] lookAt;    // a point to look at, or
+        public float[] rot;       // Euler angles
+        public float fov;         // 0 = the main camera's
+    }
+
     /// <summary>
     /// ProjectSettings/AgentHarness.json: how the harness maps this project. Read by the Editor commands (harness_*) and by
     /// tools/*.ps1. A missing file or field takes the default below, and the defaults are those of a harness attached to an
@@ -54,6 +66,15 @@ namespace Harness
 
         /// <summary>Packages install.ps1 added for the harness besides itself (e.g. com.unity.inputsystem); uninstall removes them, release builds leave them out.</summary>
         public string[] installAdded = Array.Empty<string>();
+
+        /// <summary>Named capture poses (scenario captures and harness_capture), next to the ShotPresets of the scene.</summary>
+        public ConfigShot[] shots = Array.Empty<ConfigShot>();
+
+        /// <summary>
+        /// Regular expressions for errors this project is known to log (e.g. an SDK whose desktop library is not in the
+        /// repository). Matching runtime errors are reported as knownErrors and do not fail a loop.
+        /// </summary>
+        public string[] knownErrors = Array.Empty<string>();
 
         [NonSerialized] public string loadError;
         [NonSerialized] public bool fromFile;
@@ -134,6 +155,8 @@ namespace Harness
             modules = list.ToArray();
             contracts = N(contracts);
             installAdded = Array.FindAll(installAdded ?? Array.Empty<string>(), a => !string.IsNullOrWhiteSpace(a));
+            shots = Array.FindAll(shots ?? Array.Empty<ConfigShot>(), s => s != null && !string.IsNullOrWhiteSpace(s.name));
+            knownErrors = Array.FindAll(knownErrors ?? Array.Empty<string>(), k => !string.IsNullOrWhiteSpace(k));
             generatedRoot = N(generatedRoot);
             buildScene = N(buildScene);
             playScene = string.IsNullOrWhiteSpace(playScene) ? "first" : playScene.Trim().Replace('\\', '/');

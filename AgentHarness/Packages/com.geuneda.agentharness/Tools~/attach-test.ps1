@@ -25,6 +25,9 @@ param(
     [string[]]$Module = @(),
     [string]$UnityVersion,          # open.ps1 -UnityVersion (default: the project's ProjectVersion.txt)
     [int]$Loops = 3,
+    [string]$Scenario,              # loop.ps1 -Scenario (a path; relative = this checkout): e.g. one that waits for the game's boot
+    [string[]]$KnownErrors = @(),   # install.ps1 -KnownErrors (errors the project logs anyway, e.g. an SDK library it does not commit)
+    [switch]$InputShim,             # install.ps1 -InputShim
     [switch]$NoBuild,
     [string]$BuildDir,              # default: <project>-harness-build next to the project
     [string]$Out = 'HarnessOut/attach-test'
@@ -85,6 +88,15 @@ if ($before.Count -gt 0) { Fail "the working tree of $proj is not clean (commit 
 $installArgs = @('-Project', $proj, '-Source', $Source, '-Ref', $Ref)
 if ($Scene) { $installArgs += @('-Scene', $Scene) }
 if ($Module.Count) { $installArgs += @('-Module', ($Module -join ',')) }
+if ($KnownErrors.Count) { $installArgs += @('-KnownErrors'); $installArgs += $KnownErrors }
+if ($InputShim) { $installArgs += @('-InputShim') }
+$loopArgs = @()
+if ($Scenario) {
+    $sc = if ([IO.Path]::IsPathRooted($Scenario)) { $Scenario } else { Join-Path (Get-HarnessWorkRoot) $Scenario }
+    if (-not (Test-Path -LiteralPath $sc)) { Fail "-Scenario ${Scenario}: no such file" }
+    $loopArgs = @('-Scenario', ([IO.Path]::GetFullPath($sc)).Replace('\', '/'))
+    $report['scenario'] = $loopArgs[1]
+}
 $inst = Step 'install' { Invoke-Tool (Join-Path $PSScriptRoot 'install.ps1') $installArgs 120 }
 if ($inst.json) { [IO.File]::WriteAllText((Join-Path $outAbs 'install.json'), $inst.out, (New-Object Text.UTF8Encoding($false))) }
 if (-not $inst.json -or -not $inst.json.ok) { Fail "install.ps1 failed: $(if ($inst.json) { $inst.json.error } else { $inst.out + $inst.err })" }
@@ -108,7 +120,7 @@ if (@($setup.json.result.changed | Where-Object { $_ -notlike 'CompilationPipeli
 
 $lastScene = $null
 for ($i = 1; $i -le $Loops; $i++) {
-    $loop = Step "loop$i" { Invoke-Tool 'loop.ps1' @() 900 }
+    $loop = Step "loop$i" { Invoke-Tool 'loop.ps1' $loopArgs 900 }
     $j = $loop.json
     if ($j) { [IO.File]::WriteAllText((Join-Path $outAbs "loop$i.json"), $loop.out, (New-Object Text.UTF8Encoding($false))) }
     $row = [ordered]@{ ok = [bool]($j -and $j.ok); stage = $(if ($j) { $j.stage } else { 'none' }); sec = $(if ($j) { $j.durationSec } else { 0 }) }
@@ -118,6 +130,9 @@ for ($i = 1; $i -le $Loops; $i++) {
         $row['shots'] = @($j.shotStats | ForEach-Object { "$($_.name):$([math]::Round($_.meanLuma, 1))$(if ($_.blank) { ' BLANK' })$(if ($_.dark) { ' DARK' })" })
         $row['fps'] = $j.fps.avg
         $row['playEnterSec'] = $j.timings.playEnterSec
+        if ($j.PSObject.Properties.Name -contains 'knownErrors') { $row['knownErrors'] = @($j.knownErrors).Count }
+        if ($j.PSObject.Properties.Name -contains 'teardownErrors') { $row['teardownErrors'] = @($j.teardownErrors).Count }
+        if ($j.play -and $j.play.PSObject.Properties.Name -contains 'waits') { $row['waits'] = @($j.play.waits | ForEach-Object { "$($_.target):$($_.waitedSec)s" }) }
         if ($j.PSObject.Properties.Name -contains 'scene') { $lastScene = $j.scene }
     }
     $report.loops += , $row

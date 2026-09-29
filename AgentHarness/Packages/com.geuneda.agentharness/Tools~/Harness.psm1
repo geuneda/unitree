@@ -881,6 +881,7 @@ function Invoke-HarnessLoop {
     # ---- 3. Play scenario (or edit-mode capture) ------------------------------------------------------
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $playResult = $null
+    $state = $null
     if ($NoPlay) {
         $cap = Invoke-UnityCommand -Name 'harness_capture' -Params @{ preset = 'all'; out = $OutDir } -TimeoutSec 60
         if ($cap.success) { $shotObjs = @($cap.result.shots) } else { $shotObjs = @(); $report['error'] = $cap.error }
@@ -892,7 +893,10 @@ function Invoke-HarnessLoop {
             return $report
         }
         $state = $null
-        while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
+        # A scenario that waits for scenes/targets may run longer than the default: the Editor's own timeout (+ margin) counts.
+        $waitSec = $TimeoutSec
+        if ($start.result.PSObject.Properties.Name -contains 'timeoutSec') { $waitSec = [math]::Max($TimeoutSec, [double]$start.result.timeoutSec + 30) }
+        while ($sw.Elapsed.TotalSeconds -lt $waitSec) {
             Start-Sleep -Milliseconds 200
             $st = Invoke-UnityCommand -Name 'harness_play_status' -TimeoutSec 5
             if ($st.success -and $st.result.id -eq $start.result.id -and $st.result.state -in @('done', 'failed')) { $state = $st.result; break }
@@ -900,7 +904,7 @@ function Invoke-HarnessLoop {
         if ($null -eq $state) {
             Invoke-UnityCommand -Name 'editor_stop' | Out-Null
             $report.stage = 'play'
-            $report['error'] = "play did not finish within $TimeoutSec s"
+            $report['error'] = "play did not finish within $([math]::Round($waitSec)) s"
             return $report
         }
         $playResult = $state.result
@@ -914,7 +918,10 @@ function Invoke-HarnessLoop {
 
     # ---- 4. Console + stats ---------------------------------------------------------------------------
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $con = Invoke-UnityCommand -Name 'harness_console' -Params @{ since = $mark } -TimeoutSec 10
+    # Errors after the scenario finished were logged while play mode exited (teardown): reported, not failing.
+    $conParams = @{ since = $mark }
+    if ($state -and $state.PSObject.Properties.Name -contains 'finishedSeq' -and [int]$state.finishedSeq -gt 0) { $conParams['until'] = [int]$state.finishedSeq }
+    $con = Invoke-UnityCommand -Name 'harness_console' -Params $conParams -TimeoutSec 10
     $stats = if ($NoPlay) { $null } else { Invoke-UnityCommand -Name 'harness_stats' -TimeoutSec 10 }
     $Timings['collectSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
 
@@ -925,11 +932,16 @@ function Invoke-HarnessLoop {
         $warningCount = [int]$con.result.counts.warning
         # Errors from inside the Editor/packages (no Assets/ frame). Visible, but they do not fail the loop.
         $report['editorErrors'] = @($con.result.editorErrors | ForEach-Object { [ordered]@{ type = $_.type; msg = ($_.message -split "`n")[0]; count = $_.count; stack = $_.stack } })
+        # knownErrors (config regexes: the project's known noise) and teardownErrors (after the scenario): visible, not failing.
+        $has = @($con.result.PSObject.Properties.Name)
+        if ($has -contains 'knownErrors' -and @($con.result.knownErrors).Count) { $report['knownErrors'] = @($con.result.knownErrors | ForEach-Object { [ordered]@{ type = $_.type; msg = ($_.message -split "`n")[0]; file = $_.file; line = $_.line; count = $_.count } }) }
+        if ($has -contains 'teardownErrors' -and @($con.result.teardownErrors).Count) { $report['teardownErrors'] = @($con.result.teardownErrors | ForEach-Object { [ordered]@{ type = $_.type; msg = ($_.message -split "`n")[0]; file = $_.file; line = $_.line; module = $_.module; count = $_.count } }) }
+        if ($has -contains 'knownErrorsConfigError' -and $con.result.knownErrorsConfigError) { $report['configError'] = $con.result.knownErrorsConfigError }
     }
     $report.runtimeErrors = $runtimeErrors
     $report['warningCount'] = $warningCount
     $report.shots = @($shotObjs | Where-Object { $_.path } | ForEach-Object { $_.path })
-    $report['shotStats'] = @($shotObjs | ForEach-Object { [ordered]@{ name = $_.name; preset = $_.preset; t = $_.t; meanLuma = [math]::Round($_.meanLuma, 1); stdLuma = [math]::Round($_.stdLuma, 1); blank = $_.blank; dark = [bool]$_.dark; error = $_.error } })
+    $report['shotStats'] = @($shotObjs | ForEach-Object { [ordered]@{ name = $_.name; preset = $_.preset; t = $_.t; meanLuma = [math]::Round($_.meanLuma, 1); stdLuma = [math]::Round($_.stdLuma, 1); blank = $_.blank; dark = [bool]$_.dark; error = $_.error; hint = $(if ($_.PSObject.Properties.Name -contains 'hint') { $_.hint } else { $null }) } })
     if ($stats -and $stats.success -and $stats.result.ok) {
         $f = $stats.result.fps
         $report.fps = [ordered]@{ avg = [math]::Round($f.avg, 1); min = [math]::Round($f.min, 1); p95ms = [math]::Round($f.p95ms, 2); p99ms = [math]::Round($f.p99ms, 2); hitches = $f.hitches; cpuMainAvgMs = [math]::Round($f.cpuMainAvgMs, 2); samples = $f.samples; editorFocused = $stats.result.editorFocused }
@@ -938,6 +950,14 @@ function Invoke-HarnessLoop {
     }
     if ($playResult) {
         $report['play'] = [ordered]@{ success = $playResult.success; error = $playResult.error; probeReady = $playResult.probeReady; readySec = [math]::Round($playResult.readySec, 2); wallSec = [math]::Round($playResult.wallSec, 2); gameSec = [math]::Round($playResult.gameSec, 2); frames = $playResult.frames; modules = @($playResult.modules); failedModules = @($playResult.failedModules); inputEventsApplied = $playResult.inputEventsApplied; events = @($playResult.events | ForEach-Object { [ordered]@{ name = $_.name; count = $_.count } }) }
+        # Fields a result.json of an older package version does not have are left out.
+        $has = @($playResult.PSObject.Properties.Name)
+        if ($has -contains 'inputBackends') { $report.play['inputBackends'] = @($playResult.inputBackends) }
+        if ($has -contains 'inputHooks' -and @($playResult.inputHooks).Count) { $report.play['inputHooks'] = @($playResult.inputHooks) }
+        if ($has -contains 'activeScene') { $report.play['activeScene'] = $playResult.activeScene }
+        if ($has -contains 'scenes') { $report.play['scenes'] = @($playResult.scenes | ForEach-Object { [ordered]@{ name = $_.name; mode = $_.mode; t = [math]::Round($_.t, 3); wallSec = [math]::Round($_.wallSec, 2) } }) }
+        if ($has -contains 'waits' -and @($playResult.waits).Count) { $report.play['waits'] = @($playResult.waits | ForEach-Object { [ordered]@{ type = $_.type; target = $_.target; t = [math]::Round($_.t, 3); waitedSec = [math]::Round($_.waitedSec, 2); frames = $_.frames } }) }
+        if ($has -contains 'clicks' -and @($playResult.clicks).Count) { $report.play['clicks'] = @($playResult.clicks | ForEach-Object { [ordered]@{ target = $_.target; t = [math]::Round($_.t, 3); x = [math]::Round($_.x, 1); y = [math]::Round($_.y, 1); via = $_.via } }) }
     }
 
     $blank = @($shotObjs | Where-Object { $_.blank -or $_.error }).Count

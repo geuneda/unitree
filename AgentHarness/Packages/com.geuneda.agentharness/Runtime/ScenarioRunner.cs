@@ -4,19 +4,18 @@ using System.Diagnostics;
 using System.IO;
 using Unity.Profiling;
 using UnityEngine;
-#if AGENTHARNESS_INPUT_SYSTEM
-using UnityEngine.InputSystem;
-using UnityEngine.InputSystem.LowLevel;
-#endif
+using UnityEngine.SceneManagement;
+using UnityEngine.UIElements;
 using Debug = UnityEngine.Debug;
 
 namespace Harness
 {
     /// <summary>
     /// Executes a <see cref="Scenario"/> in play mode: waits for <see cref="HarnessProbe.Ready"/>,
-    /// replays input through <see cref="ScriptedInput"/>, captures shots, records frame/render stats and
-    /// runtime errors, writes result.json and invokes <see cref="onFinished"/>.
-    /// Spawned by the Editor (harness_play); has no Editor dependency itself.
+    /// replays input through <see cref="ScriptedInput"/> (Input System) and/or the game's [AgentHarnessInput] methods
+    /// (<see cref="InputHookReplay"/>, for the legacy Input Manager), waits for scenes (waitScene), captures shots, records
+    /// frame/render stats, scene loads and runtime errors, writes result.json and invokes <see cref="onFinished"/>.
+    /// Spawned by the Editor (harness_play); has no Editor dependency itself (the Editor hands in the input hooks).
     /// </summary>
     [DefaultExecutionOrder(-2000)]
     public sealed class ScenarioRunner : MonoBehaviour
@@ -31,9 +30,8 @@ namespace Harness
         Scenario m_Scenario;
         string m_OutDir;
         PlayResult m_Result;
-#if AGENTHARNESS_INPUT_SYSTEM
-        ScriptedInput m_Input;
-#endif
+        Action<string, string, Vector2> m_InputHook;
+        readonly List<IScenarioInput> m_Inputs = new List<IScenarioInput>();
         bool m_RunInBackground;
 
         readonly Stopwatch m_Wall = new Stopwatch();
@@ -45,6 +43,17 @@ namespace Harness
         readonly object m_LogLock = new object();
         readonly List<ScenarioEvent> m_Timeline = new List<ScenarioEvent>();
         readonly HashSet<string> m_UsedPresets = new HashSet<string>();
+        readonly List<SceneLoad> m_Scenes = new List<SceneLoad>();
+        readonly List<ScenarioWait> m_Waits = new List<ScenarioWait>();
+        readonly List<ClickTarget> m_Clicks = new List<ClickTarget>();
+        readonly HashSet<ScenarioEvent> m_NextFrame = new HashSet<ScenarioEvent>();   // applied a frame after the event before it
+        int m_LastApplyFrame = -1;
+
+        // waitScene/waitTarget: the scenario clock stands still at m_WaitAt until the scene is loaded / the target is there.
+        ScenarioEvent m_Wait;
+        float m_WaitAt, m_WaitStartGame, m_PausedGame;
+        double m_WaitStartWall;
+        int m_WaitFrames;
 
         ProfilerRecorder m_Batches, m_SetPass, m_DrawCalls, m_Tris, m_Verts, m_MainThread;
         double m_BatchesSum, m_SetPassSum, m_DrawSum, m_TrisSum, m_VertsSum;
@@ -56,10 +65,11 @@ namespace Harness
         ScenarioCapture[] m_Captures;
         int m_Warnings, m_ErrorsTotal;
 
-        public float ScenarioTime => m_Ready ? Time.time - m_ReadyGameTime : 0f;
+        public float ScenarioTime => !m_Ready ? 0f : m_Wait != null ? m_WaitAt : Time.time - m_ReadyGameTime - m_PausedGame;
         public bool Finished => m_Finished;
 
-        public static ScenarioRunner Spawn(string id, Scenario scenario, string outDir)
+        /// <param name="inputHook">The game's [AgentHarnessInput] methods (found by the Editor), or null.</param>
+        public static ScenarioRunner Spawn(string id, Scenario scenario, string outDir, Action<string, string, Vector2> inputHook = null)
         {
             var go = new GameObject("[HarnessScenarioRunner]"); // not DontSave: must die with play mode
             DontDestroyOnLoad(go);
@@ -67,6 +77,7 @@ namespace Harness
             go.AddComponent<ScenarioCaptureDriver>().runner = r;
             r.m_Scenario = scenario ?? new Scenario();
             r.m_OutDir = outDir;
+            r.m_InputHook = inputHook;
             r.m_Result = new PlayResult { id = id, scenario = r.m_Scenario.name };
             Current = r;
             return r;
@@ -76,22 +87,47 @@ namespace Harness
         {
             m_Wall.Start();
             Application.logMessageReceivedThreaded += OnLog;
+            // The play scene is already loaded when the Editor spawns the runner: list it (and any others) first.
+            for (var i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var s = SceneManager.GetSceneAt(i);
+                if (s.isLoaded) m_Scenes.Add(new SceneLoad { name = s.name, path = s.path, mode = "Start", t = -1f, wallSec = 0f });
+            }
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
+        void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            m_Scenes.Add(new SceneLoad { name = scene.name, path = scene.path, mode = mode.ToString(), t = m_Ready ? ScenarioTime : -1f, wallSec = (float)m_Wall.Elapsed.TotalSeconds });
         }
 
         void Start()
         {
-            // Expand keyTap into down/up pairs and sort the timeline.
+            // Expand keyTap and click into their parts and sort the timeline (stable: equal times keep the file's order).
+            var list = new List<ScenarioEvent>();
             foreach (var e in m_Scenario.events ?? Array.Empty<ScenarioEvent>())
             {
                 if (e == null || string.IsNullOrEmpty(e.type)) continue;
                 if (e.type == "keyTap")
                 {
-                    m_Timeline.Add(new ScenarioEvent { t = e.t, type = "keyDown", key = e.key });
-                    m_Timeline.Add(new ScenarioEvent { t = e.t + Mathf.Max(0.02f, e.hold), type = "keyUp", key = e.key });
+                    list.Add(new ScenarioEvent { t = e.t, type = "keyDown", key = e.key });
+                    list.Add(new ScenarioEvent { t = e.t + Mathf.Max(0.02f, e.hold), type = "keyUp", key = e.key });
                 }
-                else m_Timeline.Add(e);
+                else if (e.type == "click")
+                {
+                    // Move there, then press and release on later frames (UI input modules see the pointer arrive first).
+                    list.Add(new ScenarioEvent { t = e.t, type = "mousePos", x = e.x, y = e.y, target = e.target });
+                    var down = new ScenarioEvent { t = e.t, type = "mouseDown", key = e.key };
+                    var up = new ScenarioEvent { t = e.t + Mathf.Max(0.02f, e.hold), type = "mouseUp", key = e.key };
+                    list.Add(down); m_NextFrame.Add(down);
+                    list.Add(up); m_NextFrame.Add(up);
+                }
+                else list.Add(e);
             }
-            m_Timeline.Sort((a, b) => a.t.CompareTo(b.t));
+            var order = new Dictionary<ScenarioEvent, int>();
+            for (var i = 0; i < list.Count; i++) order[list[i]] = i;
+            list.Sort((a, b) => a.t != b.t ? a.t.CompareTo(b.t) : order[a].CompareTo(order[b]));
+            m_Timeline.AddRange(list);
             m_Captures = (ScenarioCapture[])(m_Scenario.captures ?? Array.Empty<ScenarioCapture>()).Clone();
             Array.Sort(m_Captures, (a, b) => a.t.CompareTo(b.t));
 
@@ -121,9 +157,7 @@ namespace Harness
                     m_ReadyGameTime = Time.time;
                     m_Result.probeReady = true;
                     m_Result.readySec = (float)m_Wall.Elapsed.TotalSeconds;
-#if AGENTHARNESS_INPUT_SYSTEM
-                    m_Input = ScriptedInput.Create();
-#endif
+                    CreateInputs();
                     m_Frame.Restart();
                 }
                 else if (m_Wall.Elapsed.TotalSeconds > m_Scenario.readyTimeoutSec)
@@ -136,11 +170,19 @@ namespace Harness
             // Frame stats (wall clock; captureDeltaTime does not affect the Stopwatch).
             var ms = (float)m_Frame.Elapsed.TotalMilliseconds;
             m_Frame.Restart();
+            // Frames spent waiting for a scene are loading, not game cost; the clock resumes where it stopped.
+            var waited = m_Wait != null;
+            if (waited)
+            {
+                if (!ContinueWait()) return;
+                m_LastApplyFrame = Time.frameCount;
+                m_NextEvent++;   // the wait event itself
+            }
             var st = ScenarioTime;
             var capturedLastFrame = m_CapturedLastFrame;
             m_CapturedLastFrame = false;
             // Frames that paid for an offscreen capture (render + readback + PNG encode) are not game cost.
-            if (st > m_Scenario.warmupSec && !capturedLastFrame)
+            if (st > m_Scenario.warmupSec && !capturedLastFrame && !waited)
             {
                 m_FrameMs.Add(ms);
                 if (m_MainThread.Valid && m_MainThread.LastValue > 0) m_CpuMs.Add(m_MainThread.LastValue / 1e6f);
@@ -149,9 +191,69 @@ namespace Harness
 
             while (m_NextEvent < m_Timeline.Count && m_Timeline[m_NextEvent].t <= st)
             {
-                Apply(m_Timeline[m_NextEvent]);
+                var e = m_Timeline[m_NextEvent];
+                if (m_NextFrame.Contains(e) && m_LastApplyFrame == Time.frameCount) break;
+                if (e.type == "waitScene" || e.type == "waitTarget")
+                {
+                    StartWait(e, st);
+                    if (!ContinueWait()) return;
+                }
+                else Apply(e);
+                m_LastApplyFrame = Time.frameCount;
                 m_NextEvent++;
             }
+        }
+
+        // ---- waitScene / waitTarget ------------------------------------------------------------------------------------
+
+        void StartWait(ScenarioEvent e, float st)
+        {
+            m_Wait = e;
+            m_WaitAt = st;
+            m_WaitStartGame = Time.time;
+            m_WaitStartWall = m_Wall.Elapsed.TotalSeconds;
+            m_WaitFrames = 0;
+        }
+
+        /// <summary>True once the awaited scene is loaded or target is there (the clock runs again from where it stopped).</summary>
+        bool ContinueWait()
+        {
+            var e = m_Wait;
+            var scene = e.type == "waitScene";
+            var what = scene ? e.scene : e.target;
+            if (string.IsNullOrWhiteSpace(what))
+            {
+                m_Wait = null;
+                Debug.LogError($"[Harness] scenario event at t={e.t} ({e.type}) has no \"{(scene ? "scene" : "target")}\"");
+                return true;
+            }
+            var waited = m_Wall.Elapsed.TotalSeconds - m_WaitStartWall;
+            if (scene ? ShotPose.SceneLoaded(what) : TryTargetPoint(what, out _, out _))
+            {
+                m_PausedGame += Time.time - m_WaitStartGame;
+                m_Wait = null;
+                m_Waits.Add(new ScenarioWait { type = e.type, target = what, t = m_WaitAt, waitedSec = (float)waited, frames = m_WaitFrames });
+                return true;
+            }
+            m_WaitFrames++;
+            var limit = e.timeoutSec > 0f ? e.timeoutSec : DefaultWaitTimeoutSec;
+            if (waited > limit)
+                Finish(scene ? $"waitScene '{what}' at t={e.t}: not loaded after {limit:0.#}s (loaded: {LoadedScenes()})"
+                             : $"waitTarget '{what}' at t={e.t}: no such active, visible GameObject or UI Toolkit element after {limit:0.#}s (active scene: {SceneManager.GetActiveScene().name})");
+            return false;
+        }
+
+        public const float DefaultWaitTimeoutSec = 30f;
+
+        static string LoadedScenes()
+        {
+            var names = new List<string>();
+            for (var i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var s = SceneManager.GetSceneAt(i);
+                names.Add(s.isLoaded ? s.name : s.name + " (loading)");
+            }
+            return string.Join(", ", names);
         }
 
         /// <summary>
@@ -189,41 +291,142 @@ namespace Harness
             m_RenderSamples++;
         }
 
+        // ---- Input ------------------------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// Input backends for the kinds of input the timeline uses (none without input events): Input System virtual
+        /// devices when the Input System is active, and the game's [AgentHarnessInput] methods when it has any (both at
+        /// once is fine: a real keyboard also reaches both input systems with Active Input Handling 'Both').
+        /// </summary>
+        void CreateInputs()
+        {
+            bool keys = false, mouse = false, pad = false;
+            foreach (var e in m_Timeline)
+            {
+                switch (e.type)
+                {
+                    case "keyDown": case "keyUp": keys = true; break;
+                    case "mouseMove": case "mousePos": case "mouseDown": case "mouseUp": case "scroll": mouse = true; break;
+                    case "stick": case "padDown": case "padUp": pad = true; break;
+                }
+            }
+            if (!keys && !mouse && !pad) return;
+#if AGENTHARNESS_INPUT_SYSTEM && ENABLE_INPUT_SYSTEM
+            m_Inputs.Add(ScriptedInput.Create(keys, mouse, pad));
+#endif
+            if (m_InputHook != null && (keys || mouse)) m_Inputs.Add(new InputHookReplay(m_InputHook));
+            m_Result.inputBackends = m_Inputs.ConvertAll(i => i.Name).ToArray();
+        }
+
+        static string NoInputBackend()
+        {
+#if ENABLE_INPUT_SYSTEM && !AGENTHARNESS_INPUT_SYSTEM
+            return "Active Input Handling is 'Input System Package' but com.unity.inputsystem is not installed";
+#else
+            return "nothing takes scenario input: the legacy Input Manager (UnityEngine.Input) cannot be driven from code. Read input through " +
+                "HarnessInput (install.ps1 -InputShim adds Assets/AgentHarness/HarnessInput.cs, same members as Input), or mark a static " +
+                "void M(string type, string key, Vector2 value) of your input code [AgentHarnessInput] (tools/AgentHarness.md)";
+#endif
+        }
+
         void Apply(ScenarioEvent e)
         {
             try
             {
-#if !AGENTHARNESS_INPUT_SYSTEM
-                throw new NotSupportedException("input replay needs the Input System package (com.unity.inputsystem) with Active Input Handling 'Input System' or 'Both'");
-#else
-                switch (e.type)
+                if (e.type == "mousePos" && !string.IsNullOrEmpty(e.target)) e = ResolveTarget(e);
+                else if ((e.type == "mousePos" || e.type == "mouseMove") && string.Equals(m_Scenario.mouseSpace, "normalized", StringComparison.OrdinalIgnoreCase))
+                    e = new ScenarioEvent { t = e.t, type = e.type, key = e.key, x = e.x * Screen.width, y = e.y * Screen.height };
+                if (m_Inputs.Count == 0) throw new NotSupportedException(NoInputBackend());
+                var applied = false;
+                Exception error = null;
+                foreach (var input in m_Inputs)
                 {
-                    case "keyDown": m_Input.KeyDown(ParseEnum<Key>(e.key)); break;
-                    case "keyUp": m_Input.KeyUp(ParseEnum<Key>(e.key)); break;
-                    case "mouseMove": m_Input.MouseMove(new Vector2(e.x, e.y)); break;
-                    case "mousePos": m_Input.MousePosition(new Vector2(e.x, e.y)); break;
-                    case "mouseDown": m_Input.MouseButton(ParseEnum<MouseButton>(e.key ?? "Left"), true); break;
-                    case "mouseUp": m_Input.MouseButton(ParseEnum<MouseButton>(e.key ?? "Left"), false); break;
-                    case "scroll": m_Input.Scroll(new Vector2(e.x, e.y)); break;
-                    case "stick": m_Input.Stick(!string.Equals(e.key, "right", StringComparison.OrdinalIgnoreCase), new Vector2(e.x, e.y)); break;
-                    case "padDown": m_Input.PadButton(ParseEnum<GamepadButton>(e.key), true); break;
-                    case "padUp": m_Input.PadButton(ParseEnum<GamepadButton>(e.key), false); break;
-                    case "releaseAll": m_Input.ReleaseAll(); break;
-                    default: throw new ArgumentException($"unknown event type '{e.type}'");
+                    try { applied |= input.Apply(e); }
+                    catch (ArgumentException ex) { error = error ?? ex; }
+                }
+                if (!applied)
+                {
+                    if (error != null) throw error;
+                    if (e.type == "stick" || e.type == "padDown" || e.type == "padUp")
+                        throw new NotSupportedException("gamepad input needs the Input System (the legacy Input Manager reads joysticks from the OS)");
+                    throw new ArgumentException($"unknown event type '{e.type}'");
                 }
                 m_Result.inputEventsApplied++;
-#endif
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[Harness] scenario event at t={e.t} ({e.type} {e.key}) failed: {ex.Message}");
+                Debug.LogError($"[Harness] scenario event at t={e.t} ({e.type} {e.key}{e.target}) failed: {ex.Message}");
             }
         }
 
-        static T ParseEnum<T>(string s) where T : struct
+        /// <summary>A mousePos at the screen center of <see cref="ScenarioEvent.target"/>.</summary>
+        ScenarioEvent ResolveTarget(ScenarioEvent e)
         {
-            if (!string.IsNullOrEmpty(s) && Enum.TryParse<T>(s, true, out var v)) return v;
-            throw new ArgumentException($"'{s}' is not a valid {typeof(T).Name}");
+            if (!TryTargetPoint(e.target, out var p, out var via))
+                throw new ArgumentException($"click target '{e.target}' not found (an active GameObject name or path, or a UI Toolkit element name)");
+            m_Clicks.Add(new ClickTarget { target = e.target, t = ScenarioTime, x = p.x, y = p.y, via = via });
+            return new ScenarioEvent { t = e.t, type = e.type, x = p.x, y = p.y };
+        }
+
+        /// <summary>Screen point (pixels, origin bottom left) of a uGUI element, a scene object, or a UI Toolkit element.</summary>
+        static bool TryTargetPoint(string target, out Vector2 point, out string via)
+        {
+            point = default; via = null;
+            var go = GameObject.Find(target);
+            if (go != null)
+            {
+                if (go.transform is RectTransform rt)
+                {
+                    var canvas = go.GetComponentInParent<Canvas>();
+                    Camera uiCam = null;
+                    if (canvas != null && canvas.rootCanvas.renderMode != RenderMode.ScreenSpaceOverlay) uiCam = canvas.rootCanvas.worldCamera;
+                    var corners = new Vector3[4];
+                    rt.GetWorldCorners(corners);
+                    point = RectTransformUtility.WorldToScreenPoint(uiCam, (corners[0] + corners[2]) * 0.5f);
+                    via = "ugui";
+                    return true;
+                }
+                var cam = HarnessCapture.FindMainCamera();
+                if (cam == null) return false;
+                var center = go.transform.position;
+                if (go.TryGetComponent<Renderer>(out var r)) center = r.bounds.center;
+                else if (go.TryGetComponent<Collider>(out var c)) center = c.bounds.center;
+                else if (go.TryGetComponent<Collider2D>(out var c2)) center = c2.bounds.center;
+                var sp = cam.WorldToScreenPoint(center);
+                if (sp.z <= 0f) return false;
+                point = sp;
+                via = "world";
+                return true;
+            }
+            foreach (var doc in UnityCompat.FindObjects<UIDocument>(FindObjectsInactive.Exclude))
+            {
+                var root = doc.rootVisualElement;
+                var el = root?.Q(target);
+                var panelRoot = root?.panel?.visualTree;
+                if (el == null || panelRoot == null) continue;
+                // Laid out and shown (an element under a display:none ancestor has no size).
+                var b = el.worldBound;
+                if (float.IsNaN(b.x) || b.width <= 0f || b.height <= 0f || el.resolvedStyle.display == DisplayStyle.None || el.resolvedStyle.visibility != Visibility.Visible) continue;
+                var c = b.center;
+                if (UnityCompat.IsWorldSpace(doc.panelSettings))
+                {
+                    // A panel in the world: bounds are in the document's local units, y up (checked against a menu's button
+                    // order); project that point with the main camera.
+                    var worldCam = HarnessCapture.FindMainCamera();
+                    if (worldCam == null) continue;
+                    var wp = worldCam.WorldToScreenPoint(doc.transform.TransformPoint(new Vector3(c.x, c.y, 0f)));
+                    if (wp.z <= 0f) continue;
+                    point = wp;
+                    via = "uitk-world";
+                    return true;
+                }
+                var size = panelRoot.worldBound.size;
+                if (size.x <= 0f || size.y <= 0f) continue;
+                point = new Vector2(c.x / size.x * Screen.width, Screen.height - c.y / size.y * Screen.height);
+                via = "uitk";
+                return true;
+            }
+            return false;
         }
 
         void DoCapture(ScenarioCapture c, int index, float st)
@@ -237,37 +440,48 @@ namespace Harness
                 return;
             }
 
-            var template = HarnessCapture.FindMainCamera();
-            ShotPreset preset = null;
-            if (presetName == "auto")
+            // Camera settings from the named camera or the main camera; the pose from the capture's pos, a named shot, or that camera.
+            string error = null;
+            var template = string.IsNullOrEmpty(c.camera) ? HarnessCapture.FindMainCamera() : HarnessCapture.FindCamera(c.camera);
+            if (template == null)
+                error = string.IsNullOrEmpty(c.camera) ? "no camera in scene" : $"camera '{c.camera}' not found (cameras: {string.Join(", ", HarnessCapture.CameraNames())})";
+            ShotPose pose = null;
+            if (c.pos != null && c.pos.Length > 0)
             {
-                foreach (var p in ShotPreset.All())
-                    if (!m_UsedPresets.Contains(p.presetName)) { preset = p; break; }
+                if (ShotPose.TryCreate(!string.IsNullOrEmpty(c.name) ? c.name : "pose", c.pos, c.lookAt, c.rot, c.fov, template != null ? template.transform : null, out pose, out var poseError)) pose.source = "scenario";
+                else error = error ?? poseError;
             }
-            else if (presetName != "main")
+            else if (presetName == "auto" && string.IsNullOrEmpty(c.camera))
             {
-                preset = ShotPreset.Find(presetName);
-                if (preset == null) Debug.LogError($"[Harness] ShotPreset '{presetName}' not found; using main camera");
+                foreach (var p in ShotPose.All())
+                    if (!m_UsedPresets.Contains(p.name)) { pose = p; break; }
+            }
+            else if (presetName != "main" && presetName != "auto")
+            {
+                pose = ShotPose.Find(presetName);
+                if (pose == null) Debug.LogError($"[Harness] shot '{presetName}' not found (a ShotPreset in the scene or \"shots\" of {HarnessConfig.FileName}); using the main camera");
             }
 
-            var label = !string.IsNullOrEmpty(c.name) ? c.name : preset != null ? preset.presetName : "main";
+            var label = !string.IsNullOrEmpty(c.name) ? c.name : pose != null ? pose.name : !string.IsNullOrEmpty(c.camera) ? c.camera : "main";
             var path = Path.Combine(m_OutDir, $"shot{index}_{Sanitize(label)}.png").Replace('\\', '/');
             ShotResult r;
-            if (template == null)
-                r = new ShotResult { name = label, path = path, error = "no camera in scene" };
-            else if (preset != null)
+            if (error != null)
+                r = new ShotResult { name = label, path = path, error = error };
+            else if (pose != null)
             {
-                m_UsedPresets.Add(preset.presetName);
-                r = HarnessCapture.Capture(template, preset, m_Scenario.width, m_Scenario.height, path);
+                if (pose.source != "scenario") m_UsedPresets.Add(pose.name);
+                r = HarnessCapture.Capture(template, pose, m_Scenario.width, m_Scenario.height, path);
+                if (pose.source == "scenario") r.preset = "pose";
             }
             else
             {
                 var tr = template.transform;
                 r = HarnessCapture.Capture(template, tr.position, tr.rotation, template.fieldOfView, m_Scenario.width, m_Scenario.height, path);
-                r.preset = "main";
+                r.preset = string.IsNullOrEmpty(c.camera) ? "main" : "camera";
             }
             r.name = label;
             r.t = st;
+            if (r.blank && string.IsNullOrEmpty(r.error)) r.hint = HarnessCapture.BlankHint();
             m_Shots.Add(r);
             m_CapturedLastFrame = true;
         }
@@ -419,6 +633,10 @@ namespace Harness
             m_Result.editorFocused = Application.isFocused;
             m_Result.modules = HarnessProbe.InitializedModules.ToArray();
             m_Result.failedModules = HarnessProbe.FailedModules.ToArray();
+            m_Result.clicks = m_Clicks.ToArray();
+            m_Result.scenes = m_Scenes.ToArray();
+            m_Result.waits = m_Waits.ToArray();
+            m_Result.activeScene = SceneManager.GetActiveScene().name;
             FillStats(m_Result);
             m_Shots.Sort((a, b) => a.t.CompareTo(b.t));
             m_Result.shots = m_Shots.ToArray();
@@ -440,10 +658,11 @@ namespace Harness
 
             Time.captureDeltaTime = 0f;
             Application.runInBackground = m_RunInBackground;
-#if AGENTHARNESS_INPUT_SYSTEM
-            m_Input?.Dispose();
-            m_Input = null;
-#endif
+            foreach (var input in m_Inputs)
+            {
+                try { input.Dispose(); } catch (Exception e) { Debug.LogException(e); }
+            }
+            m_Inputs.Clear();
 
             try
             {
@@ -465,6 +684,7 @@ namespace Harness
         {
             if (!m_Finished) Finish("play mode ended before the scenario finished");
             Application.logMessageReceivedThreaded -= OnLog;
+            SceneManager.sceneLoaded -= OnSceneLoaded;
             m_Batches.Dispose(); m_SetPass.Dispose(); m_DrawCalls.Dispose();
             m_Tris.Dispose(); m_Verts.Dispose(); m_MainThread.Dispose();
             if (Current == this) Current = null;

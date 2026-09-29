@@ -11,6 +11,10 @@
   One more dependency is added when needed: com.unity.inputsystem, if the project's Active Input Handling is 'Input System
   Package' or 'Both' but the package is not installed (com.unity.pipeline 0.8.0-exp.1, the harness's Editor connection,
   then fails to compile). It is listed in "installAdded" of the config, removed by uninstall, and left out of release builds.
+  A dependency of the harness that the project pins to a lower version (e.g. com.unity.pipeline 0.6.0-exp.1) is raised
+  to the harness's; "installReplaced" of the config keeps the original, and uninstall puts it back.
+  -InputShim also adds Assets/AgentHarness/HarnessInput.cs (templates/HarnessInput.cs): for a game that reads the legacy
+  Input Manager, which scenarios cannot drive, a drop-in UnityEngine.Input that takes scenario input (Input. -> HarnessInput.).
   tools/uninstall.ps1 removes exactly this again. Run from the harness repository (or a copy of the package).
 
 .EXAMPLE
@@ -33,6 +37,8 @@ param(
     [string[]]$Module = @(),        # modules[] entries: Name=Assets/Path (a folder of existing code = one module)
     [ValidateSet('attach', 'harness')][string]$Setup = 'attach',
     [string]$InputSystemVersion = '1.19.0',   # added only when the Active Input Handling needs it (see below)
+    [switch]$InputShim,             # add Assets/AgentHarness/HarnessInput.cs (legacy Input Manager games)
+    [string[]]$KnownErrors = @(),   # knownErrors of the config: regexes of errors the project is known to log (not failing a loop)
     [switch]$WhatIf,
     [switch]$Force                  # replace existing tools/*.ps1 files that are not AgentHarness entry points
 )
@@ -155,6 +161,32 @@ if ($handler -ne 0 -and -not $hasInputSystem) {
     $result.warnings += "Active Input Handling is '$(if ($handler -eq 1) { 'Input System Package' } else { 'Both' })' but com.unity.inputsystem is not installed: adding com.unity.inputsystem $InputSystemVersion (com.unity.pipeline needs it then). uninstall.ps1 removes it; release builds leave it out"
 }
 $result['installAdded'] = $installAdded
+
+# The harness's own dependencies (package.json) must not be held back by a lower version the project pins itself: a
+# direct dependency in the manifest beats a package's in UPM, so the harness would run on, say, com.unity.pipeline
+# 0.6.0-exp.1. Raise such lines and record the original ("installReplaced" in the config) so uninstall puts it back.
+function ConvertTo-VersionKey([string]$v) {
+    $m = [regex]::Match($v, '^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$')
+    if (-not $m.Success) { return $null }
+    # A release sorts after its pre-releases; pre-release parts compare numerically where they are numbers.
+    $pre = if ($m.Groups[4].Success) { @($m.Groups[4].Value.Split('.') | ForEach-Object { if ($_ -match '^\d+$') { '{0:D10}' -f [long]$_ } else { $_ } }) -join '.' } else { '~' }
+    '{0:D10}.{1:D10}.{2:D10}-{3}' -f [long]$m.Groups[1].Value, [long]$m.Groups[2].Value, [long]$m.Groups[3].Value, $pre
+}
+$installReplaced = @()
+$pkgJson = Get-Content -LiteralPath (Join-Path $pkgDir 'package.json') -Raw | ConvertFrom-Json
+$pkgDeps = if ($pkgJson.PSObject.Properties.Name -contains 'dependencies') { @($pkgJson.dependencies.PSObject.Properties) } else { @() }
+foreach ($d in $pkgDeps) {
+    $cur = [regex]::Match($newManifest, '"' + [regex]::Escape($d.Name) + '"\s*:\s*"([^"]*)"')
+    if (-not $cur.Success) { continue }
+    $have = ConvertTo-VersionKey $cur.Groups[1].Value
+    $need = ConvertTo-VersionKey "$($d.Value)"
+    if (-not $have -or -not $need) { $result.warnings += "$($d.Name) is pinned to '$($cur.Groups[1].Value)' in the manifest; the harness needs $($d.Value) (not compared: not a version number)"; continue }
+    if ([string]::CompareOrdinal($have, $need) -ge 0) { continue }
+    $newManifest = Set-ManifestDependency $newManifest $d.Name "$($d.Value)"
+    $installReplaced += [ordered]@{ name = $d.Name; from = $cur.Groups[1].Value; to = "$($d.Value)" }
+    $result.warnings += "the project pins $($d.Name) $($cur.Groups[1].Value), older than the $($d.Value) the harness needs: raised to $($d.Value) (uninstall.ps1 puts $($cur.Groups[1].Value) back)"
+}
+$result['installReplaced'] = $installReplaced
 if ($newManifest -ne $manifest) { Add-Step 'Packages/manifest.json' 'modify' { [IO.File]::WriteAllText($manifestPath, $newManifest, $utf8) }.GetNewClosure() }
 else { Add-Step 'Packages/manifest.json' 'keep' $null }
 
@@ -178,6 +210,18 @@ foreach ($t in @(@{ rel = 'tools/scenarios/default.json'; src = 'default-scenari
     if (Test-Path -LiteralPath $dst) { Add-Step $t.rel 'keep' $null; continue }
     $text = Read-Text $src
     Add-Step $t.rel 'create' { [void][IO.Directory]::CreateDirectory((Split-Path -Parent $dst)); [IO.File]::WriteAllText($dst, $text, $utf8) }.GetNewClosure()
+}
+
+# The legacy input shim: the game's own file once written (uninstall removes it only while unchanged and unused).
+if ($InputShim) {
+    $rel = 'Assets/AgentHarness/HarnessInput.cs'
+    $dst = Join-Path $root $rel
+    if (Test-Path -LiteralPath $dst) { Add-Step $rel 'keep' $null }
+    else {
+        $text = Read-Text (Join-Path $templates 'HarnessInput.cs')
+        Add-Step $rel 'create' { [void][IO.Directory]::CreateDirectory((Split-Path -Parent $dst)); [IO.File]::WriteAllText($dst, $text, $utf8) }.GetNewClosure()
+    }
+    if ($handler -eq 1) { $result.warnings += "-InputShim: Active Input Handling is 'Input System Package', where UnityEngine.Input (and so HarnessInput) throws; scenarios drive the Input System directly" }
 }
 
 # ---- 3. ProjectSettings/AgentHarness.json ---------------------------------------------------------------------------
@@ -215,10 +259,10 @@ if (Test-Path -LiteralPath $configPath) {
     }
     $cfg = if ($Setup -eq 'harness') {
         [ordered]@{ setup = 'harness'; moduleRoots = @('Assets/Game'); modules = $mods; contracts = 'Assets/Game/Contracts'; generatedRoot = 'Assets/Generated'
-            buildScene = 'Assets/Scenes/Main.unity'; playScene = $(if ($Scene) { $playScene } else { 'build' }); installAdded = $installAdded }
+            buildScene = 'Assets/Scenes/Main.unity'; playScene = $(if ($Scene) { $playScene } else { 'build' }); knownErrors = @($KnownErrors); installAdded = $installAdded; installReplaced = $installReplaced }
     } else {
         [ordered]@{ setup = 'attach'; moduleRoots = @(); modules = $mods; contracts = ''; generatedRoot = 'Assets/AgentHarness/Generated'
-            buildScene = 'Assets/AgentHarness/Main.unity'; playScene = $playScene; installAdded = $installAdded }
+            buildScene = 'Assets/AgentHarness/Main.unity'; playScene = $playScene; knownErrors = @($KnownErrors); installAdded = $installAdded; installReplaced = $installReplaced }
     }
     # Unity-style JSON (2-space indent): PowerShell 5.1's ConvertTo-Json indents oddly, so write it by hand.
     $lines = @('{')
@@ -234,8 +278,12 @@ if (Test-Path -LiteralPath $configPath) {
                 for ($j = 0; $j -lt $items.Count; $j++) { $lines += '    { "name": "' + $items[$j].name + '", "path": "' + $items[$j].path + '" }' + $(if ($j -lt $items.Count - 1) { ',' } else { '' }) }
                 $lines += "  ]$comma"
             }
-        } elseif ($k -eq 'moduleRoots' -or $k -eq 'installAdded') {
-            $lines += '  "' + $k + '": [' + ((@($v) | ForEach-Object { '"' + $_ + '"' }) -join ', ') + "]$comma"
+        } elseif ($k -eq 'installReplaced') {
+            $items = @($v | ForEach-Object { '{ "name": "' + $_.name + '", "from": "' + $_.from + '", "to": "' + $_.to + '" }' })
+            $lines += '  "installReplaced": [' + ($items -join ', ') + "]$comma"
+        } elseif ($k -eq 'moduleRoots' -or $k -eq 'installAdded' -or $k -eq 'knownErrors') {
+            # JSON string escapes (regexes carry backslashes).
+            $lines += '  "' + $k + '": [' + ((@($v) | ForEach-Object { '"' + ($_.Replace('\', '\\').Replace('"', '\"')) + '"' }) -join ', ') + "]$comma"
         } else {
             $lines += '  "' + $k + '": "' + $v + '"' + $comma
         }
@@ -248,11 +296,13 @@ if (Test-Path -LiteralPath $configPath) {
 
 # ---- 4. A pointer for agents -------------------------------------------------------------------------------------
 $agentDocs = @('CLAUDE.md', 'AGENTS.md') | Where-Object { Test-Path -LiteralPath (Join-Path $root $_) }
+$claude = Join-Path $root 'CLAUDE.md'
+$claudeText = "# $(Split-Path -Leaf $root)`n`nThis Unity project has the AgentHarness attached: read tools/AgentHarness.md before working here`n" +
+    "(tools/loop.ps1 = recompile + play + screenshots + console as JSON).`n"
 if (@($agentDocs).Count -eq 0) {
-    $claude = Join-Path $root 'CLAUDE.md'
-    $claudeText = "# $(Split-Path -Leaf $root)`n`nThis Unity project has the AgentHarness attached: read tools/AgentHarness.md before working here`n" +
-        "(tools/loop.ps1 = recompile + play + screenshots + console as JSON).`n"
     Add-Step 'CLAUDE.md' 'create' { [IO.File]::WriteAllText($claude, $claudeText, $utf8) }.GetNewClosure()
+} elseif ((Test-Path -LiteralPath $claude) -and (Read-Text $claude) -eq $claudeText) {
+    Add-Step 'CLAUDE.md' 'keep' $null   # the pointer an earlier install wrote
 } else {
     $result.warnings += "add a line to $(@($agentDocs)[0]) so agents find the harness, e.g. 'AgentHarness: read tools/AgentHarness.md (tools/loop.ps1 = recompile + play + screenshots + console as JSON)'"
 }
@@ -267,7 +317,7 @@ foreach ($s in $plan) {
 if (-not $WhatIf) {
     if (-not (Test-Path -LiteralPath $state)) {
         [void][IO.Directory]::CreateDirectory((Split-Path -Parent $state))
-        $record = [ordered]@{ installedAt = (Get-Date).ToString('o'); source = $Source; dependency = $dep; installAdded = @($installAdded); manifestBefore = $manifest
+        $record = [ordered]@{ installedAt = (Get-Date).ToString('o'); source = $Source; dependency = $dep; installAdded = @($installAdded); installReplaced = @($installReplaced); manifestBefore = $manifest
             lockBefore = $(if (Test-Path -LiteralPath $lockPath) { [IO.File]::ReadAllText($lockPath) } else { $null }); created = @($result.created) }
         [IO.File]::WriteAllText($state, ($record | ConvertTo-Json -Depth 4), $utf8)
     }

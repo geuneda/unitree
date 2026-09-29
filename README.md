@@ -62,7 +62,9 @@ $install = 'C:\dev\unitree\AgentHarness\Packages\com.geuneda.agentharness\Tools~
 powershell -ExecutionPolicy Bypass -File $install -Project C:\dev\MyGame -WhatIf     # 바꿀 목록만 본다
 powershell -ExecutionPolicy Bypass -File $install -Project C:\dev\MyGame             # Build Settings의 첫 씬을 돈다
 #   -Scene Assets/Scenes/Level1.unity   플레이할 씬(Build Settings가 비어 있으면 필수)
-#   -Module Gameplay=Assets/Scripts      기존 코드 폴더를 모듈로(에러의 module, worktree submit/land 단위)
+#   -Module Gameplay=Assets/Scripts      기존 코드 폴더를 모듈로(에러의 module, worktree submit/land 단위; asmdef 없어도 됨)
+#   -InputShim                           구 Input Manager(Input.GetKey) 게임: 시나리오 입력을 받는 드롭인 Input(HarnessInput.cs)
+#   -KnownErrors '^\[SDK\] ...'          프로젝트가 원래 내는 에러(정규식)는 루프를 막지 않고 knownErrors로
 cd C:\dev\MyGame
 powershell -ExecutionPolicy Bypass -File tools/open.ps1     # 처음이면 패키지를 받으려고 배치 모드로 한 번 임포트한 뒤 연다
 powershell -ExecutionPolicy Bypass -File tools/loop.ps1     # 기존 씬으로 재컴파일 → 플레이 → 캡처·콘솔·FPS
@@ -78,14 +80,22 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
   Domain Reload가 켜진 프로젝트에서도 루프가 돌고, 늘어난 시간은 `timings.playEnterSec`으로 보입니다.
 - **출시 빌드에는 하네스가 없습니다**: 하네스 런타임은 `UNITY_EDITOR || DEVELOPMENT_BUILD`에서만 컴파일되고, 하네스 때문에 들어온
   `com.unity.pipeline`의 런타임 DLL·Newtonsoft.Json(·설치가 추가한 Input System)은 출시 빌드에서 빠집니다. 개발 빌드에는 들어갑니다.
-- URP·Built-in 둘 다, Input System 유무와 상관없이 컴파일됩니다(입력 재생은 Input System을 쓰는 게임만).
+- URP·Built-in 둘 다, Input System 유무와 상관없이 컴파일됩니다. 입력 재생: Input System 게임은 그대로, 구 Input Manager(`Input.GetKey`) 게임은
+  에디터가 OS 입력을 직접 읽어서 코드로 누를 수 없으므로 `Input.` → `HarnessInput.`(같은 멤버 이름의 드롭인, `-InputShim`)으로 받습니다.
+- **부트 → 메뉴 → 레벨**: 시나리오가 `waitTarget`(버튼이 보일 때까지)·`waitScene`(씬이 로드될 때까지)으로 시계를 멈추고, `click`이 이름으로 찾은
+  UI(uGUI, UI Toolkit — 월드 공간 패널 포함)나 씬 오브젝트를 누릅니다. 캡처는 카메라 이름·포즈를 시나리오나 설정(`shots`)에 적어 기존 씬을 건드리지 않습니다.
+  아래는 BagelGame에 붙인 뒤 시나리오 한 번(`waitTarget play-button` → `click` → `waitTarget select-button` → `click`)이 찍은 Game 뷰 3컷입니다.
 - 검증: 하네스를 모르는 공개 프로젝트 2개 — [BagelGame](https://github.com/Unity-Technologies/BagelGame)(URP, Unity 6.3, 기존 씬 `Main.unity`)과
   [SebLague/Fluid-Sim](https://github.com/SebLague/Fluid-Sim)(Built-in, 2022.3 → 6.0, 컴퓨트 셰이더). 설치 → 기존 씬으로 루프 3회 녹색 →
-  출시 빌드의 `Managed/` DLL 목록이 하네스 없는 대조 빌드와 같음 → 제거 후 `git status` 깨끗. 절차 전체는 `tools/attach-test.ps1` 한 번(34–54 s).
+  출시 빌드의 `Managed/` DLL 목록이 하네스 없는 대조 빌드와 같음 → 제거 후 `git status` 깨끗. 절차 전체는 `tools/attach-test.ps1` 한 번(31–68 s).
+  그리고 비공개 사내 모바일 게임 1개(URP, Addressables, 씬 22개, asmdef 35개, C# 4,400개, 부트 → 로그인 → 타이틀 → 로비): 설치 → 루프 3회 녹색 →
+  제거 후 `git status` 깨끗(100 s, 출시 빌드는 아직 — ROADMAP P-6). Fluid-Sim은 `HarnessInput`으로 구 Input Manager 입력(스페이스 일시정지, 마우스 궤도)까지.
 
 | BagelGame (URP) 메인 메뉴 | Fluid-Sim (Built-in) 입자 시뮬레이션 |
 |---|---|
 | ![bagel](docs/images/attach-bagel.jpg) | ![fluid](docs/images/attach-fluid.jpg) |
+
+![BagelGame: 메뉴 → 베이글 선택 → 플레이 (시나리오가 월드 공간 UI Toolkit 버튼을 이름으로 눌렀다)](docs/images/attach-bagel-flow.jpg)
 
 ## 요구 사항
 
@@ -211,7 +221,7 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
   CLAUDE.md                                에이전트용 사용법·규칙 (먼저 읽을 것)
   docs/ROADMAP.md                          아직 남은 격차 (성질 1~5 + 이식성: 버전·기존 프로젝트·macOS) + 검증 매트릭스
   Packages/com.geuneda.agentharness/       하네스 = UPM 패키지 (git URL: ...unitree.git?path=/AgentHarness/Packages/com.geuneda.agentharness)
-    Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioRunner · Procedural/
+    Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioInput · ScenarioRunner · Procedural/
     Editor/                                harness_* 에디터 커맨드, BuildContext / IBuildStep, 출시 빌드 필터
     Tools~/                                loop · submit · land · uc · compile-check · open · quit · install · uninstall · attach-test ·
                                            fresh-clone-test · selftest (.ps1) + templates/ (Unity는 ~ 폴더를 임포트하지 않는다)

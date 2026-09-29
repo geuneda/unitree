@@ -18,5 +18,15 @@ namespace Harness
             return Object.FindObjectsByType<T>(inactive, FindObjectsSortMode.None);
 #endif
         }
+
+        /// <summary>A UI Toolkit panel placed in the world (6.2+; element bounds are then in the document's local units).</summary>
+        public static bool IsWorldSpace(UnityEngine.UIElements.PanelSettings settings)
+        {
+#if UNITY_6000_2_OR_NEWER
+            return settings != null && settings.renderMode == UnityEngine.UIElements.PanelRenderMode.WorldSpace;
+#else
+            return false;
+#endif
+        }
     }
 }

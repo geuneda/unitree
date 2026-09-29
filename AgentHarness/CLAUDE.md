@@ -58,15 +58,20 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
   "compileErrors": [{"file","line","msg","module"}],       // C# 에러, 또는 kind:"shader" (HLSL 에러, 상태 기반)
   "runtimeErrors": [{"type","msg","file","line","module","count","stack"}],   // count = 같은 에러 폴딩 수
   "editorErrors": [{"type","msg","count","stack"}],   // Unity/패키지 내부 에러(Assets/ 흔적 없음). 실패 사유는 아니지만 읽어볼 것
+  "knownErrors": [{"type","msg","file","line","count"}],   // 설정 knownErrors 정규식에 맞은 에러(프로젝트가 원래 내는 것). 실패 아님
+  "teardownErrors": [{"type","msg","file","line","module","count"}],   // 시나리오가 끝난 뒤 플레이 모드를 나가며 난 에러. 실패 아님, 읽어볼 것
   "fps": {"avg","min","p95ms","p99ms","hitches","cpuMainAvgMs","samples","editorFocused"},
   "shots": ["C:/.../HarnessOut/latest/shot0_closeup.png", ...],
   "durationSec": 3.5, "unityVersion": "6000.3.11f1",   // 루프를 돌린 에디터 버전
   "timings": {"lockWaitSec","editorWaitSec","compileSec","buildSec","playSec","collectSec"},   // editorWaitSec: 시작 시 리로드·busy 대기(있을 때만)
   "build": {"fingerprint","steps":[{"type","module","ms","error","file","line"}], ...},
   "play": {"success","probeReady","frames","gameSec","modules","failedModules","inputEventsApplied",
-           "events":[{"name":"SpinnerLap","count":2}]},     // EventBus 발행 횟수 → 게임플레이를 기계적으로 검증
+           "events":[{"name":"SpinnerLap","count":2}],     // EventBus 발행 횟수 → 게임플레이를 기계적으로 검증
+           "inputBackends":["inputSystem"|"hook"], "inputHooks":["HarnessInput.OnScenarioInput"],   // 입력이 들어간 곳
+           "activeScene", "scenes":[{"name","mode","t","wallSec"}],      // 로드된 씬(Start = 처음부터 있던 씬, t = 시나리오 시계)
+           "waits":[{"type","target","t","waitedSec","frames"}], "clicks":[{"target","t","x","y","via"}]},
   "render": {"batches","setPassCalls","drawCalls","triangles","vertices"},
-  "shotStats": [{"name","preset","t","meanLuma","stdLuma","blank","dark","error"}],
+  "shotStats": [{"name","preset","t","meanLuma","stdLuma","blank","dark","error","hint"}],   // hint: blank의 이유 추정(화면이 오버레이 UI뿐 → "screen")
   "lint": [{"rule","module","file","message"}], "warningCount": 0,
   "submit": {"phase","synced","kept","reverted","written","deleted","contractsAdded","metaWrittenBack",   // submit.ps1만.
              "errorModules","restore","check","owner","takeover"},   // timings에 checkSec/syncSec/restoreSec 추가
@@ -106,12 +111,13 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 
 ```
 Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json: com.unity.pipeline 의존)
-  Runtime/                     런타임 계약: GameRoot, IGameModule, EventBus, HarnessProbe, HarnessConfig, ShotPreset, ScriptedInput,
-                               ScenarioRunner, HarnessCapture   (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
+  Runtime/                     런타임 계약: GameRoot, IGameModule, EventBus, HarnessProbe, HarnessConfig, ShotPreset(+ShotPose), ScriptedInput,
+                               ScenarioInput(KeyNames, InputHookReplay), ScenarioRunner, HarnessCapture
+                               (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
   Runtime/Procedural/          MeshBuilder, Noise(Perlin/fBm/Ridged/Worley/Rng), TextureBaker, PMath
   Editor/                      [CliCommand] harness_* 와 BuildContext/IBuildStep, HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
   UI/                          DefaultRuntimeTheme.tss (UI Toolkit 기본 테마, 텍스트)
-  Tools~/                      도구 본체(.ps1, Harness.psm1) + templates/ (진입점, 기본 시나리오, 기존 프로젝트용 안내서)
+  Tools~/                      도구 본체(.ps1, Harness.psm1) + templates/ (진입점, 기본 시나리오, 기존 프로젝트용 안내서, HarnessInput.cs)
 ProjectSettings/AgentHarness.json   하네스 설정: setup 모드, 모듈 루트/폴더, contracts, 생성물 경로, 빌드·플레이 씬
 Assets/Game/Contracts/         모듈 간 이벤트 타입 (Game.Contracts, 추가만)
 Assets/Game/<Module>/          런타임 코드 (Game.<Module>.asmdef) + Shaders/*.shader + UI/*.uxml|uss
@@ -195,10 +201,10 @@ public sealed class FooBuildStep : IBuildStep
 | 커맨드 | 하는 일 |
 |---|---|
 | `harness_build` | Builders의 IBuildStep을 Order 순으로 빈 씬에 실행 → `buildScene` 저장. `{ok, fingerprint, steps[], cacheHits, deletedAssets}`. `dry_run`, `no_cache`. 빌드 스텝이 없고 `playScene`이 build가 아니면(기존 프로젝트) 플레이 씬을 열고 에셋 기준 fingerprint만(`skipped`) |
-| `harness_capture` | `{"preset":"all"\|"<name>"\|"main","out":"HarnessOut/capture","scene":""}` 편집 모드 오프스크린 1280x720 PNG + `meanLuma/stdLuma/blank`. 플레이 씬을 먼저 연다(`"scene":"open"`이면 열린 씬 그대로) |
+| `harness_capture` | `{"preset":"all"\|"<name>"\|"main","out":"HarnessOut/capture","scene":""}` 편집 모드 오프스크린 1280x720 PNG + `meanLuma/stdLuma/blank`. 샷 = 씬의 ShotPreset + 설정 `shots`. 플레이 씬을 먼저 연다(`"scene":"open"`이면 열린 씬 그대로) |
 | `harness_play` | `{"scenario":"tools/scenarios/default.json"\|"{...inline}","out":"HarnessOut/play"}` 즉시 반환 → `harness_play_status` 폴링 |
 | `harness_play_status` | `entering\|running\|exiting\|done\|failed` + 끝나면 `result`(result.json) |
-| `harness_console` | `{"since":<mark>}` 최신 컴파일 에러(file,line,msg,module) + mark 이후 런타임 에러/경고 수. 응답의 `mark`를 다음에 넘긴다 |
+| `harness_console` | `{"since":<mark>,"until":<seq>}` 최신 컴파일 에러(file,line,msg,module) + mark 이후 런타임 에러/경고 수. `until` 뒤의 에러는 `teardownErrors`, 설정 `knownErrors`에 맞으면 `knownErrors`. 응답의 `mark`를 다음에 넘긴다 |
 | `harness_stats` | 플레이 중이면 live, 아니면 마지막 결과: fps avg/min/p95ms, batches, SetPass, tris |
 | `harness_lint` | static-reset / module-asmdef / module-boundary 규칙 검사 |
 | `harness_shaders` | Assets/ 셰이더의 현재 컴파일 에러(file, line, msg, module). 셰이더 에러는 로그가 아니라 상태라 매 루프 조회 |
@@ -218,11 +224,28 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
   "captures": [ { "t": 0.5, "preset": "auto" }, { "t": 1.5, "preset": "auto" }, { "t": 2.5, "preset": "auto" } ] }
 ```
 - `"scene"`(선택): 이 시나리오가 플레이할 씬. 비우면 설정의 `playScene`.
-- `t`는 HarnessProbe.Ready 이후 게임 시간(초). 입력은 Input System 가상 디바이스(`ScriptedInput`)로 들어가므로 InputAction·`Keyboard.current` 그대로 동작.
+- `t`는 HarnessProbe.Ready 이후 **게임 시간**(초). `fixedDeltaTime`이면 프레임마다 고정 간격으로 흘러서 `t=1.5`의 화면·이벤트 수가 매번 같다.
+  로딩(네트워크, Addressables)은 벽시계로 걸리므로 "로딩이 끝났을 즈음"을 고정 `t`로 잡지 말고 아래 대기 이벤트를 쓴다.
+- 입력 이벤트: `keyDown/keyUp/keyTap`(키 이름) · `mouseMove/mousePos/mouseDown/mouseUp/scroll`(`x`,`y`, `key`=Left/Right/Middle) ·
+  `click`(`target` 또는 `x`,`y`: 이동 → 다음 프레임 누름 → `hold` 뒤 뗌) · `stick`(`key`=left/right, `x`,`y`) · `padDown/padUp`(GamepadButton) · `releaseAll`.
+  - 키 이름은 Input System 이름(`Space`, `Digit1`, `Enter`, `LeftCtrl`, `Numpad0`)과 KeyCode 이름(`Alpha1`, `Return`, `LeftControl`, `Keypad0`) 둘 다 된다.
+  - `x`,`y`는 Game 뷰 픽셀(원점 왼쪽 아래). Game 뷰 크기는 사용자 레이아웃이라 매번 다를 수 있다 → 같은 곳을 눌러야 하면
+    `"mouseSpace": "normalized"`(0..1)나 `click`의 `target`을 쓴다.
+  - `target`: GameObject 이름·경로(uGUI 요소면 그 사각형 중심, 아니면 렌더러/콜라이더 중심을 메인 카메라로 투영) 또는 UI Toolkit 요소 이름
+    (스크린 공간 패널, 6.2+ 월드 공간 패널은 메인 카메라로 투영). 찾은 좌표와 방법(`ugui`/`world`/`uitk`/`uitk-world`)은 `play.clicks`에 남는다.
+- 대기 이벤트(시나리오 시계를 멈춘다 → 뒤의 이벤트·캡처가 그 순간 기준): `waitScene`(`scene` = 이름·경로, 로드될 때까지) ·
+  `waitTarget`(`target`이 활성·표시될 때까지). `timeoutSec`(기본 30, 벽시계) 안에 안 되면 시나리오 실패. 걸린 시간은 `play.waits`,
+  기다리는 동안의 프레임은 FPS 통계에서 빠진다. 부트 → 메뉴 → 레벨: `waitTarget "PlayButton"` → `click` → `waitScene "Level1"` → 캡처.
+- 입력은 **이벤트가 쓰는 장치만** Input System 가상 디바이스(`ScriptedInput`)로 넣는다(입력 이벤트가 없으면 장치를 안 만든다 — 가상 게임패드가
+  생기면 게임패드 안내로 바뀌는 게임이 있다). InputAction·`Keyboard.current` 그대로 동작.
+  **구 Input Manager(`UnityEngine.Input`)는 코드로 누를 수 없다**(에디터에서 OS 입력을 직접 읽는다, 아래 "함정") → 게임이 `[AgentHarnessInput]`
+  정적 메서드로 받는다: `Tools~/templates/HarnessInput.cs`(install `-InputShim`)는 같은 멤버 이름의 드롭인 `Input`이다(`Input.` → `HarnessInput.`).
 - 캡처는 그 프레임의 모든 `LateUpdate` 뒤에 찍는다(LateUpdate에서 카메라를 움직이거나 `Graphics.DrawMesh*`로 그리는 게임도 그대로 찍힌다).
-- 이벤트: `keyDown/keyUp/keyTap`(Key 이름) · `mouseMove/mousePos/mouseDown/mouseUp/scroll`(`x`,`y`, `key`=Left/Right) · `stick`(`key`=left/right, `x`,`y`) · `padDown/padUp`(GamepadButton) · `releaseAll`.
-- 캡처 `preset`: ShotPreset 이름 · `"auto"`(이름순 다음 프리셋) · `"main"`(메인 카메라 그대로) · `"screen"`(Game 뷰 그대로 = **UI 오버레이 포함**, 해상도는 Game 뷰 크기, Game 뷰 탭이 보여야 함).
-  나머지는 오프스크린 렌더라 **스크린 공간 UI가 안 찍힌다**. HUD 확인은 `"screen"`을 쓴다(`tools/scenarios/screen.json`).
+- 캡처 `preset`: 샷 이름(씬의 ShotPreset 또는 설정 `shots`) · `"auto"`(이름순 다음 샷, 없으면 메인 카메라) · `"main"`(메인 카메라 그대로) ·
+  `"screen"`(Game 뷰 그대로 = **UI 오버레이 포함**, 해상도는 Game 뷰 크기, Game 뷰 탭이 보여야 함).
+  `"camera": "<이름>"`이면 그 카메라로, `"pos": [x,y,z]` + `"lookAt": [x,y,z]`(또는 `"rot"` 오일러) + `"fov"`면 그 자리에서 찍는다(설정은 메인 카메라).
+  나머지는 오프스크린 렌더라 **스크린 공간 UI가 안 찍힌다**. HUD 확인은 `"screen"`을 쓴다(`tools/scenarios/screen.json`). UI뿐인 화면이
+  `blank`로 나오면 `shotStats[].hint`가 알려 준다.
 - 새 게임플레이를 넣으면 `default.json`의 입력/캡처와 기대 이벤트 수를 같이 갱신한다.
 
 ## 병렬 에이전트: worktree + submit + land (남의 컴파일 에러에 막히지 않기)
@@ -289,6 +312,10 @@ powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke  
 powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke -Backend msbuild  # 웜 ~0.5-2s, 콜드 수십 초
 ```
 - 디스크의 소스를 다시 glob 하므로 방금 만든 파일도 포함되고, 실행마다 전용 임시 폴더라 동시 실행에 안전하다. `-Module A,B` 가능.
+- 대상 = 모듈 코드를 컴파일하는 어셈블리를 Unity 규칙대로 계산한 것: asmdef/asmref 폴더(가장 가까운 것) → 그 어셈블리, 나머지 `Assets/` 코드 →
+  predefined 어셈블리(`Assets/Plugins`·`Standard Assets` → `*-firstpass`, `Editor` 폴더 → `*-Editor`, 그 외 `Assembly-CSharp`; `predefined: true`, 통째로 검사).
+  그래서 asmdef 없는 `modules[]` 폴더도 submit 게이트가 잡는다. 에디터가 컴파일하지 않는 asmdef(`includePlatforms`에 Editor 없음, 예: WebGL 전용)는
+  `notCompiledInEditor`로 빼고 검사하지 않는다.
 - worktree에서 돌리면 소스는 worktree, 응답 파일·의존 DLL은 에디터 트리 것을 쓴다(출력에 `sourceRoot`/`editorRoot`).
 - `-Module`은 그 모듈이 참조하는 프로젝트 어셈블리(`Game.Contracts`)도 함께 검사하고, 한 실행 안에서 의존 순서로 컴파일해
   **방금 만든 DLL을 참조**한다(체인) → worktree에서 추가한 Contracts 타입도 보인다. `-IncludeHarness`면 Harness도 체인.
@@ -328,7 +355,8 @@ powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                     
 powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 977545a7
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
-- 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark 없음) + `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 ·
+- 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark 없음) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
+  `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 ·
   4 HLSL 에러(재임포트 없는 다음 루프에서도) · 5 리셋 없는 static(lint) · 6 루프 2개 동시 · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
   다른 worktree의 새 모듈·계약은 락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부) ·
   8 land(fast-forward + 그 사이 submit 락 대기, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
@@ -379,6 +407,11 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   "playScene": "build" }               // build | first(Build Settings 첫 활성 씬) | 씬 경로
 ```
 - `installAdded`: install.ps1이 하네스 때문에 더한 패키지(예: `com.unity.inputsystem`). uninstall이 제거하고 출시 빌드 필터가 뺀다.
+- `installReplaced`: `[{"name","from","to"}]` install.ps1이 하네스 의존성 버전으로 올린 프로젝트의 직접 의존(예: `com.unity.pipeline` 0.6.0-exp.1 → 0.8.0-exp.1).
+  uninstall이 `from`으로 되돌린다(manifest가 아직 `to`일 때만). 커밋되는 파일이라 다른 머신의 uninstall도 정확하다.
+- `shots`: `[{"name","scene","pos":[x,y,z],"lookAt":[x,y,z]|"rot":[x,y,z],"fov"}]` 이름 있는 캡처 포즈. 기존 씬에 ShotPreset을 넣지 않고 쓴다
+  (`scene`이 있으면 그 씬이 로드됐을 때만). 시나리오 `"preset"`·`"auto"`와 `harness_capture`가 ShotPreset과 함께 쓴다.
+- `knownErrors`: 정규식 목록. 프로젝트가 원래 내는 에러(예: 저장소에 없는 SDK 데스크톱 라이브러리)를 `knownErrors`로 돌려 루프를 막지 않게 한다.
 
 - `attach`에서 `harness_build`는 하네스가 만든 적 없는 씬·에셋(`AgentHarnessGenerated` 라벨 없음)을 덮어쓰거나 지우지 않고, Build Settings를 바꾸지 않는다.
 - 씬에 저장 안 한 변경이 있으면 play/capture/build는 씬을 바꾸지 않고 실패한다(`unsaved changes in ...`). 생성된 buildScene은 예외.
@@ -398,16 +431,23 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   `local` = 이 패키지 폴더의 `file:` 경로, 하네스 개발용; `embed` = `Packages/`에 복사), `tools/` 진입점(open·quit·loop·uc·submit·land·
   compile-check·uninstall), `tools/scenarios/default.json`, `tools/AgentHarness.md`(그 프로젝트의 에이전트용 안내서, `templates/AgentHarness.md`),
   설정 파일, `CLAUDE.md`·`AGENTS.md`가 없으면 안내서를 가리키는 `CLAUDE.md`. 설치 전 manifest·lock은 `Library/AgentHarness/install.json`에 남긴다.
+- 프로젝트가 하네스 의존성(`package.json`, 지금은 `com.unity.pipeline` 0.8.0-exp.1)을 더 낮은 버전으로 직접 고정하고 있으면 올리고 `installReplaced`에 남긴다
+  (UPM에서는 manifest의 직접 의존이 이겨서 하네스가 옛 버전으로 돈다). 버전이 아닌 값(git URL 등)은 비교하지 않고 경고만.
+- `-InputShim`: 구 Input Manager 게임용 `Assets/AgentHarness/HarnessInput.cs`(게임 코드가 되는 파일: uninstall은 템플릿 그대로이고 아무도 안 쓸 때만 지운다).
+  `-KnownErrors '<정규식>'`: 설정 `knownErrors`.
 - Active Input Handling이 New/Both인데 Input System 패키지가 없으면 `com.unity.inputsystem`도 더한다(`installAdded`): `com.unity.pipeline`
   0.8.0-exp.1이 `ENABLE_INPUT_SYSTEM`만 보고 입력 코드를 컴파일해서 그 조합에서 컴파일이 깨진다(아래 "함정").
 - Build Settings가 비어 있으면 `-Scene`을 요구하고 후보 씬 목록(`scenes`)을 준다.
-- uninstall: 의존성 줄(+ `installAdded`) 제거, lock은 기록과 manifest가 맞으면 바이트 그대로 복원(아니면 하네스만 쓰던 항목 제거), 설치가 만든 파일
+- uninstall: 의존성 줄(+ `installAdded`) 제거와 `installReplaced` 복원, lock은 기록(`Library/AgentHarness/install.json`)과 manifest가 맞으면 바이트 그대로 복원,
+  기록이 없으면(설치를 커밋하고 다른 머신에서 제거) 하네스만 쓰던 항목 제거 + 올린 버전 되돌림 — 검증한 두 프로젝트에서 이것도 기준선과 바이트까지 같았고
+  Unity로 다시 열어도 그대로였다. 설치가 만든 파일
   (내용이 그대로인 것만; `-Force`면 전부), `HarnessOut/`, `Library/Harness`·`Library/AgentHarness` 삭제. 에디터가 열려 있으면 거부.
 - 진입점은 패키지를 `Packages/<이름>`(임베드) → manifest의 `file:` → `Library/PackageCache/<이름>@*` 순으로 찾는다. worktree(Library 없음)는 에디터 트리의
   패키지를 쓴다. git URL로 설치하고 아직 한 번도 안 연 체크아웃이면 `open.ps1` 진입점이 배치 모드로 한 번 임포트해(`Logs/Editor-bootstrap.log`) 패키지를 받는다.
 - 출시(비개발) 빌드: `Harness.Runtime`은 define 제약으로 빠지고, `HarnessReleaseBuild`(IFilterBuildAssemblies)가 하네스 때문에만 들어온
   `Unity.Pipeline.Attributes`·`Newtonsoft.Json`·(`installAdded`의) `Unity.InputSystem*`을 뺀다(게임 코드가 실제로 참조하면 둔다). 하네스 모듈 위에
   게임을 만든 프로젝트는 출시 빌드에 스크립팅 define `AGENTHARNESS_RUNTIME`이 필요하다.
+- attach-test 옵션: `-Scenario <파일>`(예: 부트를 기다리는 시나리오), `-KnownErrors`, `-InputShim`, `-NoBuild`.
 - attach-test 녹색 = install 성공, `harness_setup`이 아무것도 안 바꿈, install 뒤와 루프 뒤 `git status`가 install이 보고한 것 + lock뿐, 루프 N회 녹색·
   fingerprint·events 동일, 출시 빌드에 `Harness.*` 없음, uninstall 뒤 `git status` 비어 있음. 빌드가 다시 쓴 프로젝트 설정(하네스와 무관하게 Unity가
   빌드 중 쓰고 종료 때 저장)은 `buildRewrote`로 보고하고 에디터를 닫은 뒤 되돌린다.
@@ -444,6 +484,13 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   루프마다 fingerprint가 달라서, 빌드하지 않는 프로젝트는 씬 파일 + 의존 에셋의 `GetAssetDependencyHash`로 fingerprint를 낸다.
 - Unity는 플레이어를 빌드하면서 URP 에셋·`ProjectSettings.asset`(예: Input System이 `preloadedAssets`에 설정을 넣음)·`GraphicsSettings.asset`을
   다시 쓰고, 에디터가 종료할 때 한 번 더 저장한다. 하네스 없이 한 대조 빌드도 같았다 → 에디터를 닫은 뒤 되돌려야 한다.
+- **구 Input Manager(`Input.GetKey`, `Input.mousePosition`)는 에디터에서 OS 입력을 직접 읽는다.** `Input.mousePosition`이 Game 뷰 밖의 실제 커서를 따라가고,
+  Game 뷰에 보낸 이벤트(`EditorWindow.SendEvent`, 내부 `EditorGUIUtility.QueueGameViewInputEvent`)는 Game 뷰의 OnGUI까지는 가지만 `Input`에도 게임의
+  `OnGUI`에도 닿지 않았다(Active Input Handling Old/Both 둘 다, 포커스 있음). → 게임 쪽 훅(`[AgentHarnessInput]`, `HarnessInput.cs`).
+- Input System 패키지가 있는 프로젝트의 Active Input Handling을 Old로 바꾸면 Input System이 "백엔드를 켤까요?" 모달을 띄워 에디터 메인 스레드가 멈춘다.
+- **클론·worktree도 원본 프로젝트와 PlayerPrefs를 공유한다**(에디터에서는 company/product별 레지스트리). 사내 프로젝트 클론의 시나리오가 개발용 로그인
+  대화상자를 건너뛰자 원본에 저장된 선택(라이브 서버)으로 로그인했다. 서버 선택 같은 버튼은 시나리오에서 명시적으로 누르고, 바꾼 PlayerPrefs는 되돌린다.
+- 프로젝트에 이미 `Tools/`가 있으면(Windows는 대소문자 무시) 진입점이 그 폴더에 들어간다. 이름이 겹치는 기존 파일이 없으면 문제없고 uninstall은 자기 파일만 지운다.
 - 에이전트의 Bash 도구(Git Bash)로 넘긴 명령은 작은따옴표·`<<'EOF'` 안에서도 `\\`가 `\`로 줄어든다(확인: `r"a\\b"`가 3글자).
   heredoc Python으로 `.ps1`을 고치다 정규식·경로가 조용히 깨진 적 있다 → 백슬래시가 든 편집은 Edit 도구로 한다.
 

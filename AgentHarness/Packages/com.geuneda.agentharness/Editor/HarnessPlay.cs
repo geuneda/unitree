@@ -22,6 +22,7 @@ namespace Harness.Editor
         public string finishedAt;
         public float timeoutSec;
         public string error;
+        public int finishedSeq;     // console sequence number when the scenario finished: later errors are play-mode teardown
 
         public static PlayState Load()
         {
@@ -120,14 +121,23 @@ namespace Harness.Editor
                 scenarioSource = source,
                 outDir = outDir,
                 requestedAt = HarnessPaths.UtcNow(),
-                timeoutSec = timeoutSec > 0 ? timeoutSec : parsed.durationSec + parsed.readyTimeoutSec + 60f,
+                timeoutSec = timeoutSec > 0 ? timeoutSec : parsed.durationSec + parsed.readyTimeoutSec + WaitBudget(parsed) + 60f,
             };
             st.Save();
             s_Watch.Restart();
             // Not delayCall: it runs "after inspectors update", which never happens in an unfocused Editor.
             // Setting isPlaying is itself deferred to the end of the frame, so this reply still goes out first.
             EditorApplication.isPlaying = true;
-            return new { ok = true, id = st.id, state = st.state, outDir, scenario = source, scene = scenePath, poll = "harness_play_status" };
+            return new { ok = true, id = st.id, state = st.state, outDir, scenario = source, scene = scenePath, timeoutSec = st.timeoutSec, poll = "harness_play_status" };
+        }
+
+        /// <summary>The longest the scenario clock can stand still (waitScene/waitTarget timeouts).</summary>
+        static float WaitBudget(Scenario s)
+        {
+            var sum = 0f;
+            foreach (var e in s.events ?? Array.Empty<ScenarioEvent>())
+                if (e != null && (e.type == "waitScene" || e.type == "waitTarget")) sum += e.timeoutSec > 0f ? e.timeoutSec : ScenarioRunner.DefaultWaitTimeoutSec;
+            return sum;
         }
 
         /// <summary>Destroy runtime harness objects that outlived play mode (defensive; they must never tick in a later session).</summary>
@@ -154,7 +164,12 @@ namespace Harness.Editor
                     case PlayModeStateChange.EnteredPlayMode when st.state == "entering":
                     {
                         var scenario = JsonUtility.FromJson<Scenario>(st.scenarioJson);
-                        var runner = ScenarioRunner.Spawn(st.id, scenario, st.outDir);
+                        var hookNames = new System.Collections.Generic.List<string>();
+                        var hookErrors = new System.Collections.Generic.List<string>();
+                        var hook = HarnessInputHooks.Find(hookNames, hookErrors);
+                        foreach (var err in hookErrors) Debug.LogError("[Harness] " + err);
+                        var runner = ScenarioRunner.Spawn(st.id, scenario, st.outDir, hook);
+                        runner.Result.inputHooks = hookNames.ToArray();
                         var id = st.id;
                         runner.onFinished = result =>
                         {
@@ -162,6 +177,7 @@ namespace Harness.Editor
                             if (s == null || s.id != id) return;
                             s.state = "exiting";
                             s.error = result.error;
+                            s.finishedSeq = HarnessConsole.Mark;
                             s.Save();
                             EditorApplication.isPlaying = false;
                         };
@@ -245,6 +261,7 @@ namespace Harness.Editor
                 requestedAt = st.requestedAt,
                 startedAt = st.startedAt,
                 finishedAt = st.finishedAt,
+                finishedSeq = st.finishedSeq,
                 resultPath = File.Exists(st.ResultPath) ? st.ResultPath : null,
                 result,
             };

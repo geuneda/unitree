@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
   Remove AgentHarness from a project it was attached to with install.ps1, leaving git status as it was before (P-2).
-  - Packages/manifest.json: the com.geuneda.agentharness line, and dependencies install.ps1 added with it ("installAdded"). Packages/packages-lock.json: restored byte for byte from
+  - Packages/manifest.json: the com.geuneda.agentharness line, dependencies install.ps1 added with it ("installAdded"), and
+    the project's own versions of dependencies it raised ("installReplaced"). Packages/packages-lock.json: restored byte for byte from
     what install.ps1 recorded (Library/AgentHarness/install.json) when the manifest is back to that state; otherwise the
     lock entries only the harness needed are dropped (Unity re-resolves the rest when it opens the project).
   - an embedded copy (Packages/com.geuneda.agentharness), tools/ entry points, tools/scenarios/default.json and
@@ -112,6 +113,24 @@ if (Test-Path -LiteralPath $configPath) {
 }
 if ($state -and $state.PSObject.Properties.Name -contains 'installAdded') { $added += @($state.installAdded) }
 foreach ($a in @($added | Where-Object { $_ } | Sort-Object -Unique)) { $newManifest = Remove-ManifestDependency $newManifest $a; $result['removedDependencies'] += @($a) }
+# Dependencies install.ps1 raised to the harness's version (installReplaced): back to the project's own version, while
+# the manifest still has the version install wrote (a later change by the project is kept).
+$replaced = @()
+if (Test-Path -LiteralPath $configPath) {
+    try { $c = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json; if ($c.PSObject.Properties.Name -contains 'installReplaced') { $replaced += @($c.installReplaced) } } catch { }
+}
+if ($state -and $state.PSObject.Properties.Name -contains 'installReplaced') { $replaced += @($state.installReplaced) }
+$result['restoredDependencies'] = @()
+$doneReplaced = @{}
+foreach ($r in @($replaced | Where-Object { $_ -and $_.name })) {
+    if ($doneReplaced.ContainsKey($r.name)) { continue }
+    $doneReplaced[$r.name] = $true
+    $m = [regex]::Match($newManifest, '(?m)^(?<pre>[ \t]*"' + [regex]::Escape($r.name) + '"[ \t]*:[ \t]*")(?<val>[^"]*)"')
+    if (-not $m.Success) { continue }
+    if ($m.Groups['val'].Value -ne $r.to) { $result.warnings += "$($r.name) is $($m.Groups['val'].Value) now (install.ps1 set $($r.to)): kept"; continue }
+    $newManifest = $newManifest.Substring(0, $m.Groups['val'].Index) + $r.from + $newManifest.Substring($m.Groups['val'].Index + $m.Groups['val'].Length)
+    $result['restoredDependencies'] += @("$($r.name)@$($r.from)")
+}
 if ($newManifest -ne $manifest) { Add-Action 'Packages/manifest.json' 'modify' { [IO.File]::WriteAllText($manifestPath, $newManifest, $utf8) }.GetNewClosure() }
 if (Test-Path -LiteralPath $lockPath) {
     $lock = [IO.File]::ReadAllText($lockPath)
@@ -124,8 +143,14 @@ if (Test-Path -LiteralPath $lockPath) {
     } else {
         $roots = @([regex]::Matches(([regex]::Match($newManifest, '"dependencies"\s*:\s*\{(?<b>[^}]*)\}').Groups['b'].Value), '"(?<n>[^"]+)"\s*:') | ForEach-Object { $_.Groups['n'].Value })
         $newLock = Remove-UnreachableLockEntries $lock $roots
+        # Dependencies put back in the manifest: their lock entry back to that version too (Unity re-checks it on open).
+        foreach ($d in @($result['restoredDependencies'])) {
+            $name, $from = $d.Split('@', 2)
+            $to = @($replaced | Where-Object { $_.name -eq $name } | Select-Object -First 1).to
+            $newLock = [regex]::Replace($newLock, '(?m)(^    "' + [regex]::Escape($name) + '": \{\r?\n      "version": ")' + [regex]::Escape($to) + '"', '${1}' + $from + '"')
+        }
         if ($newLock -ne $lock) { Add-Action 'Packages/packages-lock.json' 'modify' { [IO.File]::WriteAllText($lockPath, $newLock, $utf8) }.GetNewClosure() }
-        $result['lock'] = 'entries only the harness needed removed (no install record matching this manifest); Unity re-resolves the rest when it opens the project'
+        $result['lock'] = 'no install record for this manifest (installed on another machine): entries only the harness needed removed, raised versions put back; Unity re-checks the lock when it opens the project'
     }
 }
 $embedDir = Join-Path $root "Packages/$pkgName"
@@ -166,8 +191,25 @@ foreach ($d in $scratch) {
     $abs = Join-Path $root $d
     if (Test-Path -LiteralPath $abs) { Add-Action $d 'remove' { Remove-Item -LiteralPath $abs -Recurse -Force }.GetNewClosure() }
 }
+# The legacy input shim (install.ps1 -InputShim) is the game's once code reads input through it.
+$shim = Join-Path $root 'Assets/AgentHarness/HarnessInput.cs'
+if (Test-Path -LiteralPath $shim) {
+    $same = (Read-Text $shim) -eq (Read-Text (Join-Path $templates 'HarnessInput.cs'))
+    $users = @(if ($same) { Get-ChildItem -LiteralPath (Join-Path $root 'Assets') -Recurse -Filter *.cs -File | Where-Object { $_.FullName -ne $shim -and [IO.File]::ReadAllText($_.FullName).Contains('HarnessInput.') } | ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace('\', '/') } })
+    if ($same -and $users.Count -eq 0) {
+        $shimDir = Split-Path -Parent $shim
+        Add-Action 'Assets/AgentHarness/HarnessInput.cs' 'remove' {
+            Remove-Item -LiteralPath $shim -Force
+            if (Test-Path -LiteralPath "$shim.meta") { Remove-Item -LiteralPath "$shim.meta" -Force }
+            if (@(Get-ChildItem -LiteralPath $shimDir -Force).Count -eq 0) { Remove-Item -LiteralPath $shimDir -Force; if (Test-Path -LiteralPath "$shimDir.meta") { Remove-Item -LiteralPath "$shimDir.meta" -Force } }
+        }.GetNewClosure()
+    } else {
+        Add-Action 'Assets/AgentHarness/HarnessInput.cs' 'keep' $null
+        $result.warnings += "Assets/AgentHarness/HarnessInput.cs is kept: $(if ($same) { "game code uses it ($($users[0])$(if ($users.Count -gt 1) { ", +$($users.Count - 1)" }))" } else { 'it was changed after install' })"
+    }
+}
 $generated = Join-Path $root 'Assets/AgentHarness'
-if (Test-Path -LiteralPath $generated) { $result.warnings += 'Assets/AgentHarness (scenes/assets harness_build generated) is kept: delete it in the Editor if you do not need it' }
+if ((Test-Path -LiteralPath $generated) -and @(Get-ChildItem -LiteralPath $generated -Force | Where-Object { $_.Name -notin @('HarnessInput.cs', 'HarnessInput.cs.meta') }).Count -gt 0) { $result.warnings += 'Assets/AgentHarness (scenes/assets harness_build generated) is kept: delete it in the Editor if you do not need it' }
 
 # ---- 3. Apply ------------------------------------------------------------------------------------------------------
 foreach ($a in $actions) {

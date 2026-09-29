@@ -9,12 +9,13 @@ namespace Harness.Editor
     public static class HarnessCaptureCommand
     {
         [CliCommand("harness_capture",
-            "Render ShotPreset <preset> (or 'all', or 'main' for the main camera) of the play scene to <out>/<preset>.png at 1280x720 " +
+            "Render shot <preset> (a ShotPreset in the scene or \"shots\" of ProjectSettings/AgentHarness.json; 'all'; 'main' = the main camera) " +
+            "of the play scene to <out>/<preset>.png at 1280x720 " +
             "(offscreen, main camera settings incl. post-processing). Works in edit mode (fast static check) and play mode. " +
             "Returns {ok, shots:[{path, meanLuma, stdLuma, blank, ...}]}.",
             Tags = new[] { "harness", "capture" })]
         public static object Capture(
-            [CliArg("preset", "ShotPreset name, 'all', or 'main'.")] string preset = "all",
+            [CliArg("preset", "Shot name, 'all', or 'main'.")] string preset = "all",
             [CliArg("out", "Output directory (relative to the project root).")] string @out = "HarnessOut/capture",
             [CliArg("width", "Width in pixels.")] int width = HarnessCapture.DefaultWidth,
             [CliArg("height", "Height in pixels.")] int height = HarnessCapture.DefaultHeight,
@@ -33,7 +34,7 @@ namespace Harness.Editor
             var outDir = HarnessPaths.Resolve(@out);
             Directory.CreateDirectory(outDir);
             var shots = new List<ShotResult>();
-            var presets = ShotPreset.All();
+            var presets = ShotPose.All();
             if (preset == "main")
             {
                 var t = cam.transform;
@@ -45,9 +46,9 @@ namespace Harness.Editor
             {
                 foreach (var p in presets)
                 {
-                    if (preset != "all" && p.presetName != preset) continue;
-                    var r = HarnessCapture.Capture(cam, p, width, height, HarnessPaths.Combine(outDir, p.presetName + ".png"));
-                    r.name = p.presetName;
+                    if (preset != "all" && p.name != preset) continue;
+                    var r = HarnessCapture.Capture(cam, p, width, height, HarnessPaths.Combine(outDir, p.name + ".png"));
+                    r.name = p.name;
                     shots.Add(r);
                 }
                 if (shots.Count == 0 && preset == "all")
@@ -59,10 +60,11 @@ namespace Harness.Editor
                 }
                 if (shots.Count == 0)
                 {
-                    var names = presets.ConvertAll(p => p.presetName);
-                    return new { ok = false, error = $"ShotPreset '{preset}' not found", available = names };
+                    var names = presets.ConvertAll(p => p.name);
+                    return new { ok = false, error = $"shot '{preset}' not found (a ShotPreset in the scene or \"shots\" of {HarnessConfig.FileName})", available = names };
                 }
             }
+            foreach (var s in shots) if (s.blank && string.IsNullOrEmpty(s.error)) s.hint = HarnessCapture.BlankHint();
             var ok = shots.TrueForAll(s => string.IsNullOrEmpty(s.error));
             return new { ok, shots };
         }

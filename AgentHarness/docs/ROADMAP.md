@@ -65,6 +65,8 @@
   - 현상: 프리셋 캡처는 카메라 오프스크린 렌더라 UI Toolkit/오버레이 UI가 빠진다. `"screen"` 캡처는 Game 뷰 탭이 보일 때만 되고 해상도가 Game 뷰 크기를 따른다(1차 검증 때 568x562).
   - 방향: `PanelSettings.targetTexture`로 UI를 RT에 렌더해 합성하거나, Game 뷰 해상도를 1280x720으로 고정.
   - 완료 기준: `"auto"` 프리셋 캡처에도 HUD가 1280x720으로 찍힌다.
+  - 2026-09-29(P-5): 기존 프로젝트는 UI가 화면의 전부인 경우가 많다(사내 프로젝트 A의 부트·로그인·타이틀·로비). 그 화면은 `"screen"`으로만 찍히고, 크기는
+    사용자 레이아웃의 Game 뷰(그때 366x415)라 샷 통계·픽셀 좌표가 레이아웃마다 달라진다. 좌표는 `"mouseSpace": "normalized"`와 `click`의 `target`으로 피했다.
 
 - [ ] **G3-2 에디터 플레이 모드 FPS는 실제 성능을 대표하지 못한다**
   - 현상: 에디터 오버헤드, autotick, Debug 코드 최적화가 섞인다. 지금은 변경 전후 비교에만 쓸 수 있다.
@@ -126,26 +128,25 @@
 
 Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고, 버전 범위(semver)로 의존하며, OS를 가리지 않는다.
 이 하네스는 이제 UPM 패키지(`com.geuneda.agentharness`, git URL `?path=`)이고 **설치 스크립트 한 번으로 기존 프로젝트에 붙였다 뗄 수 있다**(P-2).
+붙인 뒤의 격차(구 Input Manager 입력, `Assembly-CSharp` 검사, 부트 → 메뉴 → 레벨 흐름, 캡처 포즈, 머신 간 제거)는 P-5에서 메웠고, 공개 프로젝트 2개와
+사내 대형 프로젝트 1개에서 검증했다(출시 빌드는 공개 2개만 — P-6).
 Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000.6.3f1에서 렌더링 한 가지를 빼고 녹색 — P-1, P-4), OS는 Windows 하나에서만 검증했다.
 
-순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트, 2026-09-29 해결) → P-3(macOS, 나중)**.
+순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트, 2026-09-29 해결) → P-5(붙인 뒤의 격차, 2026-09-29 해결) → P-6(사내 출시 빌드) → P-3(macOS, 나중)**.
 버전은 `tools/fresh-clone-test.ps1 -SelfTest -UnityVersion <v>`, 기존 프로젝트는 `tools/attach-test.ps1 -Project <클론>`으로 검증한다.
 
 - **P-1 Unity 버전이 6000.3.11f1로 고정돼 있다** → 2026-09-29 해결(아래 "해결됨"). 6.6에서 남은 렌더링 문제는 P-4.
 - **P-2 기존 Unity 프로젝트에 붙일 수 없다** → 2026-09-29 해결(아래 "해결됨"). 붙인 뒤에도 남은 것은 P-5.
 
-- [ ] **P-5 기존 프로젝트에 붙였을 때 아직 안 되는 것** (2026-09-29, P-2에서 정리)
-  - 입력 재생은 Input System 게임만: 구 Input Manager(`Input.GetKey`)는 네이티브라 가상 장치로 흉내 낼 수 없다. 시나리오에 입력이 있으면 에러로 보고한다.
-    방향: 이런 게임용으로 시나리오 이벤트를 게임 쪽 훅(예: `[HarnessInput]` 정적 메서드 호출)으로 보내는 경로.
-  - compile-check는 asmdef 어셈블리만 검사한다. asmdef 없는 폴더(`Assembly-CSharp`)를 `modules[]`로 등록하면 에러 귀속·submit/land는 되지만
-    submit의 사전 검사는 건너뛰고 에디터 루프에서야 잡힌다. 방향: `Assembly-CSharp` 응답 파일에 worktree 소스를 다시 glob해서 넣기(`Editor/`·`Plugins/` 특수 폴더 규칙 포함).
-  - 씬 흐름: 시나리오 하나 = 씬 하나(`playScene`/`"scene"`)이고 t=0은 첫 씬 로드 직후다. 부트 씬 → 메뉴 → 레벨처럼 비동기로 넘어가는 게임은
-    "특정 씬이 로드되면 시작" 같은 대기 조건이 없다. 캡처 프리셋도 없어 메인 카메라(`auto` → `main`)만 찍는다.
-  - 기존 씬의 fingerprint는 씬 파일과 의존 에셋의 임포트 해시다(로드된 씬은 `[ExecuteAlways]` 스크립트가 편집 모드에서도 바꿔서 쓸 수 없다).
-    코드가 만드는 씬처럼 "같은 코드 = 같은 결과"를 보장하지는 않는다.
-  - 설치 기록(`Library/AgentHarness/install.json`)은 그 머신에만 있다. 설치를 커밋한 뒤 다른 머신에서 uninstall하면 lock은 바이트 복원 대신
-    "하네스만 쓰던 항목 제거"로 되돌리고, 설치 때 바뀐 다른 항목(예: 의존 깊이)은 Unity가 다시 열 때 고친다.
-  - 실제 사내 프로젝트(대형, Addressables·다중 씬·IL2CPP)에서는 아직 안 돌려 봤다. 검증은 공개 프로젝트 2개(아래 "해결됨").
+- **P-5 기존 프로젝트에 붙였을 때 아직 안 되는 것** → 2026-09-29 해결(아래 "해결됨"). 사내 프로젝트에서 남은 것은 P-6.
+
+- [ ] **P-6 사내 프로젝트의 출시 빌드(IL2CPP·모바일)를 아직 안 돌려 봤다** (2026-09-29, P-5에서 정리)
+  - 현상: 사내 프로젝트 A(Android, IL2CPP, 커스텀 키스토어)에서 attach-test를 `-NoBuild`로 돌렸다. Android 빌드는 키스토어 비밀번호가 필요하고,
+    Windows IL2CPP 모듈은 이 머신에 없으며, Standalone으로 바꾸면 5.6 GB Library가 다시 임포트된다. `HarnessReleaseBuild`(IFilterBuildAssemblies)가
+    IL2CPP 변환 전에 하네스 어셈블리를 빼는지, 개발 빌드에서 `Harness.Runtime`이 IL2CPP로 도는지는 확인하지 않았다.
+  - 방향: Android는 `exportAsGoogleAndroidProject`(서명 없이 IL2CPP까지)로 출시·개발 빌드를 한 번씩 만들어 `Managed`/IL2CPP 입력 목록을 대조 빌드와 비교.
+    attach-test에 `-BuildTarget`을 둔다.
+  - 완료 기준: 사내 프로젝트 A의 출시 IL2CPP 빌드에 `Harness.*`·하네스만 쓰는 DLL이 없고, 개발 빌드가 시작된다.
 
 - [ ] **P-4 Unity 6.6(URP 17.6)에서 샘플 씬의 조명이 검게 나온다** (2026-09-29, P-1 검증 중 발견)
   - 현상: 6000.6.3f1로 연 새 클론에서 에디터 세션의 **첫 플레이만** 정상이고(overview meanLuma 48.3, 6.3은 50.3), 그 뒤의 플레이와
@@ -197,6 +198,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
     컴파일되지 않는다(`#if ENABLE_INPUT_SYSTEM`만 보고, 자기 asmdef의 `PIPELINE_HAS_INPUT_SYSTEM_PACKAGE`는 다른 곳에만 씀) → 에디터가 Safe Mode 대화상자에서 멈춤.
     install.ps1이 그 조합이면 `com.unity.inputsystem`을 더해 우회. 출시 빌드에 `Unity.Pipeline.Attributes`·`Newtonsoft.Json`을 넣는 것도
     `HarnessReleaseBuild`로 우회 중. 둘 다 Pipeline 쪽에 신고할 것(최신 0.8.0-exp.1, 레지스트리 확인).
+  - 2026-09-29(P-5): 이미 옛 Pipeline(0.6.0-exp.1)을 직접 의존하는 프로젝트가 있었다(사내 프로젝트 A). install이 하네스가 요구하는 버전으로 올리고
+    `installReplaced`에 남긴다. 그 프로젝트의 다른 Pipeline 사용처(에이전트 도구 등)는 0.8로 돈다.
   - 할 일: 패키지를 업그레이드할 때마다 loop 검증 매트릭스(아래)를 다시 돌린다.
 - **O-2 스크립트가 Windows PowerShell 5.1 전용** → P-3으로 옮겼다(2026-09-29).
 - **O-3 하네스 자체의 자동 테스트가 없다** → 2026-09-29 해결(`tools/selftest.ps1`, 아래 "해결됨"). PNG 눈 확인만 사람·에이전트 몫으로 남았다.
@@ -213,7 +216,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
 (새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~5분), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
 
-1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark 샷 없음 + `compile-check -IncludeHarness`)
+1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark 샷 없음 + `compile-check -IncludeHarness`
+   + 시나리오 도구 루프 한 번: `waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처)
 2. C# 컴파일 에러 주입 → `stage=compile`, file/line/module 정확 → 원복 후 녹색
 3. 런타임 예외 주입 → `stage=runtime`, 정확한 줄 → 원복 후 녹색
 4. HLSL 에러 주입 → `stage=shader`, 재임포트 없는 다음 루프에서도 검출 → 원복 후 녹색
@@ -232,7 +236,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
 10. 기존 프로젝트(P-2): 하네스 패키지·설치/제거 스크립트·런타임을 바꿨으면, 기준선 커밋이 있는 테스트 클론마다
    `tools/attach-test.ps1 -Project <클론> [-Scene ...] [-Module ...]` 녹색 — install → 설치분만 바뀜 → 기존 씬으로 루프 3회 녹색(fingerprint·events 동일)
    → 출시 빌드에 `Harness.*` 없음 → uninstall 뒤 `git status` 비어 있음. `shots/`를 Read로 확인. 지금 쓰는 클론(`../ah-p2`, 기준선 커밋 포함):
-   BagelGame(`-Module Game=Assets/Game,UI=Assets/UI`), Fluid-Sim(`-Scene "Assets/Scenes/Fluid Particles.unity"`). 배포 경로를 바꿨으면
+   BagelGame(`-Module Game=Assets/Game,UI=Assets/UI`), Fluid-Sim(`-Scene "Assets/Scenes/Fluid Particles.unity"`), 사내 프로젝트 A(비공개 클론, 이 머신에만;
+   `-Scenario`로 부트 대화상자를 기다리는 시나리오, `-KnownErrors`, `-NoBuild` — P-6). 배포 경로를 바꿨으면
    `-Source git+file:///<저장소>?path=/AgentHarness/Packages/com.geuneda.agentharness#<브랜치>`(커밋된 것, 부트스트랩 포함)로도.
 
 ---
@@ -240,6 +245,63 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **P-5 기존 프로젝트에 붙였을 때 아직 안 되는 것** (2026-09-29)
+  - **구 Input Manager 입력** → 게임 쪽 훅. 먼저 코드 수정 없는 길을 확인했다: Game 뷰는 OnGUI에서 OS 이벤트를 `EditorGUIUtility.QueueGameViewInputEvent`로
+    플레이어 루프에 넘기는데, 합성 이벤트를 그 함수로 직접 넣거나 `GameView.SendEvent`로 보내(Game 뷰 OnGUI 도착은 `globalEventHandler`로 확인, 좌표는
+    내부 `gameMouseOffset/Scale`로 역변환) 봐도 `Input.GetKey`에도 게임의 `OnGUI`에도 닿지 않았다(Active Input Handling Old·Both, Game 뷰 포커스 있음).
+    `Input.mousePosition`이 Game 뷰 밖의 실제 커서를 따라간다 → 구 Input Manager는 에디터에서 OS 상태를 직접 읽는다. 그래서:
+    - 게임의 정적 메서드 `void M(string type, string key, Vector2 value)`에 `[AgentHarnessInput]`을 붙이면 `HarnessInputHooks`(Editor, TypeCache)가 찾아
+      `InputHookReplay`로 시나리오 입력을 넘긴다. 속성은 이름으로 찾아서 게임은 하네스를 참조하지 않는다(제거 뒤에도 컴파일됨).
+    - `Tools~/templates/HarnessInput.cs`(install `-InputShim` → `Assets/AgentHarness/HarnessInput.cs`): `UnityEngine.Input`과 같은 멤버 이름의 드롭인.
+      실제 입력 + 시나리오 입력, 기본 축(Horizontal/Vertical/Fire1-3/Jump/Submit/Cancel/Mouse X·Y/ScrollWheel)까지. uninstall은 템플릿 그대로이고
+      아무도 안 쓸 때만 지운다.
+    - 키 이름은 Input System 이름과 KeyCode 이름을 둘 다 받는다(`KeyNames`). Input System 가상 장치는 이제 이벤트가 쓰는 종류만 만든다(입력 없는
+      시나리오는 장치 0개 — 가상 게임패드가 게임패드 안내를 켜는 게임이 있다).
+  - **asmdef 없는 폴더의 compile-check** → compile-check가 Unity 규칙으로 각 `.cs`의 어셈블리를 계산한다(asmdef/asmref 폴더 → 그 어셈블리, 나머지
+    `Assets/` → `Assembly-CSharp`/`-Editor`/`-firstpass`). 모듈 코드를 컴파일하는 어셈블리를 통째로 검사하고, 에디터가 컴파일하지 않는 asmdef
+    (`includePlatforms`에 Editor 없음)는 뺀다. submit 게이트가 `Assembly-CSharp` 모듈도 막는다.
+  - **씬 흐름** → 시나리오 이벤트 `waitScene`(씬 로드까지)·`waitTarget`(GameObject/UI Toolkit 요소가 활성·표시될 때까지): 시나리오 시계를 멈추고
+    뒤의 이벤트·캡처를 그 순간 기준으로 민다(기다린 프레임은 FPS 통계에서 뺌, 제한 시간 넘으면 실패). `click`(`target` 이름·경로 또는 좌표 → 이동, 다음
+    프레임 누름, `hold` 뒤 뗌): uGUI 사각형 중심, 렌더러/콜라이더 중심, UI Toolkit 요소(스크린 공간 패널, 6.2+ 월드 공간 패널 — 요소 경계는 문서 로컬
+    단위·y 위, `UnityCompat.IsWorldSpace`). `"mouseSpace": "normalized"`. 결과에 `play.scenes`(로드 시각)·`waits`·`clicks`·`activeScene`.
+    Editor 타임아웃은 대기 제한 시간을 더한다(전에는 83 s에서 잘림), 루프도 그만큼 기다린다.
+  - **캡처 프리셋** → 설정 `shots`(이름·씬·`pos`+`lookAt`/`rot`+`fov`)가 ShotPreset과 함께 `"auto"`·이름·`harness_capture`에 쓰이고, 시나리오 캡처에
+    `camera`(카메라 이름)·`pos`/`lookAt`/`rot`/`fov`. 카메라 렌더가 비었는데 오버레이 캔버스·UI Toolkit 문서가 있으면 `shotStats[].hint`가 `"screen"`을 권한다.
+  - **기존 씬의 fingerprint** → 고치지 않고 정리했다(의도된 한계). 빌더가 없는 씬은 코드의 산출물이 아니라 입력이라, fingerprint = 씬 파일 + 의존 에셋의
+    임포트 해시(씬이 쓰는 스크립트 포함)가 "입력이 같은가"를 답한다. 플레이가 같은지는 `play.events`·`waits`·샷 통계로 본다.
+  - **머신에만 있던 설치 기록** → 설치가 바꾼 manifest 항목을 커밋되는 설정에도 남긴다(`installAdded`, 새 `installReplaced`). 기록이 없는 uninstall은 하네스만
+    쓰던 lock 항목을 지우고 올린 버전을 되돌린다.
+  - 사내 프로젝트에서 드러나 함께 고친 것:
+    - 프로젝트가 하네스 의존성을 더 낮게 고정하면(사내 프로젝트 A의 `com.unity.pipeline` 0.6.0-exp.1) UPM에서 직접 의존이 이겨 하네스가 옛 Pipeline으로 돈다
+      → install이 `package.json` 의존성보다 낮은 직접 의존을 올리고 `installReplaced`에 남긴다(uninstall이 되돌림).
+    - 시나리오가 부트보다 짧으면 플레이 모드를 나가며 게임이 부트 취소 에러를 찍어 루프가 빨갰다 → 시나리오가 끝난 순간의 콘솔 번호(`finishedSeq`) 뒤의 에러는
+      `teardownErrors`(실패 아님). 프로젝트가 원래 내는 에러(저장소에 없는 SDK 데스크톱 DLL)는 설정 `knownErrors` 정규식 → `knownErrors`(실패 아님).
+    - 대기가 끝난 프레임에 같은 대기 이벤트를 한 번 더 처리하던 것(`waits` 이중 기록).
+    - 재설치 때 install이 자기가 쓴 `CLAUDE.md` 포인터를 사용자 문서로 보고 경고하던 것.
+  - 검증(이 머신; 매트릭스 9와 겹친 구간은 다른 에디터가 함께 돌았음):
+    - **구 Input Manager**(Fluid-Sim, 6000.0.84f1, Both): 게임 코드 2파일에서 `Input.` → `HarnessInput.`(19곳), 시나리오 = 0.6 s 스페이스 + 1.6–1.9 s 왼쪽 드래그
+      (`mouseSpace: normalized`). 일시정지 뒤 두 샷이 같음(19.9/59.2 두 번), 드래그 뒤 시점이 바뀜(12.0; 입력 없을 때 22.2), `inputBackends` inputSystem+hook,
+      3회 같은 결과(±0.1), 루프 1.75 s. 코드를 되돌리고 uninstall → shim 제거, `git status` 비어 있음.
+    - **compile-check**: 사내 프로젝트 A의 모든 어셈블리(36개)를 모듈로 잡고 검사 → 전부 컴파일, 계산한 소스 수가 에디터 응답 파일과 같음(`Assembly-CSharp` 4,
+      `-Editor` 11, asmref로 모인 시뮬레이션 어셈블리 183, 게임 런타임 2464; 17.3 s). WebGL 전용 asmdef 1개는 `notCompiledInEditor`. 모듈 4개(asmdef·
+      asmref·`Assembly-CSharp`·`-Editor`)만이면 5.7 s. Fluid-Sim worktree에서 `Assembly-CSharp` 모듈에 CS1061 → compile-check 0.4 s, submit 게이트 1.04 s에 거부
+      (`OrbitCam.cs:48`, module Sim), 에디터 트리 무변경.
+    - **씬 흐름**: 사내 프로젝트 A — 부트 → 개발용 로그인 대화상자(UI Toolkit)의 건너뛰기 버튼 `waitTarget` 0.6 s → 테스트 서버 버튼 `click` →
+      건너뛰기 `click` → 타이틀의 준비 그룹 `waitTarget` 3.45 s/166프레임(로그인·데이터 로드) → 시작 버튼 `click`(uGUI) → 로비 씬 `waitScene`
+      0.39 s(Additive, `scenes`에 t=0.8) → 로비 Game 뷰 캡처. BagelGame — 월드 공간 UI Toolkit `play-button` → 베이글 선택 `select-button` → 코스(10–12 s 루프,
+      README 이미지). 샘플 — 포즈 캡처(위에서 내려다본 샷), UI Toolkit `laps` 클릭, 없는 카메라 이름은 카메라 목록과 함께 샷 에러.
+    - **다른 머신의 uninstall**: 설치 → 열기 → 커밋 → `Library/AgentHarness/install.json` 삭제 → uninstall. Fluid-Sim(더한 패키지만): 트리가 기준선과 바이트까지 같음.
+      사내 프로젝트 A(Pipeline 0.6→0.8을 올림): 처음엔 lock의 버전 한 줄만 달라서 그 줄도 되돌리게 고친 뒤 기준선과 같음, Unity 배치 모드로 다시 열어도(63 s)
+      `Packages/` 그대로.
+    - **사내 프로젝트 A**(비공개, Unity 6000.3.11f1, URP 17.3, Addressables 2.7, Input System, 네트워크·분석 SDK; 씬 22개(빌드 4), asmdef 35개 + asmref 5개,
+      C# 4,400개, Android IL2CPP; 원본의 Library 5.6 GB를 복사한 로컬 클론): 처음 설치해 열기 113 s. attach-test `-NoBuild -Scenario <부트 대화상자 대기>
+      -KnownErrors <SDK 초기화 에러 정규식>` 녹색 99.6 s(install 0.5 / open 50.9 / setup 2.4 / 루프 14.9·13.1·13.0 — Domain Reload가 켜져 있어 플레이 진입 7.6–8.3 s /
+      quit 3.6 / uninstall 0.5), fingerprint `6664b723…` 3회 동일, 루프마다 knownErrors 1·teardownErrors 1, 제거 뒤 `git status` 비어 있음.
+      출시 빌드는 P-6.
+    - 주의(겪은 것): 클론은 원본과 PlayerPrefs를 공유한다 → 첫 시도에서 로그인 대화상자의 저장된 선택(라이브 서버)으로 로그인했다. 이후 시나리오는 테스트 서버를
+      명시적으로 누르고, 끝난 뒤 그 PlayerPrefs 값을 원래대로(0) 되돌렸다.
+    - 매트릭스: 샘플 selftest 1–8 녹색 209.8 s(fingerprint `977545a7…`, 줄 61/68/87, 샷 65.1/60.5/50.3 그대로; 1번에 시나리오 도구 루프를 더함). 9: 새 클론(최종 커밋) 6000.3.11f1 녹색 294.8 s(`977545a7…` = 메인 트리), 6000.0.84f1 녹색 290.0 s(`d9a6d092…`), 6000.6.3f1 2–8 녹색·1 빨강 279.5 s (P-4의 `dark` 25.0/15.6/0.5 그대로, `0ba32228…`) — 세 버전 모두 줄 61/68/87, 1번의 시나리오 도구 검사 통과. 10: Fluid-Sim 녹색 31.3 s(fingerprint `54880f05…` = P-2, 출시 빌드 `Managed/` 103개·`Harness.*` 0개), BagelGame 녹색 59.1 s(`619be553…` = P-2, `Managed/` 132개·`Harness.*` 0개), 사내 프로젝트 A 녹색 94.3 s(`6664b723…`, 대기 0.61–0.66 s).
 
 - [x] **P-2 기존 Unity 프로젝트에 붙일 수 없다** (2026-09-29)
   - 방법:

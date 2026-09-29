@@ -29,6 +29,7 @@ namespace Harness
         public bool blank;       // stdLuma < 2 or colorBuckets < 8
         public bool dark;        // darkRatio >= 0.98: almost all black (e.g. lighting missing). Suspicious, not a failure
         public string error;
+        public string hint;      // why a blank shot may be expected, e.g. a screen made of overlay UI (use preset "screen")
     }
 
     /// <summary>Offscreen capture of a camera pose to PNG (edit mode and play mode).</summary>
@@ -138,6 +139,39 @@ namespace Harness
             return r;
         }
 
+        public static ShotResult Capture(Camera template, ShotPose pose, int width, int height, string path)
+        {
+            var fov = pose.fieldOfView > 0f ? pose.fieldOfView : template != null ? template.fieldOfView : 60f;
+            var r = Capture(template, pose.position, pose.rotation, fov, width, height, path);
+            r.preset = pose.name;
+            return r;
+        }
+
+        /// <summary>An enabled camera whose GameObject has this name or hierarchy path (any loaded scene), or null.</summary>
+        public static Camera FindCamera(string nameOrPath)
+        {
+            if (string.IsNullOrEmpty(nameOrPath)) return null;
+            foreach (var c in UnityCompat.FindObjects<Camera>(FindObjectsInactive.Exclude))
+                if (c.name == nameOrPath || HierarchyPath(c.transform) == nameOrPath.TrimStart('/')) return c;
+            return null;
+        }
+
+        /// <summary>Names of the enabled cameras (for "not found" errors).</summary>
+        public static List<string> CameraNames()
+        {
+            var names = new List<string>();
+            foreach (var c in UnityCompat.FindObjects<Camera>(FindObjectsInactive.Exclude)) names.Add(HierarchyPath(c.transform));
+            names.Sort(string.CompareOrdinal);
+            return names;
+        }
+
+        public static string HierarchyPath(Transform t)
+        {
+            var path = t.name;
+            for (var p = t.parent; p != null; p = p.parent) path = p.name + "/" + path;
+            return path;
+        }
+
         /// <summary>Fill the mechanical image stats of <paramref name="r"/> from raw pixels.</summary>
         public static void Analyze(Color32[] px, ShotResult r)
         {
@@ -160,6 +194,20 @@ namespace Harness
             r.colorBuckets = buckets.Count;
             r.blank = r.stdLuma < 2f || r.colorBuckets < 8;
             r.dark = r.darkRatio >= 0.98f;
+        }
+
+        /// <summary>
+        /// For a blank camera shot: the loaded scenes draw screen-space UI (overlay canvases or UI Toolkit panels), which an
+        /// offscreen camera render leaves out - the screen may well be all UI (a boot, title or menu scene).
+        /// </summary>
+        public static string BlankHint()
+        {
+            var overlay = 0;
+            foreach (var c in UnityCompat.FindObjects<Canvas>(FindObjectsInactive.Exclude))
+                if (c.isRootCanvas && c.renderMode == RenderMode.ScreenSpaceOverlay) overlay++;
+            var panels = UnityCompat.FindObjects<UnityEngine.UIElements.UIDocument>(FindObjectsInactive.Exclude).Length;
+            if (overlay == 0 && panels == 0) return null;
+            return $"camera render excludes screen-space UI ({overlay} overlay canvas(es), {panels} UI Toolkit document(s) here): capture preset \"screen\" shows it";
         }
 
         static void DestroySafe(UnityEngine.Object o)

@@ -2,10 +2,11 @@
 .SYNOPSIS
   Compile-check game modules WITHOUT the Unity Editor (safe to run from many agents in parallel).
 
-  Each module assembly (an asmdef in a module's folder, incl. <Module>/Builders; modules come from
-  ProjectSettings/AgentHarness.json, the sample's are Assets/Game/<Module>/) is compiled against the DLLs of the Editor's
-  last successful compile. Module folders without an asmdef (code in Assembly-CSharp) are not checked here. Source lists are re-globbed from disk, so files an agent just created are
-  included. Every run uses its own temp dir.
+  Each assembly that compiles a module's code is compiled against the DLLs of the Editor's last successful compile
+  (modules come from ProjectSettings/AgentHarness.json, the sample's are Assets/Game/<Module>/): the module's asmdefs
+  (incl. <Module>/Builders), or for a folder without one the predefined assembly Unity puts it in (Assembly-CSharp,
+  -Editor, -firstpass by Unity's folder rules; checked whole). asmref folders count for the assembly they reference.
+  Source lists are re-globbed from disk, so files an agent just created are included. Every run uses its own temp dir.
   - Worktree aware: sources come from the checkout this script lives in (e.g. an agent worktree), compiler settings
     and dependency DLLs from the Editor project it drives (Harness.psm1 Resolve-HarnessEditorRoot).
   - Chained: assemblies checked in one run are compiled in dependency order, and later ones reference this run's
@@ -104,35 +105,114 @@ function Parse-Errors([string[]]$lines, [string]$assembly) {
     }
 }
 
-# ---- Targets: asmdefs + their source files (excluding nested asmdef folders) --------------------------
+# ---- Which assembly compiles each .cs -------------------------------------------------------------------------
+# Unity's rules: a folder with an asmdef or asmref (the nearest one up the tree) compiles into that assembly. Other code
+# under Assets/ goes to the predefined assemblies: Assets/Plugins, Assets/Standard Assets and Assets/Pro Standard Assets
+# -> Assembly-CSharp(-Editor)-firstpass, any folder named Editor -> Assembly-CSharp-Editor, the rest -> Assembly-CSharp.
+# Hidden folders (.name, name~, cvs) and StreamingAssets are not compiled. Embedded packages count (asmdefs only).
 $projectNames = @{}   # every asmdef under Assets/ and embedded packages (for synthesized response files)
 $guidName = @{}       # asmdef GUID -> name ("GUID:..." references)
+$asmdefByName = @{}   # name -> @{ path; json }
+$rootAsm = @{}        # folder (full path) -> assembly its code compiles into
 $harnessDir = Join-Path $work 'Packages\com.geuneda.agentharness'   # embedded (the sample); a git/registry package is not checked
-foreach ($a in @(@(Get-ChildItem (Join-Path $work 'Assets') -Recurse -Filter *.asmdef) + @(Get-ChildItem (Join-Path $work 'Packages') -Recurse -Filter *.asmdef -ErrorAction SilentlyContinue))) {
-    $n = (Get-Content $a.FullName -Raw | ConvertFrom-Json).name
-    $projectNames[$n] = $true
-    $meta = "$($a.FullName).meta"
-    if (Test-Path -LiteralPath $meta) {
-        $g = Select-String -LiteralPath $meta -Pattern '^guid:\s*(\w+)' | Select-Object -First 1
-        if ($g) { $guidName[$g.Matches[0].Groups[1].Value] = $n }
+$assetsDir = Join-Path $work 'Assets'
+$scanRoots = @($assetsDir) + @(Get-ChildItem -LiteralPath (Join-Path $work 'Packages') -Directory -ErrorAction SilentlyContinue |
+    Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'package.json') } | ForEach-Object { $_.FullName })
+$found = @{ '.cs' = (New-Object System.Collections.Generic.List[string]); '.asmdef' = (New-Object System.Collections.Generic.List[string]); '.asmref' = (New-Object System.Collections.Generic.List[string]) }
+foreach ($r in $scanRoots) {
+    if (-not [IO.Directory]::Exists($r)) { continue }
+    foreach ($f in [IO.Directory]::EnumerateFiles($r, '*.*', [IO.SearchOption]::AllDirectories)) {
+        $ext = [IO.Path]::GetExtension($f).ToLowerInvariant()
+        if (-not $found.ContainsKey($ext)) { continue }
+        $rel = $f.Substring($work.Length).Replace('\', '/')
+        if ($rel -match '/(\.[^/]*|[^/]*~|cvs)/|/\.[^/]*$' -or $rel -match '^/Assets/StreamingAssets/') { continue }
+        $found[$ext].Add($f)
     }
 }
-$asmdefs = @()
-foreach ($d in @(@($cfg.moduleRoots) + @($cfg.modules | ForEach-Object { $_.path }))) {
-    $abs = Join-Path $work $d
-    if (Test-Path -LiteralPath $abs) { $asmdefs += @(Get-ChildItem $abs -Recurse -Filter *.asmdef) }
+foreach ($a in $found['.asmdef']) {
+    $j = [IO.File]::ReadAllText($a) | ConvertFrom-Json
+    $projectNames[$j.name] = $true
+    $asmdefByName[$j.name] = [pscustomobject]@{ path = $a; json = $j }
+    $rootAsm[[IO.Path]::GetDirectoryName($a)] = $j.name
+    $meta = "$a.meta"
+    if (Test-Path -LiteralPath $meta) {
+        $g = Select-String -LiteralPath $meta -Pattern '^guid:\s*(\w+)' | Select-Object -First 1
+        if ($g) { $guidName[$g.Matches[0].Groups[1].Value] = $j.name }
+    }
 }
-$asmdefs = @($asmdefs | Sort-Object FullName -Unique)
-if ($IncludeHarness -and (Test-Path -LiteralPath $harnessDir)) { $asmdefs += @(Get-ChildItem $harnessDir -Recurse -Filter *.asmdef) }
+foreach ($a in $found['.asmref']) {
+    $ref = "$(([IO.File]::ReadAllText($a) | ConvertFrom-Json).reference)"
+    if ($ref -like 'GUID:*') { $ref = $guidName[$ref.Substring(5)] }
+    if ($ref) { $rootAsm[[IO.Path]::GetDirectoryName($a)] = $ref }
+}
+$dirOwner = @{}
+function Get-OwnerAssembly([string]$File) {
+    $dir = [IO.Path]::GetDirectoryName($File)
+    if ($dirOwner.ContainsKey($dir)) { return $dirOwner[$dir] }
+    $owner = $null
+    for ($d = $dir; $d -and $d.Length -ge $work.Length; $d = [IO.Path]::GetDirectoryName($d)) {
+        if ($rootAsm.ContainsKey($d)) { $owner = $rootAsm[$d]; break }
+    }
+    if (-not $owner -and $dir.StartsWith($assetsDir, [StringComparison]::OrdinalIgnoreCase)) {
+        $segs = @($dir.Substring($assetsDir.Length).Replace('\', '/').Split('/') | Where-Object { $_ })
+        $firstpass = $segs.Count -gt 0 -and $segs[0] -in @('Plugins', 'Standard Assets', 'Pro Standard Assets')
+        $editor = @($segs | Where-Object { $_ -eq 'Editor' }).Count -gt 0
+        $owner = 'Assembly-CSharp' + $(if ($editor) { '-Editor' } else { '' }) + $(if ($firstpass) { '-firstpass' } else { '' })
+    }
+    $dirOwner[$dir] = $owner
+    $owner
+}
+$sourcesOf = @{}   # assembly -> its .cs files in this checkout
+foreach ($f in $found['.cs']) {
+    $o = Get-OwnerAssembly $f
+    if (-not $o) { continue }
+    if (-not $sourcesOf.ContainsKey($o)) { $sourcesOf[$o] = New-Object System.Collections.Generic.List[string] }
+    $sourcesOf[$o].Add($f)
+}
+
+# ---- Targets: the assemblies that compile module code ---------------------------------------------------------
+# Module folders come from the config; an asmdef inside one is its assembly, a folder without one is (part of) a
+# predefined assembly, which is then checked whole (its other files included).
+$moduleDirs = @(@(@($cfg.moduleRoots) | ForEach-Object { $abs = Join-Path $work $_; if (Test-Path -LiteralPath $abs) { Get-ChildItem -LiteralPath $abs -Directory | ForEach-Object { $_.FullName } } }) +
+    @(@($cfg.modules) | ForEach-Object { $abs = Join-Path $work $_.path; if (Test-Path -LiteralPath $abs) { [IO.Path]::GetFullPath($abs).TrimEnd('\') } }))
+$modulesOf = @{}   # assembly -> module names whose code it compiles
+function Add-ModuleOwner([string]$Assembly, [string]$File) {
+    $m = ModuleOf $File
+    if (-not $m) { return }
+    if (-not $modulesOf.ContainsKey($Assembly)) { $modulesOf[$Assembly] = New-Object System.Collections.Generic.List[string] }
+    if (-not $modulesOf[$Assembly].Contains($m)) { $modulesOf[$Assembly].Add($m) }
+}
+foreach ($dir in $moduleDirs) {
+    $prefix = $dir + '\'
+    foreach ($f in @($found['.asmdef']) + @($found['.asmref'])) { if ($f.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { Add-ModuleOwner $rootAsm[[IO.Path]::GetDirectoryName($f)] $f } }
+    foreach ($f in $found['.cs']) { if ($f.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { $o = Get-OwnerAssembly $f; if ($o) { Add-ModuleOwner $o $f } } }
+}
+if ($IncludeHarness -and (Test-Path -LiteralPath $harnessDir)) {
+    foreach ($a in @(Get-ChildItem $harnessDir -Recurse -Filter *.asmdef)) { $n = $rootAsm[$a.DirectoryName]; if ($n) { $modulesOf[$n] = New-Object System.Collections.Generic.List[string]; $modulesOf[$n].Add('Harness') } }
+}
+$autoRef = @($asmdefByName.Keys | Where-Object { $j = $asmdefByName[$_].json; -not ($j.PSObject.Properties.Name -contains 'autoReferenced' -and $j.autoReferenced -eq $false) })
+$predefinedRefs = @{
+    'Assembly-CSharp-firstpass'        = @()
+    'Assembly-CSharp'                  = @('Assembly-CSharp-firstpass')
+    'Assembly-CSharp-Editor-firstpass' = @('Assembly-CSharp-firstpass')
+    'Assembly-CSharp-Editor'           = @('Assembly-CSharp', 'Assembly-CSharp-firstpass', 'Assembly-CSharp-Editor-firstpass')
+}
 $all = @()
-foreach ($a in $asmdefs) {
-    $j = Get-Content $a.FullName -Raw | ConvertFrom-Json
-    $dir = $a.DirectoryName
-    $nested = @($asmdefs | Where-Object { $_.DirectoryName -ne $dir -and $_.DirectoryName.StartsWith($dir + '\') } | ForEach-Object { $_.DirectoryName + '\' })
-    $sources = @(Get-ChildItem $dir -Recurse -Filter *.cs | Where-Object { $f = $_.FullName; -not ($nested | Where-Object { $f.StartsWith($_) }) } | ForEach-Object { $_.FullName })
-    $refs = @(@($j.references) | Where-Object { $_ } | ForEach-Object { if ($_ -like 'GUID:*') { $guidName[$_.Substring(5)] } else { $_ } } | Where-Object { $_ })
-    $all += [pscustomobject]@{ assembly = $j.name; module = (ModuleOf $a.FullName); sources = $sources; refs = $refs
-        editorOnly = (@($j.includePlatforms) -contains 'Editor'); dependency = $false }
+$notEditor = @()   # asmdefs the Editor does not compile (includePlatforms without Editor, e.g. WebGL only): nothing to check
+foreach ($asm in @($modulesOf.Keys | Sort-Object)) {
+    $sources = @(if ($sourcesOf.ContainsKey($asm)) { $sourcesOf[$asm] })
+    if ($asmdefByName.ContainsKey($asm)) {
+        $j = $asmdefByName[$asm].json
+        $inc = @($j.includePlatforms | Where-Object { $_ }); $exc = @($j.excludePlatforms | Where-Object { $_ })
+        if (($inc.Count -gt 0 -and $inc -notcontains 'Editor') -or $exc -contains 'Editor') { $notEditor += $asm; continue }
+        $refs = @(@($j.references) | Where-Object { $_ } | ForEach-Object { if ($_ -like 'GUID:*') { $guidName[$_.Substring(5)] } else { $_ } } | Where-Object { $_ })
+        $editorOnly = @($j.includePlatforms) -contains 'Editor'
+    } elseif ($predefinedRefs.ContainsKey($asm)) {
+        $refs = @($predefinedRefs[$asm]) + $autoRef
+        $editorOnly = $asm -like '*-Editor*'
+    } else { continue }   # an asmref to an assembly that is not in this checkout
+    $all += [pscustomobject]@{ assembly = $asm; module = ($modulesOf[$asm] -join ','); modules = @($modulesOf[$asm]); sources = $sources; refs = $refs
+        editorOnly = $editorOnly; predefined = -not $asmdefByName.ContainsKey($asm); dependency = $false }
 }
 $byName = @{}; foreach ($t in $all) { $byName[$t.assembly] = $t }
 
@@ -142,7 +222,7 @@ $picked = $all
 if ($Module.Count -gt 0) {
     $sel = [ordered]@{}
     $queue = New-Object System.Collections.Queue
-    foreach ($t in $all) { if ($t.module -in $Module) { $sel[$t.assembly] = $t; $queue.Enqueue($t) } }
+    foreach ($t in $all) { if (@($t.modules | Where-Object { $_ -in $Module }).Count -gt 0) { $sel[$t.assembly] = $t; $queue.Enqueue($t) } }
     while ($queue.Count -gt 0) {
         $t = $queue.Dequeue()
         foreach ($r in $t.refs) {
@@ -262,7 +342,7 @@ if ($Backend -eq 'msbuild') { $script:MSBuild = Get-MSBuild } else {
 $results = @()
 $allErrors = @()
 if ($targets.Count -eq 0) {
-    $allErrors += [ordered]@{ file = ''; line = 0; msg = "no assembly (asmdef) for module(s) '$($Module -join ',')' in $work (module folders: ProjectSettings/AgentHarness.json; a folder without an asmdef compiles into Assembly-CSharp and is only checked by the Editor)"; module = ''; assembly = '' }
+    $allErrors += [ordered]@{ file = ''; line = 0; msg = "no C# code for module(s) '$($Module -join ',')' in $work (module folders: ProjectSettings/AgentHarness.json)"; module = ''; assembly = '' }
 }
 foreach ($t in $targets) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -279,6 +359,7 @@ foreach ($t in $targets) {
     if ($r.ok) { $built[$t.assembly] = $r.dll } else { $failed[$t.assembly] = $true }
     $allErrors += @($r.errors)
     $row['ok'] = $r.ok; $row['sources'] = @($t.sources).Count; $row['errors'] = @($r.errors).Count; $row['seconds'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+    if ($t.predefined) { $row['predefined'] = $true }
     if ($r.synthesized) { $row['synthesized'] = $true }
     if ($r.note) { $row['note'] = $r.note }
     $results += $row
@@ -293,6 +374,7 @@ $report = [ordered]@{
     targets       = @($results)
     durationSec   = [math]::Round($total.Elapsed.TotalSeconds, 2)
 }
+if ($notEditor.Count -gt 0) { $report['notCompiledInEditor'] = @($notEditor) }
 if (Test-HarnessWorktree) { $report['sourceRoot'] = $work.Replace('\', '/'); $report['editorRoot'] = $root.Replace('\', '/') }
 $report | ConvertTo-Json -Depth 6
 exit $(if ($report.ok) { 0 } else { 1 })

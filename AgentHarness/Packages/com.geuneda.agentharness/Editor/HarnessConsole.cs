@@ -226,7 +226,8 @@ namespace Harness.Editor
             [CliArg("since", "Only log entries with sequence number > since (0 = whole Editor session).")] int since = 0,
             [CliArg("include_logs", "Also return plain Debug.Log lines (default: errors/warnings only).")] bool includeLogs = false,
             [CliArg("limit", "Max entries returned per list.")] int limit = 100,
-            [CliArg("compile_only", "Skip log entries (cheap poll of compile state).")] bool compileOnly = false)
+            [CliArg("compile_only", "Skip log entries (cheap poll of compile state).")] bool compileOnly = false,
+            [CliArg("until", "Runtime errors with sequence number > until are teardownErrors (logged after a scenario finished, while play mode exits); 0 = none.")] int until = 0)
         {
             var compile = ReadCompile();
             var compileErrors = new List<CompileMessage>();
@@ -241,7 +242,10 @@ namespace Harness.Editor
 
             var entries = ReadSince(since);
             var runtimeErrors = new List<LogEntry>();
+            var knownErrors = new List<LogEntry>();
+            var teardownErrors = new List<LogEntry>();
             var editorErrors = new List<LogEntry>();
+            var known = KnownErrorPatterns(out var knownError);
             var warnings = new List<LogEntry>();
             var logs = new List<LogEntry>();
             int errorCount = 0, exceptionCount = 0, assertCount = 0, warningCount = 0, logCount = 0, infraCount = 0, shaderLogCount = 0;
@@ -259,7 +263,8 @@ namespace Harness.Editor
                     case "Warning": warningCount++; break;
                     default: logCount++; break;
                 }
-                var target = e.type == "Warning" ? warnings : e.type == "Log" ? (includeLogs ? logs : null) : IsEditorInternal(e) ? editorErrors : runtimeErrors;
+                var target = e.type == "Warning" ? warnings : e.type == "Log" ? (includeLogs ? logs : null) : IsEditorInternal(e) ? editorErrors
+                    : IsKnown(known, e) ? knownErrors : until > 0 && e.seq > until ? teardownErrors : runtimeErrors;
                 if (target == null) continue;
                 // Compiler errors are also logged as console errors; they are already reported above.
                 if (e.type == "Error" && s_CompilerPrefix.IsMatch(e.message ?? "")) continue;
@@ -277,11 +282,33 @@ namespace Harness.Editor
                 compileErrors,
                 compileWarningCount = compileWarnings,
                 runtimeErrors,
+                knownErrors,
+                teardownErrors,
+                knownErrorsConfigError = knownError,
                 editorErrors,
                 warnings,
                 logs = includeLogs ? logs : null,
                 counts = new { error = errorCount, exception = exceptionCount, assert = assertCount, warning = warningCount, log = logCount, infra = infraCount, shaderLog = shaderLogCount },
             };
+        }
+
+        /// <summary>knownErrors of the config as regular expressions (an invalid one is reported, not used).</summary>
+        static List<Regex> KnownErrorPatterns(out string error)
+        {
+            error = null;
+            var list = new List<Regex>();
+            foreach (var p in HarnessPaths.Config.knownErrors)
+            {
+                try { list.Add(new Regex(p, RegexOptions.CultureInvariant)); }
+                catch (ArgumentException e) { error = $"knownErrors in {HarnessConfig.FileName}: '{p}': {e.Message}"; }
+            }
+            return list;
+        }
+
+        static bool IsKnown(List<Regex> known, LogLine e)
+        {
+            foreach (var r in known) if (r.IsMatch(e.message ?? "")) return true;
+            return false;
         }
 
         /// <summary>

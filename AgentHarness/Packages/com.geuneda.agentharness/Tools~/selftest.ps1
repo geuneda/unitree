@@ -4,7 +4,8 @@
   changing the harness, and per Unity version in a fresh clone (tools/fresh-clone-test.ps1 -SelfTest, P-1).
 
   1 loop x3: green, same build.fingerprint and play.events (-ExpectFingerprint), no blank shots; compile-check of
-    every assembly (csc, the Editor's response files)
+    every assembly (csc, the Editor's response files); one more loop with the scenario tools of P-5 (waitScene,
+    waitTarget, a UI Toolkit click by name, KeyCode key names, a capture from a pose and one from a named camera)
   2 C# compile error in Smoke -> stage=compile at the injected file/line, module Smoke; reverted -> green
   3 runtime exception in Smoke -> stage=runtime at the injected line; reverted -> green
   4 HLSL error in the Smoke shader -> stage=shader at the injected line, again in the next loop (no reimport);
@@ -301,6 +302,26 @@ namespace Game.Smoke
 }
 '@
 
+# Item 1's scenario-tools loop (written to HarnessOut, which git ignores).
+$ScenarioToolsText = @'
+{
+    "name": "selftest-scenario-tools",
+    "durationSec": 1.2,
+    "fixedDeltaTime": 0.0166667,
+    "events": [
+        { "t": 0.0, "type": "waitScene", "scene": "Main" },
+        { "t": 0.05, "type": "waitTarget", "target": "laps" },
+        { "t": 0.1, "type": "click", "target": "laps" },
+        { "t": 0.3, "type": "keyTap", "key": "Return" },
+        { "t": 0.5, "type": "keyTap", "key": "Alpha1" }
+    ],
+    "captures": [
+        { "t": 0.6, "name": "top", "pos": [0, 40, -0.01], "lookAt": [0, 0, 0], "fov": 50 },
+        { "t": 0.9, "camera": "Main Camera", "name": "cam" }
+    ]
+}
+'@
+
 # ---- matrix 1-6: the Editor tree -----------------------------------------------------------------------------------
 function Invoke-Item1 {
     Start-Item 1 'loop x3: green, deterministic, compile-check'
@@ -323,6 +344,22 @@ function Invoke-Item1 {
     $report['shotStats'] = @($runs[-1].shotStats | ForEach-Object { "$($_.name) $($_.meanLuma)/$($_.stdLuma)" })
     $state.item['loopSec'] = @($runs | ForEach-Object { $_.durationSec })
     $state.item['editorErrors'] = @($runs | ForEach-Object { @($_.editorErrors | ForEach-Object { $_.msg }) } | Select-Object -Unique)
+
+    # Scenario tools (P-5), on the smoke scene: waits that are already satisfied, a click on the HUD's UI Toolkit label,
+    # KeyCode names for the Input System, a pose capture from above and one from the scene camera by name.
+    $scenario = Join-Path $outAbs 'scenario-tools.json'
+    [void][IO.Directory]::CreateDirectory($outAbs)
+    [IO.File]::WriteAllText($scenario, $ScenarioToolsText, (New-Object Text.UTF8Encoding($false)))
+    $r = Invoke-Tool $root 'loop.ps1' '1-scenario-tools' @('-Scenario', $scenario.Replace('\', '/'))
+    Test-Check 'scenario tools: loop green' ([bool]$r.ok) (Get-Summary $r)
+    $w = @($r.play.waits | ForEach-Object { "$($_.type):$($_.target)" })
+    Test-Check 'waitScene Main + waitTarget laps satisfied' (($w -join ',') -eq 'waitScene:Main,waitTarget:laps') ($w -join ',')
+    $c = @($r.play.clicks)
+    Test-Check 'click laps found as a UI Toolkit element' ($c.Count -eq 1 -and $c[0].via -eq 'uitk') (($c | ForEach-Object { "$($_.target) $($_.via) $($_.x),$($_.y)" }) -join ' | ')
+    Test-Check 'input events applied (click 3 + Return/Alpha1 taps 4)' ([int]$r.play.inputEventsApplied -eq 7) $r.play.inputEventsApplied
+    $shots = @($r.shotStats | ForEach-Object { "$($_.name):$($_.preset)$(if ($_.blank) { ':BLANK' })$(if ($_.error) { ":$($_.error)" })" })
+    Test-Check 'pose shot + named camera shot' (($shots -join ',') -eq 'top:pose,cam:camera') ($shots -join ',')
+    $state.item['scenarioTools'] = [ordered]@{ waits = $w; clicks = @($c | ForEach-Object { "$($_.target) $($_.via)" }); shots = $shots }
 
     $cc = Invoke-HarnessProcess $ps @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'tools/compile-check.ps1'), '-IncludeHarness') -Environment $childEnv -TimeoutSec 300
     $j = $null; try { $j = $cc.out | ConvertFrom-Json } catch { }
