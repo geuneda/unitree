@@ -5,7 +5,8 @@
 
 - 표기: `[ ]` 미해결 · `[~]` 부분 해결 · `[x]` 해결(아래 "해결됨"으로 옮김)
 - 기준: 각 항목은 "Three.js 환경의 어떤 성질을 복원하는가"로 판단한다.
-- 측정 기준 머신/상태: Unity 6000.3.11f1, URP 17.3, Code Optimization=Debug, 에디터 GUI 1개.
+- 측정 기준 머신/상태: Unity 6000.3.11f1, URP 17.3, Code Optimization=Debug, 에디터 GUI 1개. 버전별 기대값은 CLAUDE.md "Unity 버전".
+- 하네스를 고친 뒤에는 아래 "검증 매트릭스"를 돌린다: 1–8 = `tools/selftest.ps1`, 9 = `tools/fresh-clone-test.ps1 -SelfTest`(버전별 `-UnityVersion`).
 
 ## 1차 버전 기준선 (비교용)
 
@@ -123,35 +124,28 @@
 ## 이식성 — `npm install three`처럼 어디에나 붙는다
 
 Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고, 버전 범위(semver)로 의존하며, OS를 가리지 않는다.
-이 하네스는 지금 **"이 저장소를 클론해서 그 안에서 시작"하는 방식만** 된다. Unity 버전은 6000.3.11f1 하나, OS는 Windows 하나에서만 검증했다.
+이 하네스는 지금 **"이 저장소를 클론해서 그 안에서 시작"하는 방식만** 된다. Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부,
+6000.6.3f1에서 렌더링 한 가지를 빼고 녹색 — P-1, P-4), OS는 Windows 하나에서만 검증했다.
 
-순서: **P-1(버전) → P-2(기존 프로젝트) → P-3(macOS, 나중)**. 기존 프로젝트는 저마다 다른 6.x 버전을 쓰므로 P-2는 P-1이 먼저 필요하다.
-세 항목 모두 `tools/fresh-clone-test.ps1`(O-8, 2026-09-29 해결)을 버전(`-UnityVersion`)·OS·대상 프로젝트별로 돌려서 검증한다.
+순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트) → P-3(macOS, 나중)**. 기존 프로젝트는 저마다 다른 6.x 버전을 쓰므로 P-2는 P-1이 먼저 필요했다.
+모두 `tools/fresh-clone-test.ps1 -SelfTest`(O-8·O-3)를 버전(`-UnityVersion`)·OS·대상 프로젝트별로 돌려서 검증한다.
 
-- [ ] **P-1 Unity 버전이 6000.3.11f1로 고정돼 있다**
-  - 현상:
-    - 검증한 버전이 하나뿐이다. `ProjectVersion.txt`와 `manifest.json`(URP 17.3.0, Input System 1.19.0)이 이 버전 기준이고,
-      기준선 표와 검증 매트릭스 기대값(fingerprint `5887385e…`, 컴파일 61행·런타임 68행·셰이더 87행)도 이 버전에서 잰 값이다.
-    - 하한: `com.unity.pipeline` 0.8.0-exp.1의 `package.json`이 `"unity": "6000.0"`이다. 2022.3 LTS 같은 Unity 6 미만 버전은
-      에디터 연결 방식(Pipeline HTTP 서버 + `[CliCommand]`)을 바꾸지 않는 한 지원할 수 없다.
-    - 도구: `compile-check.ps1`은 `ProjectVersion.txt`의 버전으로 에디터를 찾고(Hub 기본 경로 → `unity editors --installed`),
-      `Library/Bee/artifacts/*/<Asm>.rsp` 형식에 기댄다. 버전마다 rsp 형식이 같은지 확인하지 않았다.
-    - 코드: 이미 버전 차이를 한 곳 우회했다(`enterPlayModeOptionsEnabled`가 6.x에서 obsolete → 리플렉션). 다른 버전에서 컴파일되고 동작하는지는 확인하지 않았다.
-    - O-1의 recompile 상태 레이스 우회는 Pipeline 0.8.0-exp.1의 동작에 맞춘 것이다.
-    - 프로젝트를 다른 버전 에디터로 열면 업그레이드 확인 모달이 뜬다(G2-2와 같은 문제). `unity open`만으로는 끝까지 진행되지 않을 수 있다.
-      `open.ps1`은 모달을 `dialog`로 보고하고 실패한다. `fresh-clone-test.ps1 -UnityVersion`은 클론의 `ProjectVersion.txt`를 그 버전으로 바꿔서
-      모달 없이 열도록 했지만, 설치된 에디터가 6000.3.11f1뿐이라 다른 버전으로는 아직 돌려 보지 않았다(2022.3은 하한 미만).
-    - `compile-check.ps1`의 에디터 찾기(`Get-EditorPath`)는 아직 Hub 기본 경로를 먼저 본다. `Harness.psm1`에 `Find-HarnessEditorExe`
-      (`unity editors --installed`)와 `Get-HarnessEditorProcess`(실행 중인 에디터)가 생겼으니 그쪽으로 바꾼다.
-  - 방향:
-    - 지원 범위를 "Unity 6.0 LTS 이상"으로 선언하고 검증 대상 목록을 둔다(예: 6.0 LTS 최신 패치, 6.3 LTS, 최신 정식).
-    - 버전별 API 차이는 `#if UNITY_6000_x_OR_NEWER`와 asmdef `versionDefines`(URP 17.0–17.x)로 가른다.
-    - 샘플 프로젝트(이 저장소)는 한 버전으로 고정해 두되, `Assets/Harness/`와 `tools/`에는 버전 문자열을 하드코딩하지 않는다.
-      compile-check는 실행 중인 에디터 프로세스의 경로를 먼저 쓴다(실제로 컴파일하는 버전이 그 에디터다).
-    - 매트릭스 기대값은 버전별로 기록한다. 줄 번호는 모든 버전에서 같아야 한다. fingerprint는 버전마다 달라도 되지만, 같은 버전 안에서는 3회 동일해야 한다.
-    - `fresh-clone-test.ps1 -UnityVersion <v> -ExpectFingerprint <그 버전의 값>`을 목록의 버전마다 반복한다(파라미터는 O-8에서 만들었다).
-  - 완료 기준: 목록의 각 버전에서 새 클론(해당 버전으로 업그레이드) → `harness_setup` → 매트릭스 1–8 녹색.
-    `Assets/Harness/`·`tools/`에서 `6000.` 검색 결과 0건.
+- **P-1 Unity 버전이 6000.3.11f1로 고정돼 있다** → 2026-09-29 해결(아래 "해결됨"). 6.6에서 남은 렌더링 문제는 P-4.
+
+- [ ] **P-4 Unity 6.6(URP 17.6)에서 샘플 씬의 조명이 검게 나온다** (2026-09-29, P-1 검증 중 발견)
+  - 현상: 6000.6.3f1로 연 새 클론에서 에디터 세션의 **첫 플레이만** 정상이고(overview meanLuma 48.3, 6.3은 50.3), 그 뒤의 플레이와
+    편집 모드 캡처는 URP Lit 표면(지형·받침대)의 확산광·앰비언트가 0이 되어 거의 검다(closeup 25.0, horizon 15.6, overview 0.5).
+    하늘과 커스텀 HLSL 매듭은 그려진다. 루프는 녹색이지만 `shotStats[].dark`(98% 검정)가 잡고, `selftest.ps1` 1번이 빨갛다.
+    Game 뷰 자체도 검다(`screen` 캡처) → 하네스 캡처 경로(`SubmitRenderRequest`) 문제가 아니다.
+  - 확인한 것(같은 세션에서): **태양 그림자를 끄거나 하드 그림자로 바꾸면** 밝아진다(정상인지는 미확인: 6.3보다 훨씬 밝은 125.9).
+    소프트 그림자 + 캐스케이드 2–4개면 검정, 1개면 한 번은 밝고 한 번은 검정(비결정적). SSAO·Forward/Forward+/Deferred·Domain Reload·
+    빌드 캐시·GPU Resident Drawer·Game 뷰 크기·URP 에셋 재직렬화·파이프라인 재생성·`ScriptableRendererData.SetDirty`와는 무관.
+    머티리얼 값·라이트·앰비언트 프로브는 6.3과 같다. 하네스 없는 빈 씬(기본 카메라·방향광 + 평면·큐브)에서도 6.6만 소프트 그림자가 더 어둡다
+    (Soft 114.7 / Hard 138.0 / None 138.1; 6.3은 137.8 / 138.0 / 138.1) → URP 17.6 쪽 문제로 보인다.
+  - 방향: 프레임 디버거/RenderDoc으로 주광 그림자 패스(캐스케이드 아틀라스, `_MainLightShadowParams`)를 6.3과 비교한다. Unity 쪽 버그면
+    최소 재현 프로젝트로 신고하고, 그 전까지 6.6에서는 소프트 그림자 캐스케이드를 쓰지 않는 설정을 샘플에 둘지 정한다.
+    6000.6.x 새 패치가 나오면 `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`로 다시 본다.
+  - 완료 기준: 6.6에서 새 클론 selftest 1–8 녹색(샷에 `dark` 없음, 6.3과 육안 동일).
 
 - [ ] **P-2 기존 Unity 프로젝트에 붙일 수 없다**
   - 현상: 하네스는 "이 저장소 = 프로젝트"를 전제한다. `Assets/Harness/`와 `tools/`를 기존 프로젝트에 복사하는 방법은 검증하지 않았고, 그대로 복사하면 다음과 부딪친다.
@@ -220,7 +214,7 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
   - 현상: `recompile` 상태 레이스(직전 실패 후 옛 실패 보고 / `triggered` 고착)를 `Invoke-HarnessRecompile`의 컴파일 세대 번호 + idle 판정으로 우회 중.
   - 할 일: 패키지를 업그레이드할 때마다 loop 검증 매트릭스(아래)를 다시 돌린다.
 - **O-2 스크립트가 Windows PowerShell 5.1 전용** → P-3으로 옮겼다(2026-09-29).
-- [ ] **O-3 하네스 자체의 자동 테스트가 없다.** 아래 매트릭스를 스크립트(`tools/selftest.ps1`)로 만든다.
+- **O-3 하네스 자체의 자동 테스트가 없다** → 2026-09-29 해결(`tools/selftest.ps1`, 아래 "해결됨"). PNG 눈 확인만 사람·에이전트 몫으로 남았다.
 - **O-4 에디터를 코드로 닫을 방법이 없다** → 2026-09-29 해결(아래 "해결됨").
 - [ ] **O-5 `%TEMP%` 아래 프로젝트에서 Burst JIT DLL 로드가 막힌다** (LoadLibrary error 4551 = Windows 애플리케이션 제어 정책).
   editorErrors로만 보고된다. 프로젝트를 Temp에 두지 말 것.
@@ -230,7 +224,10 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
-1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인
+**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~3.5분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
+(새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~5분). 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
+
+1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark 샷 없음 + `compile-check -IncludeHarness`)
 2. C# 컴파일 에러 주입 → `stage=compile`, file/line/module 정확 → 원복 후 녹색
 3. 런타임 예외 주입 → `stage=runtime`, 정확한 줄 → 원복 후 녹색
 4. HLSL 에러 주입 → `stage=shader`, 재임포트 없는 다음 루프에서도 검출 → 원복 후 녹색
@@ -242,15 +239,63 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
 8. land(G5-5): 새 모듈을 submit → 커밋 → `land.ps1` 녹색(에디터 트리 `git status` 깨끗, stash 버림, 소유 해제), 그 사이 다른 worktree의
    submit은 락 대기 후 녹색. 컴파일 에러 커밋 land → `stage=compile` + `land.reverted` + `restore.ok`, HEAD·`git status` 동일.
    land를 병합 직후 kill → 다음 `loop.ps1`에 `recoveredLand`, 녹색, HEAD·`git status` 동일. `.meta` 미커밋·충돌 → `stage=land` 거부, 무변경.
-   테스트 병합 커밋은 끝나면 `git reset --mixed <테스트 전 커밋>`으로 걷어내고 테스트 모듈 파일을 지운다
+   (selftest는 이미 병합됨·미커밋·에디터 트리 직접 수정 거부까지 보고, 끝나면 worktree·`selftest/*` 브랜치·테스트 커밋을 스스로 걷어낸다)
 9. 새 클론(O-8): `tools/`·`ProjectSettings/`·`Packages/`·`.gitignore`·에디터 시작 코드를 바꿨으면 임시 커밋 후
-   `tools/fresh-clone-test.ps1 -ExpectFingerprint <1의 fingerprint>` 녹색(클론이 메인 트리와 같은 fingerprint), `shots/`를 Read로 확인
+   `tools/fresh-clone-test.ps1 -SelfTest -ExpectFingerprint <1의 fingerprint>` 녹색(클론이 메인 트리와 같은 fingerprint), `shots/`를 Read로 확인.
+   지원 버전(CLAUDE.md "Unity 버전")마다 `-UnityVersion <v>`로도 돌린다(fingerprint는 그 버전의 값)
 
 ---
 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **P-1 Unity 버전이 6000.3.11f1로 고정돼 있다** (2026-09-29)
+  - 지원 범위: **Unity 6.0 LTS 이상**(하한 = `com.unity.pipeline` 0.8.0-exp.1의 `"unity": "6000.0"`). 검증 목록: 6000.0.84f1(6.0 LTS 최신),
+    6000.3.11f1(6.3 LTS, 샘플 고정 버전), 6000.6.3f1(최신 정식). 설치는 `unity install <v> --no-cm`(각 ~4 GB, 새 버전 첫 실행에 이용 약관 동의 필요).
+  - 버전을 타던 것과 고친 방법:
+    - **manifest의 내장 모듈**: 6.0에는 `com.unity.modules.adaptiveperformance`·`vectorgraphics`, 6.6에는 `com.unity.modules.vr`이 없어
+      에디터가 `Package ... cannot be found`로 시작하다 종료(코드 1). 템플릿 기본 `com.unity.visualscripting` 1.9.10은 6.6에서 CS0619.
+      넷 다 아무도 안 써서 `PackageManager.Client`(eval)로 제거. URP·Core 같은 코어 패키지는 manifest(17.3.0)와 무관하게 에디터 내장 버전
+      (6.0 17.0.4, 6.6 17.6.0)으로 해석돼 그대로 둔다.
+    - **compile-check**: Hub 기본 경로·`ProjectVersion.txt` 대신 Bee 빌드 그래프(`Library/Bee/*.dag.json`)에 기록된 컴파일 명령에서 dotnet·csc.dll·플래그를
+      읽는다. 6.6은 설치 구조가 달라(`Data/DotNetSdk/dotnet.exe` + `Data/DotNetSdk/sdk/8.0.318/Roslyn/bincore/csc.dll`) 옛 방식으로는 실패했다.
+      응답 파일 형식은 세 버전 모두 같다(`<Asm>.rsp` + 빈 `.rsp2`, `/nostdlib /noconfig /shared`). 그래프 읽기 ~45 ms.
+    - **API**: `FindObjectsByType(…, FindObjectsSortMode)`가 6.4부터 obsolete(6.6에서 CS0618 경고 6개)이고 대체 오버로드는 6.3에 없다
+      → `Harness.Runtime/UnityCompat.FindObjects`(`#if UNITY_6000_4_OR_NEWER`) 한 곳에서 가른다. asmdef `versionDefines`는 필요 없었다.
+    - **열기**: `open.ps1 -UnityVersion <v>`(ProjectVersion.txt를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뜀), 설치 안 된 버전이면 설치된 목록을 보여 준다.
+      새 버전의 이용 약관 창·Safe Mode 창처럼 Pipeline 서버가 뜨기 전의 다이얼로그는 전에는 보이지 않아 타임아웃(새 클론 1800 s)까지 기다렸다
+      → 로그가 60 s 멈추고 에디터 프로세스에 진행 창이 아닌 창이 있으면 `dialog.title`로 실패(Win32 `EnumWindows`; `MainWindowTitle`로는 Safe Mode 창이 안 보임).
+      `open.ps1`이 띄운 pid를 `Logs/harness-editor.json`에 남겨, 락 파일이 생기기 전에도 다시 부르면 두 번째 에디터를 띄우지 않고 그 에디터를 기다린다.
+      `quit.ps1`은 그런 에디터를 "없음(ok)"으로 보고하던 것을 고쳐 창 제목과 함께 실패하고 `-Force`면 종료한다. 실측(6.6, 시작 시 컴파일 에러):
+      새로 띄우면 87 s, 이미 떠 있으면 60 s 만에 `Enter Safe Mode?` 보고(전: 400 s 타임아웃까지 대기).
+    - 루프 report와 `harness_ping`에 `unityVersion`(실제로 돈 에디터).
+  - P-1을 돌리다 드러난 하네스 버그(모든 버전 공통):
+    - **런타임 예외가 났는데 루프가 녹색**: `[InitializeOnLoad]` `HarnessConsole`이 에셋 임포트 워커 프로세스에서도 돌아, 워커의 빈 SessionState를 새 세션으로 보고
+      `Library/Harness/console.ndjson`을 지우고 seq 1부터 썼다 → 루프의 `since <mark>` 조회가 그 뒤 줄을 놓쳤다(selftest 3번이 새 클론에서 간헐적으로 빨감,
+      `SpinnerLap=1`로 예외 발생은 확인). 증거: 그 파일의 `[Pipeline] Failed to persist console log buffer` 줄은 워커 로그에만 있고 `Editor.log`에는 0건.
+      `HarnessConsole`·`HarnessPlay`·`HarnessCodeOptimization`은 `AssetDatabase.IsAssetImportWorkerProcess()`면 아무것도 안 하고, seq는 도메인 리로드 때
+      SessionState에도 남겨 되돌아가지 않게, 로그 쓰기는 IOException이면 재시도, 에디터 내부 에러 판정은 `\` 경로도 프로젝트 프레임으로 본다.
+      수정 뒤 새 클론 3개의 `console.ndjson`에 워커 줄·seq 역행 0건, selftest 3번 녹색.
+    - `Mobile_RPAsset`이 옛 직렬화(v12)라 selftest 뒤 에디터 종료 때 URP 17.3이 v13으로 저장해 6.3 새 클론의 `git status`가 더러웠다 → 6.3이 쓰는 모양 그대로 저장해 커밋.
+  - 검증(이 머신, 다른 에디터 1개 동시 실행; `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`, 버전당 ~4.5–5 분):
+    - 6000.0.84f1: 매트릭스 1–9 녹색. fingerprint `882e811b…`(3회 동일), 줄 61/68/87, 샷 통계가 6.3과 소수점까지 같음(65.1/60.5/50.3), 육안 동일.
+      클론 `git status`에는 버전 전환으로 다시 쓰인 `ProjectVersion.txt`·`packages-lock.json`·`URPProjectSettings.asset`·URP 전역 설정만.
+    - 6000.3.11f1: 매트릭스 1–9 녹색. fingerprint `5887385e…`, 줄 61/68/87, 종료 뒤 클론 `git status` 깨끗.
+    - 6000.6.3f1: 2–8 녹색, 1 빨강(첫 플레이 뒤 조명이 검다, `dark` 3장) → **P-4**로 남김. fingerprint `4a3c5c8c…`(3회 동일), 줄 61/68/87.
+    - `Assets/Harness/`·`tools/`에서 `6000.` 검색 0건(버전 분기는 `UNITY_6000_4_OR_NEWER` 정의 하나).
+    - 메인 트리 `selftest.ps1` 1–8 녹색 3.3–3.7 분, 루프(변경 없음) 3.5–4 s로 기준선과 같다.
+
+- [x] **O-3 하네스 자체의 자동 테스트가 없다** (2026-09-29)
+  - 방법: `tools/selftest.ps1` = 검증 매트릭스 1–8을 한 번에. 주입은 샘플 모듈의 표식 줄을 바꾸는 방식(컴파일 `m_Time += dt;` 61행, 런타임
+    `EventBus.Publish(new SpinnerLap(laps));` 68행, 셰이더 `Frag` 첫 줄 87행, lint용 새 파일)이고, 에러가 **주입한 file/line/module 그대로** 보고돼야 녹색.
+    7–8은 저장소 옆에 worktree 2개(`<저장소>-st-a/-b`)와 `selftest/*` 브랜치를 만들어 게이트 거부, 강제 submit 되돌림 + 다른 worktree의 새 모듈·계약
+    락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부, land fast-forward + 그 사이 submit 락 대기, 이미 병합됨,
+    미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 land 되돌림, 병합 직후 kill → `recoveredLand`까지 확인하고, 끝나면 worktree·브랜치·
+    테스트 커밋을 걷어내 에디터 트리 브랜치를 시작 커밋으로 되돌린다(detached HEAD면 임시 브랜치를 썼다가 되돌림). 마지막 루프(`final`)로 녹색과
+    `git status` 원상을 확인. 첫 빨간 항목에서 멈추고 `-KeepGoing`이면 계속(`fresh-clone-test.ps1 -SelfTest`가 씀). 결과 `HarnessOut/selftest/report.json`.
+  - 첫 실행에서 드러난 것: 위 P-1의 console 버그(3번), 6.6 렌더링(1번의 `dark` 검사) — 사람이 매트릭스를 돌릴 때는 둘 다 놓쳤다.
+  - 한계: PNG 눈 확인은 여전히 사람·에이전트 몫(`shots`를 Read). G3-6(실제 키보드 입력 섞임)이 겹치면 1번 events 비교가 드물게 빨갈 수 있다.
 
 - [x] **O-8 새 클론 검증을 자동화한다** (2026-09-29)
   - 방법: `tools/fresh-clone-test.ps1`. 이 저장소(기본 HEAD; `-Source`/`-Ref`로 원격도)를 짧은 경로(`<저장소 상위>/ah-fresh`, 프로젝트 경로 60자·`%TEMP%` 밖 검사)에

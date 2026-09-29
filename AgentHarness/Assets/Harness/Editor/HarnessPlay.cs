@@ -57,6 +57,7 @@ namespace Harness.Editor
 
         static HarnessPlay()
         {
+            if (AssetDatabase.IsAssetImportWorkerProcess()) return;   // asset import workers load Editor assemblies too
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
             EditorApplication.update += Watchdog;
         }

@@ -9,10 +9,12 @@
   powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1
   powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source https://github.com/geuneda/unitree -Ref master
   powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion <installed>   # another Editor version (P-1)
+  powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -SelfTest                   # + tools/selftest.ps1 in the clone
   powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Keep                      # leave the clone and its Editor open
 
   Exit code 0 = green. Report: HarnessOut/fresh-clone/report.json (also on stdout) + the clone's loop reports
-  (loop<N>.json), the last loop's shots (shots/) and the clone's Editor log (Editor.log).
+  (loop<N>.json), the last loop's shots (shots/), the clone's Editor log (Editor.log) and with -SelfTest the
+  verification matrix report (selftest.json; its worktrees go next to the clone and are removed again).
   A failed run closes the clone's Editor but keeps the clone for inspection; replace it next time with -Force.
 #>
 param(
@@ -22,6 +24,7 @@ param(
     [string]$UnityVersion,        # default: the clone's ProjectSettings/ProjectVersion.txt
     [int]$Loops = 3,
     [string]$ExpectFingerprint,   # optional: build.fingerprint (or its prefix) every loop must produce
+    [switch]$SelfTest,            # then run the clone's tools/selftest.ps1 (verification matrix 1-8)
     [switch]$Keep,
     [switch]$Force,
     [string]$Out = 'HarnessOut/fresh-clone',
@@ -179,6 +182,23 @@ function Invoke-FreshClone {
     if ($fps.Count -ne 1 -or -not $fps[0]) { Set-Failure "build.fingerprint differs between loops: $($fps -join ', ')"; return }
     if ($events.Count -ne 1) { Set-Failure "play.events differ between loops: $($events -join ' | ')"; return }
     if ($ExpectFingerprint -and -not $fps[0].StartsWith($ExpectFingerprint)) { Set-Failure "fingerprint $($fps[0]) is not the expected $ExpectFingerprint"; return }
+
+    # ---- selftest: the verification matrix, in this clone and with its Editor version (P-1) -------------------------
+    if ($SelfTest) {
+        $state.phase = 'selftest'
+        # -KeepGoing: one red item (e.g. a rendering difference of this Unity version) must not hide the others.
+        $r = Invoke-CloneTool 'selftest.ps1' @('-Out', 'HarnessOut/selftest', '-ExpectFingerprint', $fps[0], '-KeepGoing') -TimeoutSec 3600
+        $timings['selftestSec'] = $r.sec
+        $file = Join-Path $state.project 'HarnessOut/selftest/report.json'
+        if (-not (Test-Path -LiteralPath $file)) { Set-Failure "selftest wrote no report ($($r.code)): $($r.err)"; return }
+        Copy-Item -LiteralPath $file -Destination (Join-Path $outAbs 'selftest.json') -Force
+        $st = [IO.File]::ReadAllText($file) | ConvertFrom-Json
+        $report['selftest'] = [ordered]@{ ok = $st.ok; stage = $st.stage; unityVersion = $st.unityVersion; lines = $st.lines
+            items = @($st.items | ForEach-Object { "$($_.item) $(if ($_.ok) { 'ok' } else { 'RED' }) $($_.sec)s $($_.name)" })
+            failed = @($st.items | ForEach-Object { $i = $_.item; @($_.checks | Where-Object { -not $_.ok } | ForEach-Object { "${i}: $($_.check) ($($_.actual))" }) })
+            final = $st.final; cleanupErrors = $st.cleanupErrors; error = $st.error }
+        if (-not $st.ok) { Set-Failure "selftest is red: stage=$($st.stage) (selftest.json)"; return }
+    }
     $state.phase = 'done'
 }
 
@@ -192,9 +212,9 @@ if ($state.project -and (Test-Path -LiteralPath (Join-Path $state.project 'tools
     if (-not ($r.json -and $r.json.ok)) { $r = Invoke-CloneTool 'quit.ps1' @('-Force') -TimeoutSec 300 }
     $timings['quitSec'] = $r.sec
     if ($r.json) { $report['quit'] = $r.json }
-    # No Pipeline server to talk to (e.g. a dialog before it started): kill what open.ps1 started. An Editor that has
-    # just exited can still be listed for a moment, with HasExited already true.
-    if (-not ($r.json -and $r.json.ok) -and $state.pid) {
+    # Whatever quit.ps1 said (an older clone's quit.ps1 reports "no Editor" while a startup dialog waits): the Editor
+    # open.ps1 started must be gone. One that has just exited can still be listed for a moment, with HasExited true.
+    if ($state.pid) {
         $p = Get-Process -Id $state.pid -ErrorAction SilentlyContinue
         if ($p -and $p.ProcessName -eq 'Unity' -and -not $p.HasExited) { Stop-Process -Id $state.pid -Force; $report['killed'] = $state.pid }
     }

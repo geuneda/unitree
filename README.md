@@ -56,7 +56,8 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 ## 요구 사항
 
 - Windows 10/11 — 도구 스크립트는 Windows PowerShell 5.1 기준
-- Unity **6000.3.11f1** (Unity 6.3 LTS) + URP (프로젝트에 포함)
+- Unity **6.0 LTS 이상** + URP. 샘플 프로젝트는 **6000.3.11f1**(Unity 6.3 LTS)로 고정돼 있고, 새 클론에서 6000.0.84f1·6000.3.11f1은 검증 매트릭스 전부,
+  6000.6.3f1은 렌더링 한 가지(소프트 그림자, ROADMAP P-4)를 빼고 녹색이다. 다른 설치 버전으로 열 때는 `tools/open.ps1 -UnityVersion <버전>`.
 - Unity CLI (`unity`, beta): `$env:UNITY_CLI_CHANNEL='beta'; irm https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.ps1 | iex`
 - 선택: Visual Studio 2022 MSBuild (`compile-check.ps1`의 msbuild 백엔드). 기본인 `csc` 백엔드는 Unity 설치에 포함된 Roslyn만 쓴다.
 - **짧은 경로에 클론할 것 (프로젝트 경로 60자 이하 권장).** Unity 패키지 내부 경로가 길어서(Library 아래 최장 200자 이상) 긴 경로에 두면
@@ -77,6 +78,8 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1               # 끝낼 �
 사용자 전역 `Editor.log` 하나를 서로 덮어써서, 에디터를 둘 이상 띄우면 로그가 뒤섞입니다.
 
 위 과정 전체(클론 → 열기 → 설정 → 루프 3회 → 종료 → 삭제)를 `tools/fresh-clone-test.ps1` 하나로 검증할 수 있습니다(이 머신에서 ~110 s).
+하네스 자체의 검증 매트릭스(에러 주입·동시 루프·worktree submit/land)는 `tools/selftest.ps1`이 한 번에 돌리고(~3.5분),
+`fresh-clone-test.ps1 -UnityVersion <버전> -SelfTest`는 그것을 다른 Unity 버전의 새 클론에서 돌립니다.
 
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)
 또는 `unity command harness_capture --preset all --format json`.
@@ -177,7 +180,7 @@ AgentHarness/
   Assets/Harness/Editor/    harness_* 에디터 커맨드, BuildContext / IBuildStep
   Assets/Game/<Module>/     모듈 런타임 코드 (+ Shaders/, UI/), Builders/ 에 씬 빌드 스텝
   tools/                    loop.ps1 · submit.ps1 · land.ps1 · uc.ps1 · compile-check.ps1 · scenarios/*.json
-                            open.ps1 · quit.ps1 (에디터 열기·닫기) · fresh-clone-test.ps1 (새 클론 검증)
+                            open.ps1 · quit.ps1 (에디터 열기·닫기) · fresh-clone-test.ps1 (새 클론 검증) · selftest.ps1 (검증 매트릭스)
 ```
 
 ## 에이전트와 함께 쓰기

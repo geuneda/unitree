@@ -17,7 +17,7 @@ namespace Harness
         /// <summary>All presets in loaded scenes, sorted by name (stable order for "auto" captures).</summary>
         public static List<ShotPreset> All()
         {
-            var list = new List<ShotPreset>(Object.FindObjectsByType<ShotPreset>(FindObjectsInactive.Include, FindObjectsSortMode.None));
+            var list = new List<ShotPreset>(UnityCompat.FindObjects<ShotPreset>(FindObjectsInactive.Include));
             list.Sort((a, b) => string.CompareOrdinal(a.presetName, b.presetName));
             return list;
         }

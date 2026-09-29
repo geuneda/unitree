@@ -59,13 +59,19 @@ namespace Harness.Editor
 
         static HarnessConsole()
         {
+            // Asset import worker processes load the Editor assemblies too, each with its own (empty) SessionState. There
+            // this looked like a new session: it deleted the log and wrote its own lines from seq 1 into the same file, so a
+            // loop's "since <mark>" missed runtime errors logged afterwards (seen as a green loop with an exception thrown).
+            if (AssetDatabase.IsAssetImportWorkerProcess()) return;
             if (!SessionState.GetBool("Harness.ConsoleSession", false))
             {
                 // New Editor session: start a fresh log.
                 SessionState.SetBool("Harness.ConsoleSession", true);
                 try { File.Delete(HarnessPaths.ConsoleFile); } catch { }
             }
-            s_Seq = ReadLastSeq();
+            // The sequence must never go back within a session, even if the file cannot be read right now.
+            s_Seq = Math.Max(ReadLastSeq(), SessionState.GetInt("Harness.ConsoleSeq", 0));
+            AssemblyReloadEvents.beforeAssemblyReload += () => SessionState.SetInt("Harness.ConsoleSeq", Mark);
             DomainReloads = SessionState.GetInt("Harness.DomainReloads", 0) + 1;
             SessionState.SetInt("Harness.DomainReloads", DomainReloads);
 
@@ -106,7 +112,13 @@ namespace Harness.Editor
                     line.seq = ++s_Seq;
                     var fi = new FileInfo(HarnessPaths.ConsoleFile);
                     if (fi.Exists && fi.Length > MaxLogBytes) Rotate();
-                    File.AppendAllText(HarnessPaths.ConsoleFile, JsonUtility.ToJson(line) + "\n");
+                    var json = JsonUtility.ToJson(line) + "\n";
+                    // Another process (virus scanner, indexer) may hold the file for a moment: retry rather than lose the line.
+                    for (var attempt = 0; ; attempt++)
+                    {
+                        try { File.AppendAllText(HarnessPaths.ConsoleFile, json); break; }
+                        catch (IOException) when (attempt < 5) { System.Threading.Thread.Sleep(10); }
+                    }
                 }
             }
             catch { /* never throw from a log callback */ }
@@ -279,10 +291,12 @@ namespace Harness.Editor
         /// </summary>
         static bool IsEditorInternal(LogLine e)
         {
-            var msg = e.message ?? "";
+            // Frames come as "(at Assets/X.cs:12)" or, when Unity does not shorten the path, as Mono's
+            // "in C:\...\Assets\X.cs:12": a project file either way (a backslash path once made a runtime error pass as internal).
+            var msg = (e.message ?? "").Replace('\\', '/');
             if (msg.Contains("Assets/")) return false;
             if (!string.IsNullOrEmpty(e.stack))
-                return !e.stack.Contains("Assets/");
+                return !e.stack.Replace('\\', '/').Contains("Assets/");
             return msg.StartsWith("Unexpected error in Burst compilation", StringComparison.Ordinal);
         }
 
@@ -297,7 +311,7 @@ namespace Harness.Editor
         }
 
         [CliCommand("harness_ping",
-            "Cheap readiness probe: domain reload counter, compiling/updating/playing flags, console mark.",
+            "Cheap readiness probe: domain reload counter, compiling/updating/playing flags, console mark, Editor version.",
             Tags = new[] { "harness" })]
         public static object Ping()
         {
@@ -312,6 +326,7 @@ namespace Harness.Editor
                 compileFailed = EditorUtility.scriptCompilationFailed,
                 mark = Mark,
                 activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().path,
+                unityVersion = Application.unityVersion,
             };
         }
     }

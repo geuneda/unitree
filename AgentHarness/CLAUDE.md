@@ -1,7 +1,8 @@
-# AgentHarness — Unity 6 LTS(6000.3.11f1) + URP 에이전트 하네스
+# AgentHarness — Unity 6(6.0 LTS 이상) + URP 에이전트 하네스
 
 이 문서만 읽고 바로 루프를 돌릴 수 있어야 한다. 게임은 아직 없다 — `Assets/Game/Stage`, `Assets/Game/Smoke`는
 하네스를 검증하는 스모크 씬이다(절차적 지형 + 커스텀 HLSL + 라이트 + Volume 후처리 + 회전 오브젝트 + UI Toolkit HUD).
+샘플 프로젝트는 Unity 6000.3.11f1로 고정돼 있고, 하네스(`Assets/Harness/`, `tools/`)는 Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전").
 
 ## 왜 이 하네스가 있나
 
@@ -18,7 +19,7 @@
 모든 설계 결정의 기준: **"Three.js 환경의 어떤 성질을 복원하는가"**. URP·물리·엔진 기능을 쓰니 결과는 그 이상을 노린다.
 
 **아직 해결 안 된 격차는 [`docs/ROADMAP.md`](docs/ROADMAP.md)에 성질 1~5와 이식성(Unity 버전·기존 프로젝트·macOS)별로 기록돼 있다.** 하네스를 개선할 때는 거기서 항목을 고르고,
-해결하면 체크 + 검증 방법·측정값을 남긴다. 하네스를 고친 뒤에는 ROADMAP의 "검증 매트릭스"를 다시 돌린다.
+해결하면 체크 + 검증 방법·측정값을 남긴다. 하네스를 고친 뒤에는 ROADMAP의 "검증 매트릭스"를 다시 돌린다(1–8 = `tools/selftest.ps1`, 아래 "하네스 자기 검증").
 
 ## 빠른 시작 (새로고침 + 스크린샷 + 콘솔 = 한 방)
 
@@ -31,12 +32,17 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
 `open.ps1`은 에디터 로그를 `Logs/Editor.log`(직전 것은 `Editor-prev.log`)에 따로 쓰게 하고, 첫 응답 뒤 Debug 재컴파일까지 끝나
 3초간 idle일 때 돌아온다(재시작 ~30s, 새 클론 첫 임포트는 수 분). `unity open`이나 Hub로 열면 `-logFile`이 없어 여러 에디터가
 사용자 전역 `Editor.log` 하나를 서로 덮어쓴다(아래 "함정"). 실패하면 JSON의 `error`, `dialog`(모달 다이얼로그 — 사람이 답해야 함), `logTail`을 본다.
+Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이용 약관, Safe Mode, 패키지 에러)는 로그가 60 s 멈추고 에디터 창 제목이
+진행 창이 아니면 `dialog.title`로 보고한다. 에디터는 그대로 두니 사람이 답한 뒤 `open.ps1`을 다시 부르면 그 에디터를 기다린다
+(`open.ps1`이 띄운 pid는 `Logs/harness-editor.json`에 남아서, 락 파일이 생기기 전에도 두 번째 에디터를 띄우지 않는다).
+다른 설치 버전으로 열기: `open.ps1 -UnityVersion <버전>`(아래 "Unity 버전").
 
 `tools/loop.ps1` = recompile → (C# 컴파일 에러면 즉시 중단) → lint → `harness_build` → `harness_shaders` → `harness_play`(기본 3컷)
 → `harness_console` + `harness_stats` → `HarnessOut/latest/report.json` (stdout에도 같은 JSON). 종료코드 0 = 전부 녹색.
 
 **매 루프 후 반드시**: `report.json`의 `ok/stage`를 보고, `shots`의 PNG를 **Read 툴로 직접 열어** 눈으로 확인한다.
-`shotStats[].blank=true`(평평/검은 화면)면 렌더가 깨진 것이다.
+`shotStats[].blank=true`(평평/검은 화면)면 렌더가 깨진 것이다. `dark=true`(픽셀 98% 이상이 거의 검정)는 실패로 치지 않지만
+조명이 빠진 화면일 가능성이 크다 — PNG를 열어 본다.
 
 옵션: `-Scenario tools/scenarios/x.json`, `-Out HarnessOut/x`, `-NoPlay`(편집 모드 캡처만), `-NoCompile`.
 **여러 에이전트가 동시에 작업하면** 이 폴더를 직접 고치지 말고 각자 worktree에서 `tools/submit.ps1`을 쓰고, 끝나면 커밋해서
@@ -52,13 +58,13 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   "editorErrors": [{"type","msg","count","stack"}],   // Unity/패키지 내부 에러(Assets/ 흔적 없음). 실패 사유는 아니지만 읽어볼 것
   "fps": {"avg","min","p95ms","p99ms","hitches","cpuMainAvgMs","samples","editorFocused"},
   "shots": ["C:/.../HarnessOut/latest/shot0_closeup.png", ...],
-  "durationSec": 3.5,
+  "durationSec": 3.5, "unityVersion": "6000.3.11f1",   // 루프를 돌린 에디터 버전
   "timings": {"lockWaitSec","editorWaitSec","compileSec","buildSec","playSec","collectSec"},   // editorWaitSec: 시작 시 리로드·busy 대기(있을 때만)
   "build": {"fingerprint","steps":[{"type","module","ms","error","file","line"}], ...},
   "play": {"success","probeReady","frames","gameSec","modules","failedModules","inputEventsApplied",
            "events":[{"name":"SpinnerLap","count":2}]},     // EventBus 발행 횟수 → 게임플레이를 기계적으로 검증
   "render": {"batches","setPassCalls","drawCalls","triangles","vertices"},
-  "shotStats": [{"name","preset","t","meanLuma","stdLuma","blank","error"}],
+  "shotStats": [{"name","preset","t","meanLuma","stdLuma","blank","dark","error"}],
   "lint": [{"rule","module","file","message"}], "warningCount": 0,
   "submit": {"phase","synced","kept","reverted","written","deleted","contractsAdded","metaWrittenBack",   // submit.ps1만.
              "errorModules","restore","check","owner","takeover"},   // timings에 checkSec/syncSec/restoreSec 추가
@@ -112,6 +118,7 @@ tools/land.ps1                 worktree 브랜치 → 에디터 트리 브랜치
 tools/compile-check.ps1        에디터 없는 컴파일 검사  tools/Harness.psm1    HTTP 클라이언트·락·루프·submit/land 저널·git
 tools/open.ps1 / quit.ps1      에디터 열기(프로젝트별 로그, 준비 대기) / 정상 종료(락)
 tools/fresh-clone-test.ps1     새 클론 검증: 짧은 경로에 클론 → open → harness_setup → 루프 N회 → quit → 삭제
+tools/selftest.ps1             검증 매트릭스 1–8 자동 실행(에러 주입·동시 루프·worktree submit/land)
 tools/scenarios/*.json         플레이 시나리오        HarnessOut/           캡처·result.json·report.json (gitignore)
 AgentScripts/                  eval_file / run_script 용 임시 C# (gitignore)
 ```
@@ -189,7 +196,7 @@ public sealed class FooBuildStep : IBuildStep
 | `harness_stats` | 플레이 중이면 live, 아니면 마지막 결과: fps avg/min/p95ms, batches, SetPass, tris |
 | `harness_lint` | static-reset / module-asmdef / module-boundary 규칙 검사 |
 | `harness_shaders` | Assets/ 셰이더의 현재 컴파일 에러(file, line, msg, module). 셰이더 에러는 로그가 아니라 상태라 매 루프 조회 |
-| `harness_ping` | domainReloads, isCompiling, isPlaying, compileFailed, mark |
+| `harness_ping` | domainReloads, isCompiling, isPlaying, compileFailed, mark, unityVersion |
 | `harness_setup` | 프로젝트 설정 멱등 적용(Domain Reload off, runInBackground, Debug 코드 최적화, 템플릿 샘플 삭제) |
 | `harness_sync_csproj` | .sln/.csproj 생성(사용자 외부 에디터 설정은 복원) — compile-check msbuild 백엔드용 |
 | `harness_quit` | 응답 ~0.3s 뒤 `EditorApplication.Exit(0)`(저장 확인 없음). 직접 부르지 말고 `tools/quit.ps1`(락 + 종료 대기) |
@@ -275,7 +282,9 @@ powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke -
 - worktree에서 돌리면 소스는 worktree, 응답 파일·의존 DLL은 에디터 트리 것을 쓴다(출력에 `sourceRoot`/`editorRoot`).
 - `-Module`은 그 모듈이 참조하는 프로젝트 어셈블리(`Game.Contracts`)도 함께 검사하고, 한 실행 안에서 의존 순서로 컴파일해
   **방금 만든 DLL을 참조**한다(체인) → worktree에서 추가한 Contracts 타입도 보인다. `-IncludeHarness`면 Harness도 체인.
-- `csc`: 에디터가 쓰는 응답 파일(`Library/Bee/artifacts/*/<Asm>.rsp`)과 에디터 내장 Roslyn → 에디터와 동일한 플래그/분석기. .NET SDK·VS 불필요.
+- `csc`: 에디터가 쓰는 응답 파일(`Library/Bee/artifacts/*/<Asm>.rsp`)을 에디터 빌드 그래프(`Library/Bee/*.dag.json`)에 기록된 그대로의
+  dotnet·csc.dll·플래그로 컴파일 → 에디터와 동일한 컴파일러/플래그/분석기(출력 `compiler`). Unity 버전마다 설치 구조가 달라도 된다
+  (6.0–6.3 `Data/DotNetSdkRoslyn`, 6.6 `Data/DotNetSdk/sdk/<v>/Roslyn/bincore`). .NET SDK·VS 불필요.
   에디터가 한 번도 컴파일하지 않은 **새 어셈블리**(.rsp 없음)는 같은 종류(Editor 전용/런타임) Harness 어셈블리의 응답 파일에
   asmdef 참조를 붙여 합성해 검사한다(`synthesized: true`; 템플릿의 패키지 참조가 남아 실제보다 약간 관대).
 - `msbuild`: Unity가 생성한 `<Asm>.csproj`를 실행마다 재작성(소스 목록 갱신, ProjectReference → 체인 DLL 또는 에디터 DLL) 후 VS 2022 MSBuild.
@@ -297,10 +306,73 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
 - 결과: `HarnessOut/fresh-clone/report.json`(`stage` = prepare|clone|version|open|setup|loop|determinism|quit|git), `loop<N>.json`,
   마지막 루프의 `shots/`(Read로 확인), 클론의 `Editor.log`. 실패하면 에디터는 닫고 클론은 남긴다(`kept`) → 다음 실행은 `-Force`.
   `-Keep`은 녹색이어도 클론과 에디터를 남긴다(비교·디버깅용).
-- `-UnityVersion <설치된 버전>`: 클론의 `ProjectVersion.txt`를 그 버전으로 바꿔서 연다(P-1용; 이때 `git status` 변경은 보고만 한다).
+- `-UnityVersion <설치된 버전>`: 클론의 `ProjectVersion.txt`를 그 버전으로 바꿔서 연다(P-1; 이때 `git status` 변경은 보고만 한다).
+- `-SelfTest`: 루프 뒤 클론에서 `tools/selftest.ps1`(매트릭스 1–8, 루프의 fingerprint를 기대값으로)까지 돌린다 → `selftest.json`,
+  report의 `selftest`(`stage=selftest`). worktree는 클론 옆(`ah-fresh-st-a/-b`)에 생겼다가 지워진다. 전체 ~4분.
 - 언제: `tools/`, `ProjectSettings/`, `Packages/`, `.gitignore`, 에디터 시작 경로(`[InitializeOnLoad]`)를 바꿨을 때와 공개 전.
 
+## 하네스 자기 검증 (tools/selftest.ps1)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~3.5분
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 5887385e
+powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
+```
+- 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark 없음) + `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 ·
+  4 HLSL 에러(재임포트 없는 다음 루프에서도) · 5 리셋 없는 static(lint) · 6 루프 2개 동시 · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
+  다른 worktree의 새 모듈·계약은 락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부) ·
+  8 land(fast-forward + 그 사이 submit 락 대기, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
+  병합 직후 kill → `recoveredLand`). 에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
+- 주입 위치는 샘플 모듈의 표식 줄: `SmokeModule.cs`의 `m_Time += dt;`(컴파일, 61행)·`EventBus.Publish(new SpinnerLap(laps));`(런타임, 68행),
+  `SmokeIridescent.shader`의 `Frag` 첫 줄(87행). 이 줄들을 바꾸면 `selftest.ps1`의 표식도 바꾼다.
+- 7–8은 커밋된 `tools/`·`Assets/Harness/`·`Assets/Game/`을 쓰는 worktree 두 개를 저장소 옆(`<저장소>-st-a/-b`)에 만들고, `selftest/*` 브랜치·
+  테스트 커밋(land의 병합 포함)을 만든 뒤 에디터 트리 브랜치를 시작 커밋으로 되돌린다(detached HEAD면 임시 브랜치를 썼다가 되돌린다).
+  → 하네스를 고친 중이면 **임시 커밋 후** 돌린다. 도중에 에디터 트리 파일을 고치지 말 것(`git status`를 비교한다).
+- 첫 빨간 항목에서 멈추고, 바꾼 파일·worktree·브랜치·커밋을 되돌린 뒤 마지막 루프(`final`)로 녹색과 `git status` 원상을 확인한다.
+- 결과: `HarnessOut/selftest/report.json`(`items[].checks[]`, `lines`, `fingerprint`, `shotStats`, `final`), 단계별 report는
+  `HarnessOut/selftest/<항목>-<단계>/`. PNG 눈 확인(`shots`)은 여전히 사람·에이전트 몫이다.
+
+## Unity 버전
+
+- 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
+- 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
+  (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
+- 검증한 버전(2026-09-29, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`):
+
+  | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
+  |---|---|---|---|---|
+  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `882e811b…` | 61 / 68 / 87 | 1–9 녹색, 샷은 6.3과 같은 밝기 |
+  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `5887385e…` | 61 / 68 / 87 | 1–9 녹색 |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `4a3c5c8c…` | 61 / 68 / 87 | 2–8 녹색, **1 빨강**: 첫 플레이 뒤 조명이 검다(`dark`, ROADMAP P-4) |
+
+  fingerprint는 버전마다 다르다(URP가 만드는 머티리얼·에셋 직렬화가 다르다). 같은 버전 안에서만 매번 같아야 한다.
+- 다른 버전으로 열면 Unity가 다시 쓰는 파일(커밋하지 않는다): `Packages/packages-lock.json`, `Assets/Settings/*RPAsset.asset`·
+  `UniversalRenderPipelineGlobalSettings.asset`, `ProjectSettings/*`(버전별 새 필드). URP·Core 같은 **코어 패키지는 manifest의 버전(17.3.0)과
+  상관없이 에디터 내장 버전으로 해석된다**.
+- `Assets/Harness/`·`tools/`에는 버전 문자열을 쓰지 않는다. 에디터·컴파일러 경로는 실행 중인 에디터 프로세스 → `unity editors --installed`에서 얻고,
+  API 차이는 `Assets/Harness/Runtime/UnityCompat.cs` 한 곳에서 `#if UNITY_6000_4_OR_NEWER`처럼 가른다(예: 6.4부터 `FindObjectsSortMode` obsolete).
+  모듈 코드도 버전을 타는 API는 `UnityCompat`을 쓰거나 같은 방식으로 가른다.
+
 ## 함정 (겪은 것)
+
+- **`[InitializeOnLoad]` 코드는 에셋 임포트 워커 프로세스(`Logs/AssetImportWorker*.log`)에서도 돈다.** 워커의 SessionState는 비어 있어서
+  `HarnessConsole`이 "새 세션"으로 보고 `console.ndjson`을 지우고 seq 1부터 썼다 → 루프의 `since <mark>` 조회가 그 뒤 런타임 예외를 놓쳐
+  **예외가 났는데 루프가 녹색**이었다(selftest 3번이 새 클론에서 간헐적으로 빨감). 파일·전역 상태를 건드리는 에디터 초기화는
+  `AssetDatabase.IsAssetImportWorkerProcess()`면 건너뛴다(`Application.isBatchMode`도 워커에서 참이다).
+- **버전마다 내장 패키지가 다르다.** manifest에 그 버전에 없는 내장 모듈이 있으면 에디터가 시작하다 `Package ... cannot be found`로 꺼진다
+  (6.0에는 `com.unity.modules.adaptiveperformance`·`vectorgraphics`가, 6.6에는 `com.unity.modules.vr`이 없다). 템플릿 기본 패키지
+  `com.unity.visualscripting` 1.9.10은 6.6에서 컴파일 에러(CS0619). 샘플 프로젝트에서는 넷 다 뺐다(아무도 쓰지 않음). 패키지는
+  `UnityEditor.PackageManager.Client`(eval)로 추가·제거한다 — packages-lock.json까지 맞게 바뀐다.
+- 새로 설치한 Unity 버전의 첫 실행은 **이용 약관 창**(Unity Editor Software Terms)을 띄운다. Pipeline 서버가 뜨기 전이라 `open.ps1`이
+  `dialog.title`로 보고한다 → 사람이 동의해야 한다. 시작 시 컴파일 에러가 있으면 "Enter Safe Mode?"도 같은 식으로 보고된다(창 제목은
+  `Process.MainWindowTitle`로는 안 보여서 Win32 `EnumWindows`로 읽는다).
+- 템플릿에서 온 URP 에셋이 옛 직렬화 버전이면(`Mobile_RPAsset`이 `k_AssetVersion: 12`, URP 17.3은 13) 셰이더 재임포트 같은 작업 뒤
+  URP가 모든 RP 에셋을 다시 써서 **에디터 종료 때** 저장한다 → 새 클론의 `git status`가 더러워졌다. 에디터 API(SerializedObject + SaveAssetIfDirty)로
+  그 버전이 쓰는 모양 그대로 저장해 커밋했다.
+- Game 뷰 크기 목록(`PlayModeWindow.SetCustomRenderingResolution`이 여기에 추가한다)과 에디터 기본 레이아웃은 **사용자 전역**이다
+  (`%APPDATA%\Unity\Editor-5.x\Preferences\GameViewSizes.asset`, `Layouts\current\default-6000.dwlt`). 하네스·실험 코드에서 바꾸지 않는다.
+- 에이전트의 Bash 도구(Git Bash)로 넘긴 명령은 작은따옴표·`<<'EOF'` 안에서도 `\\`가 `\`로 줄어든다(확인: `r"a\\b"`가 3글자).
+  heredoc Python으로 `.ps1`을 고치다 정규식·경로가 조용히 깨진 적 있다 → 백슬래시가 든 편집은 Edit 도구로 한다.
 
 - `Mathf.SmoothStep(from, to, t)`는 GLSL `smoothstep`이 **아니다**(값 보간). `PMath.Smoothstep(e0, e1, x)`를 써라. 지형이 전부 눈으로 나온 원인.
 - `UnityEngine.Object`에 `?.` 금지(에디터의 fake null). `TryGetComponent`를 쓴다.

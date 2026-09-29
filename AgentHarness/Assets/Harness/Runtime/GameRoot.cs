@@ -59,7 +59,7 @@ namespace Harness
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
         {
-            var stale = FindObjectsByType<GameRoot>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            var stale = UnityCompat.FindObjects<GameRoot>(FindObjectsInactive.Include);
             if (stale.Length > 0)
                 Debug.LogError($"[GameRoot] {stale.Length} GameRoot object(s) from a previous play session still exist - modules would tick more than once per frame");
             // No HideFlags.DontSave here: DontSave objects survive leaving play mode, and with Domain Reload off

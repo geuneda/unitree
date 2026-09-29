@@ -29,6 +29,21 @@ function Finish([int]$Code) {
 
 $editor = Get-HarnessEditorProcess
 if (-not $editor) {
+    $started = Get-HarnessLaunchedEditor
+    if ($started) {
+        # Started by open.ps1 but no Pipeline server (a startup dialog, still importing, or Safe Mode): nothing to ask.
+        $result.pid = $started.Id
+        if (-not $Force) {
+            $result['windows'] = @(Get-HarnessWindowTitles $started.Id)
+            $result['error'] = "The Editor open.ps1 started (pid $($started.Id), windows: $($result.windows -join ' | ')) has no Pipeline server yet (a startup dialog, importing, or Safe Mode). Answer/close it by hand, or -Force to kill it."
+            Finish 1
+        }
+        Stop-Process -Id $started.Id -Force
+        [void]$started.WaitForExit(15000)
+        $result.method = 'kill'
+        $result.ok = $started.HasExited
+        Finish $(if ($result.ok) { 0 } else { 1 })
+    }
     if (Test-HarnessProjectOpen) {
         # Open, but without a Pipeline server (still importing, or Safe Mode): nothing to talk to, and no pid to kill.
         $result['error'] = 'An Editor has this project open but its Pipeline server is not up (importing, or Safe Mode). Close it by hand.'

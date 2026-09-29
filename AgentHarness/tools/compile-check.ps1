@@ -13,8 +13,9 @@
     template assembly of the same kind (Editor-only or not) plus the asmdef references ("synthesized": true).
 
   Backends:
-    csc (default)  Unity's own compiler response file (Library/Bee/artifacts/*/<Asm>.rsp) + the Roslyn bundled with
-                   the Editor install. Identical flags/analyzers to the Editor, ~0.1-0.3 s per assembly.
+    csc (default)  Unity's own compiler response file (Library/Bee/artifacts/*/<Asm>.rsp), run the way the Editor's
+                   build graph (Library/Bee/*.dag.json) runs it: same dotnet, csc.dll and flags. Identical
+                   flags/analyzers to the Editor, ~0.1-0.3 s per assembly, whatever the Unity version's layout.
     msbuild        Unity-generated <Asm>.csproj (tools/uc.ps1 harness_sync_csproj once), rewritten per run; needs
                    Visual Studio 2022 / Build Tools MSBuild (no .NET SDK needed). Cold start 10-75 s. Existing assemblies only.
 
@@ -45,14 +46,22 @@ $runId = [guid]::NewGuid().ToString('N').Substring(0, 8)
 $tmpRoot = Join-Path $root "Temp\compile-check\$runId"
 New-Item -ItemType Directory -Force $tmpRoot | Out-Null
 
-function Get-EditorPath {
-    $ver = (Get-Content (Join-Path $root 'ProjectSettings\ProjectVersion.txt') | Select-String 'm_EditorVersion:\s*(\S+)').Matches[0].Groups[1].Value
-    $candidates = @("C:\Program Files\Unity\Hub\Editor\$ver\Editor", "C:\Program Files\Unity\Hub\Editor\$ver-x86_64\Editor")
-    foreach ($c in $candidates) { if (Test-Path "$c\Unity.exe") { return $c } }
-    $json = & unity editors --installed --format json --no-banner 2>$null | ConvertFrom-Json
-    $e = $json.data | Where-Object { $_.version -eq $ver } | Select-Object -First 1
-    if ($e) { return (Split-Path -Parent $e.location) }
-    throw "Unity $ver not found"
+# The compiler exactly as the Editor runs it (P-1). Its build graph records every C# compile as
+# '"<dotnet>" exec "<csc.dll>" /nostdlib /noconfig /shared "@<Asm>.rsp" "@<Asm>.rsp2"'. Where dotnet and csc.dll live
+# differs between Unity versions (6.0-6.3: Data/NetCoreRuntime + Data/DotNetSdkRoslyn; 6.6: Data/DotNetSdk/...
+# /Roslyn/bincore), so nothing about the install is assumed. No graph = the Editor never compiled the project, and
+# there are no response files either.
+function Get-EditorCompiler {
+    $dags = @(Get-ChildItem -LiteralPath (Join-Path $root 'Library/Bee') -Filter '*.dag.json' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+    $pattern = '"Action":\s*"\\"(?<dotnet>[^"\\]*(?:\\\\[^"\\]*)*)\\" exec \\"(?<csc>[^"\\]*(?:\\\\[^"\\]*)*csc\.dll)\\"(?<flags>(?: /\w+)*) '
+    foreach ($dag in $dags) {
+        $m = [regex]::Match([IO.File]::ReadAllText($dag.FullName), $pattern)
+        if (-not $m.Success) { continue }
+        # JSON escapes: \\ -> \
+        return [pscustomobject]@{ dotnet = $m.Groups['dotnet'].Value -replace '\\\\', '\'; csc = $m.Groups['csc'].Value -replace '\\\\', '\'
+            flags = @($m.Groups['flags'].Value -split ' ' | Where-Object { $_ }); graph = "Library/Bee/$($dag.Name)" }
+    }
+    throw "no C# compile in the Editor's build graph (Library/Bee/*.dag.json): open the project in the Editor once (tools/open.ps1)"
 }
 
 function Get-MSBuild {
@@ -182,7 +191,7 @@ function Invoke-CscCheck($t) {
     foreach ($s in $t.sources) { $lines.Add('"' + $s.Replace('\', '/') + '"') }
     $rspPath = Join-Path $outDir 'check.rsp'
     [IO.File]::WriteAllLines($rspPath, $lines, (New-Object Text.UTF8Encoding($false)))
-    $out = & $script:Dotnet exec $script:Csc /noconfig /shared "@$rspPath" 2>&1 | ForEach-Object { "$_" }
+    $out = & $script:Compiler.dotnet exec $script:Compiler.csc @($script:Compiler.flags) "@$rspPath" 2>&1 | ForEach-Object { "$_" }
     $code = $LASTEXITCODE
     $errs = @(Parse-Errors $out $t.assembly)
     if ($code -ne 0 -and $errs.Count -eq 0) { $errs = @(New-CheckError (($out | Select-Object -First 5) -join ' | ') $t) }
@@ -226,10 +235,10 @@ function Invoke-MSBuildCheck($t) {
     @{ ok = ($code -eq 0); errors = $errs; dll = (Join-Path $root "${out}bin\$($t.assembly).dll") }
 }
 
+$script:Compiler = $null
 if ($Backend -eq 'msbuild') { $script:MSBuild = Get-MSBuild } else {
-    $editor = Get-EditorPath
-    $script:Dotnet = Join-Path $editor 'Data\NetCoreRuntime\dotnet.exe'
-    $script:Csc = Join-Path $editor 'Data\DotNetSdkRoslyn\csc.dll'
+    $script:Compiler = Get-EditorCompiler
+    foreach ($f in @($script:Compiler.dotnet, $script:Compiler.csc)) { if (-not (Test-Path -LiteralPath $f)) { throw "$f (from $($script:Compiler.graph)) not found: was the Editor that compiled this project uninstalled? Open the project again (tools/open.ps1)" } }
 }
 
 $results = @()
@@ -262,6 +271,7 @@ $report = [ordered]@{
     ok            = ($allErrors.Count -eq 0) -and ($results.Count -gt 0) -and (@($results | Where-Object { -not $_.ok }).Count -eq 0)
     backend       = $Backend
     compileErrors = @($allErrors)
+    compiler      = if ($script:Compiler) { [ordered]@{ dotnet = $script:Compiler.dotnet.Replace('\', '/'); csc = $script:Compiler.csc; flags = @($script:Compiler.flags) } } else { $null }
     targets       = @($results)
     durationSec   = [math]::Round($total.Elapsed.TotalSeconds, 2)
 }

@@ -118,6 +118,59 @@ function Get-HarnessEditorProcess {
     $p
 }
 
+# The Editor tools/open.ps1 started for this project (Logs/harness-editor.json), while it runs. Known from the start,
+# before the Editor writes its lock file or the Pipeline descriptor (e.g. while a startup dialog waits for a person).
+function Get-HarnessLaunchedEditor {
+    $f = Join-Path $script:ProjectRoot 'Logs/harness-editor.json'
+    if (-not (Test-Path -LiteralPath $f)) { return $null }
+    try { $j = [IO.File]::ReadAllText($f) | ConvertFrom-Json } catch { return $null }
+    $p = Get-Process -Id ([int]$j.pid) -ErrorAction SilentlyContinue
+    if (-not $p -or $p.ProcessName -ne 'Unity' -or $p.HasExited) { return $null }
+    # A later process that reuses the pid of an Editor that has exited is not it.
+    try { if ([math]::Abs(($p.StartTime.ToUniversalTime() - [DateTime]::Parse($j.startedAt).ToUniversalTime()).TotalSeconds) -gt 2) { return $null } } catch { return $null }
+    $p
+}
+
+# Titles of a process's visible top-level windows: how a dialog shown before the Pipeline server is up (software
+# terms, "Enter Safe Mode?", package errors) is seen from outside. Process.MainWindowTitle misses some of them (the
+# Safe Mode prompt has no main window). Windows only for now (P-3); elsewhere an empty list.
+function Get-HarnessWindowTitles([int]$ProcessId) {
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { return @() }
+    if (-not ('AgentHarnessWindows' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
+public static class AgentHarnessWindows {
+    delegate bool EnumProc(IntPtr hwnd, IntPtr arg);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr arg);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
+    public static string[] Titles(int processId) {
+        var titles = new List<string>();
+        EnumWindows((hwnd, arg) => {
+            uint pid;
+            GetWindowThreadProcessId(hwnd, out pid);
+            if (pid == processId && IsWindowVisible(hwnd)) {
+                var text = new StringBuilder(512);
+                if (GetWindowText(hwnd, text, text.Capacity) > 0) titles.Add(text.ToString());
+            }
+            return true;
+        }, IntPtr.Zero);
+        return titles.ToArray();
+    }
+}
+'@
+    }
+    @([AgentHarnessWindows]::Titles($ProcessId))
+}
+
+function Save-HarnessLaunchedEditor([Diagnostics.Process]$Process) {
+    $f = Join-Path $script:ProjectRoot 'Logs/harness-editor.json'
+    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($f))
+    $j = [ordered]@{ pid = $Process.Id; startedAt = $Process.StartTime.ToUniversalTime().ToString('o') }
+    [IO.File]::WriteAllText($f, ($j | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+}
+
 # True while an Editor has this project open, also before its Pipeline server is up (first import, Safe Mode):
 # the Editor holds Temp/UnityLockfile exclusively.
 function Test-HarnessProjectOpen {
@@ -700,6 +753,7 @@ function Invoke-HarnessLoop {
         do { Start-Sleep -Milliseconds 200; $ping = Invoke-UnityCommand -Name 'harness_ping' -TimeoutSec 5 } while ((-not $ping.success -or $ping.result.isPlaying) -and $sw.Elapsed.TotalSeconds -lt 30)
     }
     $mark = [int]$ping.result.mark
+    if ($ping.result.unityVersion) { $report['unityVersion'] = $ping.result.unityVersion }
 
     # ---- 1. Recompile (stop immediately on errors) ----------------------------------------------------
     if (-not $NoCompile) {
@@ -795,7 +849,7 @@ function Invoke-HarnessLoop {
     $report.runtimeErrors = $runtimeErrors
     $report['warningCount'] = $warningCount
     $report.shots = @($shotObjs | Where-Object { $_.path } | ForEach-Object { $_.path })
-    $report['shotStats'] = @($shotObjs | ForEach-Object { [ordered]@{ name = $_.name; preset = $_.preset; t = $_.t; meanLuma = [math]::Round($_.meanLuma, 1); stdLuma = [math]::Round($_.stdLuma, 1); blank = $_.blank; error = $_.error } })
+    $report['shotStats'] = @($shotObjs | ForEach-Object { [ordered]@{ name = $_.name; preset = $_.preset; t = $_.t; meanLuma = [math]::Round($_.meanLuma, 1); stdLuma = [math]::Round($_.stdLuma, 1); blank = $_.blank; dark = [bool]$_.dark; error = $_.error } })
     if ($stats -and $stats.success -and $stats.result.ok) {
         $f = $stats.result.fps
         $report.fps = [ordered]@{ avg = [math]::Round($f.avg, 1); min = [math]::Round($f.min, 1); p95ms = [math]::Round($f.p95ms, 2); p99ms = [math]::Round($f.p99ms, 2); hitches = $f.hitches; cpuMainAvgMs = [math]::Round($f.cpuMainAvgMs, 2); samples = $f.samples; editorFocused = $stats.result.editorFocused }
@@ -831,7 +885,8 @@ function Save-HarnessReport {
 }
 
 Export-ModuleMember -Function Get-HarnessProjectRoot, Get-HarnessWorkRoot, Test-HarnessWorktree, Get-HarnessEndpoint, Invoke-UnityCommand,
-    Wait-UnityReachable, Get-HarnessEditorProcess, Test-HarnessProjectOpen, Get-HarnessProjectVersion, Get-HarnessInstalledEditors,
+    Wait-UnityReachable, Get-HarnessEditorProcess, Get-HarnessLaunchedEditor, Save-HarnessLaunchedEditor, Get-HarnessWindowTitles, Test-HarnessProjectOpen,
+    Get-HarnessProjectVersion, Get-HarnessInstalledEditors,
     Find-HarnessEditorExe, Read-HarnessLogTail, Invoke-HarnessProcess, Get-HarnessPowerShell, ConvertTo-HarnessArg,
     Invoke-HarnessRecompile, Get-HarnessCompileState, Wait-HarnessIdle, Enter-HarnessLock, Exit-HarnessLock, Test-HarnessReadOnly,
     Get-HarnessLastRecovery, Get-HarnessLastLandRecovery, Add-HarnessRecovery, Start-HarnessSubmit, Complete-HarnessSubmit,

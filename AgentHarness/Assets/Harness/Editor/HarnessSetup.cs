@@ -18,7 +18,7 @@ namespace Harness.Editor
     {
         static HarnessCodeOptimization()
         {
-            if (Application.isBatchMode) return;
+            if (Application.isBatchMode || AssetDatabase.IsAssetImportWorkerProcess()) return;
             if (UnityEditor.Compilation.CompilationPipeline.codeOptimization == UnityEditor.Compilation.CodeOptimization.Debug) return;
             UnityEditor.Compilation.CompilationPipeline.codeOptimization = UnityEditor.Compilation.CodeOptimization.Debug;
             Debug.Log("[Harness] Code optimization set to Debug for this Editor session (exact exception lines, stable build fingerprint)");

@@ -25,6 +25,7 @@ namespace Harness
         public float darkRatio;  // fraction of pixels with luma < 8
         public int colorBuckets; // distinct 4-bit/channel colors (4096 max)
         public bool blank;       // stdLuma < 2 or colorBuckets < 8
+        public bool dark;        // darkRatio >= 0.98: almost all black (e.g. lighting missing). Suspicious, not a failure
         public string error;
     }
 
@@ -38,7 +39,7 @@ namespace Harness
         {
             var main = Camera.main;
             if (main != null) return main;
-            foreach (var c in UnityEngine.Object.FindObjectsByType<Camera>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            foreach (var c in UnityCompat.FindObjects<Camera>(FindObjectsInactive.Exclude))
                 if (c.cameraType == CameraType.Game) return c;
             return null;
         }
@@ -153,6 +154,7 @@ namespace Harness
             r.darkRatio = (float)dark / n;
             r.colorBuckets = buckets.Count;
             r.blank = r.stdLuma < 2f || r.colorBuckets < 8;
+            r.dark = r.darkRatio >= 0.98f;
         }
 
         static void DestroySafe(UnityEngine.Object o)
