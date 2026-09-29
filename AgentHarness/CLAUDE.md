@@ -13,7 +13,7 @@
 | 2 | 수정→새로고침이 초 단위 | 컴파일 + 도메인 리로드 | Domain Reload 끔, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크 |
 | 3 | 스크린샷·콘솔·FPS를 눈/기계로 확인 | 에이전트가 화면을 못 봄 | `harness_capture/play`가 PNG + 이미지 통계, `harness_console/stats`가 JSON |
 | 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/Texture 베이크), URP Volume을 코드로 |
-| 5 | 레지스트리 구조라 병렬 작업이 쉬움 | 에디터 하나를 공유 | `GameRoot.Register` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 git worktree + `submit.ps1` 트랜잭션 |
+| 5 | 레지스트리 구조라 병렬 작업이 쉬움 | 에디터 하나를 공유 | `GameRoot.Register` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 git worktree + `submit.ps1`/`land.ps1` 트랜잭션 |
 
 모든 설계 결정의 기준: **"Three.js 환경의 어떤 성질을 복원하는가"**. URP·물리·엔진 기능을 쓰니 결과는 그 이상을 노린다.
 
@@ -35,13 +35,14 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1
 `shotStats[].blank=true`(평평/검은 화면)면 렌더가 깨진 것이다.
 
 옵션: `-Scenario tools/scenarios/x.json`, `-Out HarnessOut/x`, `-NoPlay`(편집 모드 캡처만), `-NoCompile`.
-**여러 에이전트가 동시에 작업하면** 이 폴더를 직접 고치지 말고 각자 worktree에서 `tools/submit.ps1`을 쓴다(아래 "병렬 에이전트").
+**여러 에이전트가 동시에 작업하면** 이 폴더를 직접 고치지 말고 각자 worktree에서 `tools/submit.ps1`을 쓰고, 끝나면 커밋해서
+`tools/land.ps1`로 병합한다(아래 "병렬 에이전트").
 
 ### report.json
 
 ```jsonc
 {
-  "ok": true, "stage": "done",            // 실패 시 stage = editor|compile|build|shader|play|runtime|lint|shots|submit
+  "ok": true, "stage": "done",            // 실패 시 stage = editor|compile|build|shader|play|runtime|lint|shots|submit|land
   "compileErrors": [{"file","line","msg","module"}],       // C# 에러, 또는 kind:"shader" (HLSL 에러, 상태 기반)
   "runtimeErrors": [{"type","msg","file","line","module","count","stack"}],   // count = 같은 에러 폴딩 수
   "editorErrors": [{"type","msg","count","stack"}],   // Unity/패키지 내부 에러(Assets/ 흔적 없음). 실패 사유는 아니지만 읽어볼 것
@@ -56,8 +57,12 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1
   "shotStats": [{"name","preset","t","meanLuma","stdLuma","blank","error"}],
   "lint": [{"rule","module","file","message"}], "warningCount": 0,
   "submit": {"phase","synced","kept","reverted","written","deleted","contractsAdded","metaWrittenBack",   // submit.ps1만.
-             "errorModules","restore","check"},                  // timings에 checkSec/syncSec/restoreSec 추가
-  "recoveredSubmit": {"runId","workRoot","modules","files"}      // 도중에 죽은 submit을 이번 실행이 되돌렸을 때만
+             "errorModules","restore","check","owner","takeover"},   // timings에 checkSec/syncSec/restoreSec 추가
+  "land": {"branch","into","phase","head":{"before","after"},"merged","fastForward","kept","reverted",  // land.ps1만.
+           "modules","files","stash":{"sha","paths","dropped"},"releasedOwners","errorModules","undo","restore",
+           "conflicts","missingMeta","owner","foreign","uncommitted","note","warning"},   // 거부 사유는 해당 필드에. timings에 checkSec/mergeSec/restoreSec
+  "recoveredSubmit": {"runId","workRoot","modules","files"},     // 도중에 죽은 submit을 이번 실행이 되돌렸을 때만
+  "recoveredLand": {"runId","branch","steps"}                    // 도중에 죽은 land를 이번 실행이 되돌렸을 때만
 }
 ```
 
@@ -75,8 +80,9 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1
    `Assets/Game/Contracts/`에 **추가**(기존 타입 수정 금지). `Assets/Harness/`, `tools/`는 하네스 작업일 때만 고친다.
 4. **에디터 조작은 한 번에 하나씩.** 에디터는 하나다. `tools/loop.ps1`과 `tools/uc.ps1`은 프로젝트별 시스템 뮤텍스를 잡으므로
    병렬 에이전트는 자동으로 줄을 선다(`timings.lockWaitSec`). recompile/build/play/capture를 `unity command`로 직접 호출해
-   락을 우회하지 말 것. **병렬 에이전트는 각자 git worktree에서 코드를 쓰고 `tools/submit.ps1 -Module <M>`으로 에디터에 넣는다**
-   (아래 "병렬 에이전트"). 여럿이 에디터 트리를 직접 고치면 한 명의 컴파일 에러가 모두의 루프를 막는다.
+   락을 우회하지 말 것. **병렬 에이전트는 각자 git worktree에서 코드를 쓰고 `tools/submit.ps1 -Module <M>`으로 에디터에 넣고,
+   커밋한 뒤 `tools/land.ps1`로 병합한다** (아래 "병렬 에이전트"). 여럿이 에디터 트리를 직접 고치면 한 명의 컴파일 에러가 모두의 루프를 막는다.
+   에디터 트리에서 `git merge`/`git stash`를 직접 하지 말 것 — land가 락 안에서 한다.
 5. **Domain Reload가 꺼져 있다.** 플레이 사이에 static이 유지된다. 가변 static(필드·자동 프로퍼티·이벤트, static readonly 컬렉션 포함)이 있는
    타입은 `[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)] static void ResetStatics()`에서 초기화한다.
    `harness_lint`가 검사하며 위반 시 루프는 `stage=lint`로 실패한다.
@@ -98,7 +104,8 @@ Assets/Game/<Module>/Builders/ IBuildStep 구현 (Game.<Module>.Builders.asmdef,
 Assets/Generated/, Assets/Scenes/Main.unity   빌드 산출물 (gitignore, 직접 수정 금지)
 tools/loop.ps1                 원커맨드 루프          tools/uc.ps1          커맨드 1개 호출(JSON 인자)
 tools/submit.ps1               worktree의 모듈 → 에디터 트리, 트랜잭션 루프(실패 시 되돌림)
-tools/compile-check.ps1        에디터 없는 컴파일 검사  tools/Harness.psm1    HTTP 클라이언트·락·루프·submit 저널
+tools/land.ps1                 worktree 브랜치 → 에디터 트리 브랜치로 병합, 트랜잭션 루프(실패 시 되돌림)
+tools/compile-check.ps1        에디터 없는 컴파일 검사  tools/Harness.psm1    HTTP 클라이언트·락·루프·submit/land 저널·git
 tools/scenarios/*.json         플레이 시나리오        HarnessOut/           캡처·result.json·report.json (gitignore)
 AgentScripts/                  eval_file / run_script 용 임시 C# (gitignore)
 ```
@@ -196,7 +203,7 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
   나머지는 오프스크린 렌더라 **스크린 공간 UI가 안 찍힌다**. HUD 확인은 `"screen"`을 쓴다(`tools/scenarios/screen.json`).
 - 새 게임플레이를 넣으면 `default.json`의 입력/캡처와 기대 이벤트 수를 같이 갱신한다.
 
-## 병렬 에이전트: worktree + submit (남의 컴파일 에러에 막히지 않기)
+## 병렬 에이전트: worktree + submit + land (남의 컴파일 에러에 막히지 않기)
 
 에디터는 이 폴더(에디터 트리) 하나에 묶여 있다. 여러 에이전트가 여기서 직접 코드를 고치면 한 명의 쓰다 만 코드가
 Unity 도메인 리로드를 막아 **모두의 루프가 `stage=compile`로 멈춘다.** 그래서 병렬 작업은 에이전트별 worktree에서 한다:
@@ -207,6 +214,8 @@ git worktree add ..\wt-foo -b agent/foo
 cd ..\wt-foo\AgentHarness                                                        # 이후 편집·명령은 모두 여기서
 powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Foo    # 에디터 없이 ~0.5s, 동시 실행 OK
 powershell -ExecutionPolicy Bypass -File tools/submit.ps1 -Module Foo          # 에디터 트리에서 루프(트랜잭션)
+git add -A; git commit -m "Foo: ..."                                             # submit이 되복사한 .meta까지
+powershell -ExecutionPolicy Bypass -File tools/land.ps1                         # 이 브랜치를 에디터 트리 브랜치에 병합(트랜잭션)
 ```
 
 `submit.ps1` = ① worktree 소스로 compile-check(락 없음; 실패면 아무것도 복사하지 않고 `stage=compile`, `submit.phase=check`)
@@ -222,13 +231,32 @@ worktree로 되복사(**커밋할 것**), 아니면 **백업으로 되돌리고 
 - worktree에서 `loop.ps1`은 거부된다(`stage=submit`): 에디터가 컴파일하는 건 worktree가 아니라 에디터 트리다.
   `uc.ps1`은 worktree에서도 에디터 트리의 에디터에 붙는다(JSON 안의 상대 경로는 에디터 트리 기준).
 - 시나리오는 worktree의 파일을 절대 경로로 넘기므로 worktree에서 고친 `tools/scenarios/*.json`이 그대로 쓰인다.
-- 한 모듈은 한 에이전트만 submit한다(미러링이라 마지막 submit이 이긴다). 모듈 삭제·`Assets/Harness`·`tools/`는 submit 대상이 아니다
-  (하네스 작업은 에디터 트리에서 직접).
+- **한 모듈 = 한 에이전트**(강제): submit은 모듈별로 마지막에 반영한 worktree를 `Library/Harness/submit/owners.json`에 기록한다.
+  다른 살아 있는 worktree가 올린 미병합 변경이 에디터 트리에 남아 있는 모듈은 `stage=submit`으로 거부된다(`submit.owner`).
+  그 작업이 버려졌을 때만 `-Takeover`. land가 그 브랜치의 모듈 소유를 해제한다.
+- 에디터 트리 브랜치에 그 모듈을 건드린 커밋이 있는데 worktree에 없으면 거부된다(미러링하면 병합된 작업을 되돌리게 된다) → `git merge master`.
+- 모듈 삭제·`Assets/Harness`·`tools/`는 submit 대상이 아니다(하네스 작업은 에디터 트리에서 직접). land로는 병합된다.
 - 에디터 트리 찾기: `Library/`가 없는 체크아웃이면 `git worktree list`의 메인 worktree에서 같은 하위 경로.
   git worktree가 아닌 복사본이면 `$env:AGENTHARNESS_EDITOR_ROOT`에 에디터 트리 경로를 준다.
-- 병합: submit한 파일은 메인 트리에 미커밋 사본으로 남아 `git merge agent/foo`가 "would be overwritten"으로 거부된다.
-  다른 루프가 돌지 않을 때 메인 트리에서 그 브랜치 경로만 치우고 병합한다(내용은 같다):
-  `$p = git diff --name-only HEAD...agent/foo; git stash push -u -m land-foo -- $p; git merge agent/foo` → 확인 후 `git stash drop`(stash가 생겼을 때만).
+
+### land.ps1 (병합)
+
+submit한 파일은 에디터 트리에 미커밋 사본으로 남아 그냥 `git merge agent/foo`는 "would be overwritten"으로 거부된다. `land.ps1`이 락 안에서 처리한다.
+worktree에서 인자 없이 돌리면 그 worktree의 브랜치, 에디터 트리에서는 `-Branch agent/foo`. 결과는 `HarnessOut/land/report.json`. 종료코드 0 = 병합되고 녹색.
+
+1. (락 없음) 브랜치를 체크아웃한 worktree에 미커밋 파일이 있으면 거부(`land.uncommitted`) — 커밋된 것만 병합된다. **submit이 되복사한 `.meta`도 커밋할 것.**
+2. (락) 아무것도 건드리기 전에 거부(`stage=land`): 에디터 트리가 detached/병합·리베이스 중/staged 변경 있음 ·
+   `git merge-tree`로 미리 병합해 충돌(`land.conflicts` → worktree에서 `git merge master`, 해결, 커밋, submit, 다시 land) ·
+   브랜치가 `Assets/`에 추가하는 파일·폴더의 `.meta`가 커밋 안 됨(`land.missingMeta`) · 건드리는 모듈에 다른 worktree의 미병합 submit(`land.owner`, `-Takeover`) ·
+   덮어쓸 미커밋 변경이 이 브랜치의 submit 사본(또는 같은 내용)이 아님(`land.foreign`, 예: 에디터 트리를 직접 고친 것 — 사람이 커밋·stash).
+3. 저널(`Library/Harness/land/pending.json`) → 병합이 건드리는 경로와 그 모듈의 미커밋 사본만 `git stash`
+   (stash 목록은 모든 worktree가 공유하므로 바로 `refs/agentharness/land/<runId>`로 옮긴다) → `git merge`.
+4. 에디터 트리에서 평소 루프. 녹색이면 병합 유지 + stash 버림 + 소유 해제(`land.releasedOwners`). 빨가면 `git reset --keep`으로 병합 전 커밋
+   (병합한 경로만; 다른 에이전트의 미커밋 submit은 그대로) → stash 복원 → 재컴파일(`land.undo`, `land.restore`). `-KeepOnFail`은 submit과 같다.
+
+- land가 도중에 죽어도 다음에 락을 잡는 loop/uc/submit/land가 저널로 되돌린다 → report에 `recoveredLand`.
+- 이미 병합된 브랜치는 아무것도 안 하고 녹색(`land.note`). submit했지만 브랜치에 없는 변경이 남은 모듈은 소유를 유지하고 `land.warning`.
+- git 병합이라 브랜치의 중간 커밋도 이력에 들어간다. 루프가 검증하는 건 병합 결과다.
 
 ## 에디터 없이 컴파일 체크
 
@@ -266,6 +294,10 @@ powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke -
 - 도메인 리로드 때 Pipeline 서버는 새 토큰으로 재시작한다. 그 사이 요청은 연결 끊김 또는 **401 Unauthorized**(`success` 필드 없음)를 받는다.
   `Invoke-UnityCommand`는 둘 다 `unreachable`로 돌려주고 폴러와 루프 시작 ping은 재시도한다. 락이 리로드 직후 다음 에이전트로
   넘어가는 submit 흐름에서 처음 드러났다(루프가 `stage=editor`로 실패, StrictMode 모듈이 `success` 접근에서 예외).
+- `refs/stash`는 한 저장소의 **모든 worktree가 공유**한다. 에이전트가 자기 worktree에서 `git stash pop`을 하면 다른 worktree(에디터 트리)가
+  방금 만든 stash를 가져갈 수 있다. land는 stash를 만들자마자 목록에서 빼 전용 ref에 둔다.
+- PowerShell 5.1에서 git 출력은 `Invoke-HarnessGit`(Process, UTF-8, stderr 캡처, 종료코드)로 받는다. `&` 호출은 콘솔 코드페이지로 경로가 깨지고
+  stderr가 에러 레코드가 된다. 자식 프로세스 stdin을 리다이렉트하면 .NET이 콘솔 인코딩의 BOM을 먼저 써 넣는다(`--stdin-paths` 첫 경로가 깨짐) → 인자로 넘긴다.
 
 ## 문제 해결
 
@@ -273,7 +305,13 @@ powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke -
   `unity pipeline list`, `Logs/Editor.log`에서 `error CS` 확인 후 소스 수정 → 에디터 재시작. `editor_status`가 `blocked_by_dialog`면 사람에게 다이얼로그를 닫아 달라고 한다.
 - 플레이가 끝나지 않음: 시나리오 타임아웃(duration+70s) 후 자동 종료. 수동: `tools/uc.ps1 editor_stop`.
 - 빌드 fingerprint가 매번 바뀜: 빌더가 비결정적(시드 없는 랜덤, 시간, Dictionary 순회 순서 등). `Library/Harness/fingerprint.txt` 두 개를 diff.
-- `stage=submit`: worktree에서 `loop.ps1`을 돌렸거나(→ `submit.ps1`), 기존 Contracts 파일을 고쳤거나(추가만 허용), `-Module` 폴더가 없다. `error`를 읽는다.
+- `stage=submit`: worktree에서 `loop.ps1`을 돌렸거나(→ `submit.ps1`), 기존 Contracts 파일을 고쳤거나(추가만 허용), `-Module` 폴더가 없거나,
+  다른 worktree가 그 모듈을 미병합 상태로 올려 두었거나(`submit.owner`), 에디터 트리 브랜치에 이 worktree에 없는 그 모듈 커밋이 있다(→ `git merge master`). `error`를 읽는다.
 - report에 `recoveredSubmit`: 이전 submit이 도중에 죽어 이번 실행이 되돌렸다. 그 에이전트는 다시 submit하면 된다.
   되돌리기가 실패하면 `Library/Harness/submit/pending.json`과 같은 폴더의 `<runId>/` 백업을 본다.
-- 하네스 상태 파일: `Library/Harness/`(play_state.json, console.ndjson, compile.json, buildcache.json, fingerprint.txt, submit/).
+- `stage=land`: `error`와 사유 필드(`land.uncommitted/conflicts/missingMeta/owner/foreign`)를 읽는다. 이때 에디터 트리는 손대지 않은 상태다.
+- report에 `recoveredLand`: 이전 land가 도중에 죽어 이번 실행이 병합을 되돌렸다. 그 에이전트는 다시 land하면 된다. 되돌리기가 실패하면
+  저널이 `Library/Harness/land/failed-<runId>.json`으로 옮겨지고(`recoveredLand.error`), stash는 `refs/agentharness/land/<runId>`에 남는다
+  (`git stash apply <sha>`로 직접 복원).
+- 하네스 상태 파일: `Library/Harness/`(play_state.json, console.ndjson, compile.json, buildcache.json, fingerprint.txt,
+  submit/(pending.json, owners.json), land/).

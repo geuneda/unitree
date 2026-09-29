@@ -110,6 +110,7 @@ function Wait-UnityReachable {
 # machine-wide mutex per project, so parallel agents queue instead of interleaving.
 $script:Mutex = $null
 $script:LastRecovery = $null
+$script:LastLandRecovery = $null
 $script:ReadOnlyCommands = @('harness_ping', 'harness_console', 'harness_play_status', 'harness_stats', 'harness_lint', 'harness_shaders',
     'recompile_status', 'editor_status', 'console', 'console_status', 'get_scene_hierarchy', 'find_gameobjects',
     'list_open_scenes', 'get_component_properties', 'package_list', 'test_status', 'build_status')
@@ -130,6 +131,7 @@ function Enter-HarnessLock {
     $script:Mutex = $m
     $wait = [math]::Round($sw.Elapsed.TotalSeconds, 2)
     $script:LastRecovery = Restore-HarnessPendingSubmit
+    $script:LastLandRecovery = Restore-HarnessPendingLand
     return $wait
 }
 
@@ -141,6 +143,13 @@ function Exit-HarnessLock {
 }
 
 function Get-HarnessLastRecovery { $script:LastRecovery }
+function Get-HarnessLastLandRecovery { $script:LastLandRecovery }
+
+# recoveredSubmit / recoveredLand fields for a report, when this lock holder rolled one back.
+function Add-HarnessRecovery([System.Collections.IDictionary]$Report) {
+    if ($script:LastRecovery) { $Report['recoveredSubmit'] = $script:LastRecovery }
+    if ($script:LastLandRecovery) { $Report['recoveredLand'] = $script:LastLandRecovery }
+}
 
 # ---- Submit transactions (tools/submit.ps1, G5-2) ------------------------------------------------------
 # submit.ps1 copies an agent worktree's module folders into the Editor tree while holding the lock. Before the first
@@ -221,6 +230,239 @@ function Restore-HarnessPendingSubmit {
         return [ordered]@{ runId = $j.runId; workRoot = $j.workRoot; modules = @($j.modules); startedAt = $j.startedAt; files = @($j.entries).Count }
     } catch {
         return [ordered]@{ error = "could not roll back the interrupted submit in $script:JournalPath : $($_.Exception.Message)" }
+    }
+}
+
+# ---- git (tools/land.ps1, submit ownership) -------------------------------------------------------------------
+# git runs through Process, not the call operator: UTF-8 output (non-ASCII paths), stderr captured without PowerShell
+# 5.1 turning it into errors, exit code returned. Paths come back unquoted (core.quotePath=false).
+function ConvertTo-HarnessArg([string]$a) {
+    if ($a -ne '' -and $a -notmatch '[\s"]') { return $a }
+    '"' + (($a -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
+}
+
+function Invoke-HarnessGit {
+    param([Parameter(Mandatory, Position = 0)][string]$Dir, [Parameter(Mandatory, Position = 1)][string[]]$Arguments, [switch]$Check)
+    $psi = New-Object Diagnostics.ProcessStartInfo
+    $psi.FileName = 'git'
+    $psi.Arguments = (@('-C', $Dir, '-c', 'core.quotePath=false') + $Arguments | ForEach-Object { ConvertTo-HarnessArg $_ }) -join ' '
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $utf8 = New-Object Text.UTF8Encoding($false)
+    $psi.StandardOutputEncoding = $utf8
+    $psi.StandardErrorEncoding = $utf8
+    $psi.EnvironmentVariables['GIT_TERMINAL_PROMPT'] = '0'
+    $psi.EnvironmentVariables['GIT_MERGE_AUTOEDIT'] = 'no'
+    $psi.EnvironmentVariables['LC_ALL'] = 'C'
+    $p = [Diagnostics.Process]::Start($psi)
+    $p.StandardInput.Close()   # nothing to read (.NET may have written the console encoding's BOM to it already)
+    $out = $p.StandardOutput.ReadToEndAsync()
+    $err = $p.StandardError.ReadToEndAsync()
+    $p.WaitForExit()
+    $r = [pscustomobject]@{ code = $p.ExitCode; out = $out.Result; err = $err.Result.Trim() }
+    $p.Dispose()
+    if ($Check -and $r.code -ne 0) { throw "git $($Arguments -join ' ') failed ($($r.code)): $($r.err) $($r.out.Trim())" }
+    $r
+}
+
+# Tokens of NUL-terminated (-z) output.
+function Split-HarnessZ([string]$s) { @($s.Split([char]0) | Where-Object { $_ -ne '' }) }
+
+# Uncommitted state of a repository: repo-relative path -> XY ('??' untracked, ' M', ' D', 'M ', ...).
+function Get-HarnessGitStatus([string]$Repo) {
+    $h = @{}
+    foreach ($t in @(Split-HarnessZ (Invoke-HarnessGit $Repo @('status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames') -Check).out)) {
+        $h[$t.Substring(3)] = $t.Substring(0, 2)
+    }
+    $h
+}
+
+function Test-HarnessSamePath([string]$a, [string]$b) {
+    if (-not $a -or -not $b) { return $false }
+    [IO.Path]::GetFullPath($a).TrimEnd('\', '/') -ieq [IO.Path]::GetFullPath($b).TrimEnd('\', '/')
+}
+
+# Top level of the Editor tree's repository (what land.ps1 merges into; forward slashes).
+$script:RepoRoot = $null
+function Get-HarnessRepoRoot {
+    if ($null -eq $script:RepoRoot) { $script:RepoRoot = (Invoke-HarnessGit $script:ProjectRoot @('rev-parse', '--show-toplevel') -Check).out.Trim() }
+    $script:RepoRoot
+}
+
+# A file for --pathspec-from-file --pathspec-file-nul (no command-line length limit, no glob magic).
+function Write-HarnessPathspec([string]$File, [string[]]$Paths) {
+    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($File))
+    $text = (@($Paths | ForEach-Object { ":(literal)$_" }) -join [char]0) + [char]0
+    [IO.File]::WriteAllText($File, $text, (New-Object Text.UTF8Encoding($false)))
+}
+
+# Blob ids of working-tree files as git would store them (eol-normalized), repo-relative path -> id or $null (absent).
+function Get-HarnessContentIds([string]$Repo, [string[]]$Paths) {
+    $h = @{}
+    foreach ($p in $Paths) { $h[$p] = $null }
+    $exist = @($Paths | Where-Object { [IO.File]::Exists([IO.Path]::Combine($Repo, $_)) })
+    $i = 0
+    while ($i -lt $exist.Count) {
+        # Arguments, in chunks under the Windows command-line limit.
+        $chunk = @(); $len = 0
+        while ($i -lt $exist.Count -and ($chunk.Count -eq 0 -or $len + $exist[$i].Length -lt 16000)) { $chunk += $exist[$i]; $len += $exist[$i].Length + 3; $i++ }
+        $ids = @((Invoke-HarnessGit $Repo (@('hash-object', '--') + $chunk) -Check).out -split "`n" | Where-Object { $_ })
+        for ($k = 0; $k -lt $chunk.Count; $k++) { $h[$chunk[$k]] = $ids[$k].Trim() }
+    }
+    $h
+}
+
+# ---- Module owners: one module = one agent (G5-5) ----------------------------------------------------------------
+# submit.ps1 records which worktree last kept each module in the Editor tree; land.ps1 releases the modules of the
+# branch it landed. A module whose Editor-tree copy still has un-landed changes from another live worktree is refused.
+$script:OwnersPath = Join-Path $script:SubmitDir 'owners.json'
+
+# module -> @{ workRoot; branch; runId; at }
+function Get-HarnessOwners {
+    $h = @{}
+    if (Test-Path -LiteralPath $script:OwnersPath) {
+        try { $o = [IO.File]::ReadAllText($script:OwnersPath) | ConvertFrom-Json; foreach ($p in $o.PSObject.Properties) { $h[$p.Name] = $p.Value } } catch { }
+    }
+    $h
+}
+
+function Save-HarnessOwners([hashtable]$Owners) {
+    $o = [ordered]@{}
+    foreach ($k in @($Owners.Keys | Sort-Object)) { $o[$k] = $Owners[$k] }
+    [void][IO.Directory]::CreateDirectory($script:SubmitDir)
+    $tmp = "$script:OwnersPath.tmp"
+    [IO.File]::WriteAllText($tmp, ($o | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $tmp -Destination $script:OwnersPath -Force
+}
+
+# Editor-tree files under Assets/Game/<Module> (and its folder .meta) that differ from HEAD = submitted, not landed.
+function Get-HarnessModuleChanges([string]$Module) {
+    $r = Invoke-HarnessGit $script:ProjectRoot @('status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames', '--', "Assets/Game/$Module", "Assets/Game/$Module.meta") -Check
+    @(Split-HarnessZ $r.out | ForEach-Object { $_.Substring(3) })
+}
+
+# ---- Land transactions (tools/land.ps1, G5-5) -----------------------------------------------------------------
+# land.ps1 merges an agent branch into the Editor tree's branch under the lock. The Editor tree holds uncommitted
+# copies of what was submitted, which make git refuse the merge, so it stashes exactly the paths the merge touches
+# (plus leftovers in the merged modules), merges, and runs the loop. A journal (Library/Harness/land/pending.json)
+# lives from before the stash until the land is kept or undone; the next lock holder undoes a land that died.
+$script:LandDir = Join-Path $script:ProjectRoot 'Library\Harness\land'
+$script:LandJournalPath = Join-Path $script:LandDir 'pending.json'
+
+function Save-HarnessLandJournal {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Journal)
+    [void][IO.Directory]::CreateDirectory($script:LandDir)
+    $tmp = "$script:LandJournalPath.tmp"
+    [IO.File]::WriteAllText($tmp, ($Journal | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $tmp -Destination $script:LandJournalPath -Force
+}
+
+function Complete-HarnessLand {
+    if (Test-Path -LiteralPath $script:LandJournalPath) { Remove-Item -LiteralPath $script:LandJournalPath -Force }
+}
+
+# refs/stash is shared by every worktree of the repository: an agent's 'git stash pop' could take the land's entry.
+# So land.ps1 moves its stash out of the list right away, to a private ref (the journal also records the sha).
+function Get-HarnessLandStashRef([string]$RunId) { "refs/agentharness/land/$RunId" }
+
+# The land's entry while it is still in the stash list (@{ sha; ref = 'stash@{n}' }), found by its message.
+function Find-HarnessLandStash([string]$Repo, [string]$RunId) {
+    $list = Invoke-HarnessGit $Repo @('stash', 'list', '--format=%H%x00%gd%x00%gs')
+    if ($list.code -ne 0) { return $null }
+    foreach ($line in @($list.out -split "`n")) {
+        $f = $line.Split([char]0)
+        if ($f.Count -ge 3 -and $f[2] -like "*agentharness-land $RunId *") { return [pscustomobject]@{ sha = $f[0]; ref = $f[1] } }
+    }
+    $null
+}
+
+# HEAD is what the land made: a fast-forward to the branch, or a merge commit (preHead, branch).
+function Test-HarnessLandMerge([string]$Repo, [string]$Head, $Journal) {
+    if ($Head -eq $Journal.branchSha) { return $true }
+    $ids = @((Invoke-HarnessGit $Repo @('rev-list', '--parents', '-n', '1', $Head)).out.Trim() -split ' ')
+    $ids.Count -eq 3 -and $ids[1] -eq $Journal.preHead -and $ids[2] -eq $Journal.branchSha
+}
+
+# Undo a land: abort a half-done merge, reset HEAD to the pre-land commit touching only the merged paths (other
+# uncommitted work in the tree stays), drop .meta files Unity generated for what the merge added, re-apply the stash.
+# Returns the steps taken. Throws when the tree is not in a state it can undo safely.
+function Undo-HarnessLand {
+    param([Parameter(Mandatory)]$Journal)
+    $repo = $Journal.repo
+    $steps = @()
+    if ((Invoke-HarnessGit $repo @('rev-parse', '-q', '--verify', 'MERGE_HEAD')).code -eq 0) {
+        [void](Invoke-HarnessGit $repo @('merge', '--abort') -Check)
+        $steps += 'merge --abort'
+    }
+    $head = (Invoke-HarnessGit $repo @('rev-parse', 'HEAD') -Check).out.Trim()
+    if ($head -ne $Journal.preHead) {
+        if (-not (Test-HarnessLandMerge $repo $head $Journal)) {
+            throw "HEAD is $head, neither the pre-land commit $($Journal.preHead) nor its merge with $($Journal.branchSha); not resetting (inspect by hand)"
+        }
+        # Edits to merged files made during the land (Unity rewriting a .meta, ...) go away with the merge.
+        $status = Get-HarnessGitStatus $repo
+        $dirty = @(@($Journal.paths) | Where-Object { $status.ContainsKey($_) })
+        foreach ($p in @($dirty | Where-Object { $status[$_] -eq '??' })) { [IO.File]::Delete([IO.Path]::Combine($repo, $p)) }
+        $tracked = @($dirty | Where-Object { $status[$_] -ne '??' })
+        if ($tracked.Count -gt 0) {
+            $ps = Join-Path $script:LandDir "$($Journal.runId).undo.paths"
+            Write-HarnessPathspec $ps $tracked
+            [void](Invoke-HarnessGit $repo @('restore', '--source=HEAD', '--staged', '--worktree', "--pathspec-from-file=$ps", '--pathspec-file-nul') -Check)
+            Remove-Item -LiteralPath $ps -Force
+        }
+        [void](Invoke-HarnessGit $repo @('reset', '--keep', $Journal.preHead) -Check)
+        $steps += "reset --keep $($Journal.preHead)"
+    }
+    # .meta files Unity generated during the land for files/folders the merge added (those are gone again).
+    $status = Get-HarnessGitStatus $repo
+    foreach ($p in @(@($Journal.added) + @(@($Journal.newDirs) | Sort-Object Length -Descending))) {
+        if (-not $p) { continue }
+        $abs = [IO.Path]::Combine($repo, $p)
+        if ([IO.Directory]::Exists($abs) -and @([IO.Directory]::GetFileSystemEntries($abs)).Count -eq 0) { [IO.Directory]::Delete($abs) }
+        if (-not [IO.File]::Exists($abs) -and -not [IO.Directory]::Exists($abs) -and $status.ContainsKey("$p.meta") -and $status["$p.meta"] -eq '??') {
+            [IO.File]::Delete("$abs.meta")
+        }
+    }
+    $listed = Find-HarnessLandStash $repo $Journal.runId   # still listed: the land died right after 'stash push'
+    $sha = if ($Journal.stashSha) { $Journal.stashSha } elseif ($listed) { $listed.sha } else { $null }
+    if ($sha) {
+        # git will not re-create a stashed untracked file that exists again: remove identical copies, refuse others.
+        $u = Invoke-HarnessGit $repo @('ls-tree', '-r', '-z', '--name-only', "$sha^3")
+        if ($u.code -eq 0) {
+            foreach ($p in @(Split-HarnessZ $u.out)) {
+                $abs = [IO.Path]::Combine($repo, $p)
+                if (-not [IO.File]::Exists($abs)) { continue }
+                $now = (Invoke-HarnessGit $repo @('hash-object', '--', $p) -Check).out.Trim()
+                $was = (Invoke-HarnessGit $repo @('rev-parse', "$sha^3:$p") -Check).out.Trim()
+                if ($now -ne $was) { throw "$p exists and differs from its stashed copy; stash $sha was not applied (git stash apply $sha by hand)" }
+                [IO.File]::Delete($abs)
+            }
+        }
+        [void](Invoke-HarnessGit $repo @('stash', 'apply', $sha) -Check)
+        if ($listed) { [void](Invoke-HarnessGit $repo @('stash', 'drop', $listed.ref) -Check) }
+        [void](Invoke-HarnessGit $repo @('update-ref', '-d', (Get-HarnessLandStashRef $Journal.runId)))
+        $steps += "stash apply $sha"
+    }
+    Complete-HarnessLand
+    $steps
+}
+
+# Undo a land that died while holding the lock. Call only while holding the lock (Enter-HarnessLock does).
+function Restore-HarnessPendingLand {
+    if (-not (Test-Path -LiteralPath $script:LandJournalPath)) { return $null }
+    $j = $null
+    try {
+        $j = [IO.File]::ReadAllText($script:LandJournalPath) | ConvertFrom-Json
+        $steps = Undo-HarnessLand $j
+        return [ordered]@{ runId = $j.runId; branch = $j.branch; startedAt = $j.startedAt; steps = @($steps) }
+    } catch {
+        # Park the journal instead of failing every later lock holder on it.
+        $parked = Join-Path $script:LandDir ('failed-' + $(if ($j) { $j.runId } else { 'unknown' }) + '.json')
+        try { Move-Item -LiteralPath $script:LandJournalPath -Destination $parked -Force } catch { }
+        return [ordered]@{ error = "could not undo the interrupted land: $($_.Exception.Message). Journal moved to $parked" }
     }
 }
 
@@ -512,5 +754,8 @@ function Save-HarnessReport {
 
 Export-ModuleMember -Function Get-HarnessProjectRoot, Get-HarnessWorkRoot, Test-HarnessWorktree, Get-HarnessEndpoint, Invoke-UnityCommand,
     Wait-UnityReachable, Invoke-HarnessRecompile, Get-HarnessCompileState, Wait-HarnessIdle, Enter-HarnessLock, Exit-HarnessLock,
-    Test-HarnessReadOnly, Get-HarnessLastRecovery, Start-HarnessSubmit, Complete-HarnessSubmit, Undo-HarnessSubmit,
-    Invoke-HarnessLoop, Save-HarnessReport
+    Test-HarnessReadOnly, Get-HarnessLastRecovery, Get-HarnessLastLandRecovery, Add-HarnessRecovery, Start-HarnessSubmit,
+    Complete-HarnessSubmit, Undo-HarnessSubmit, Invoke-HarnessLoop, Save-HarnessReport,
+    Invoke-HarnessGit, Split-HarnessZ, Get-HarnessGitStatus, Test-HarnessSamePath, Get-HarnessRepoRoot, Write-HarnessPathspec,
+    Get-HarnessContentIds, Get-HarnessOwners, Save-HarnessOwners, Get-HarnessModuleChanges,
+    Save-HarnessLandJournal, Complete-HarnessLand, Get-HarnessLandStashRef, Find-HarnessLandStash, Undo-HarnessLand

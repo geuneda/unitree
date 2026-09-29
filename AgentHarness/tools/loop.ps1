@@ -38,8 +38,7 @@ if (Test-HarnessWorktree) {
 $timings['lockWaitSec'] = Enter-HarnessLock
 try {
     $report = Invoke-HarnessLoop -Scenario $Scenario -OutDir $outAbs -NoPlay:$NoPlay -NoCompile:$NoCompile -TimeoutSec $TimeoutSec -Timings $timings
-    $recovered = Get-HarnessLastRecovery
-    if ($recovered) { $report['recoveredSubmit'] = $recovered }
+    Add-HarnessRecovery $report
 } finally { Exit-HarnessLock }
 Save-HarnessReport $report $outAbs $clock $timings
 exit $(if ($report.ok) { 0 } else { 1 })

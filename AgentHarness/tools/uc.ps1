@@ -21,6 +21,8 @@ if (-not (Test-HarnessReadOnly $Command)) {
     [void](Enter-HarnessLock)
     $rec = Get-HarnessLastRecovery
     if ($rec) { [Console]::Error.WriteLine("uc.ps1: rolled back an interrupted submit: $($rec | ConvertTo-Json -Compress)") }
+    $rec = Get-HarnessLastLandRecovery
+    if ($rec) { [Console]::Error.WriteLine("uc.ps1: undid an interrupted land: $($rec | ConvertTo-Json -Compress)") }
 }
 try { $r = Invoke-UnityCommand -Name $Command -Params $params -TimeoutSec $TimeoutSec }
 finally { Exit-HarnessLock }

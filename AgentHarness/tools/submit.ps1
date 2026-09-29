@@ -14,6 +14,12 @@
      holder (loop.ps1 / uc.ps1 / submit.ps1) rolls it back from the journal.
   So one agent's broken code never stays in the Editor tree and never blocks another agent's loop.
 
+  Refused under the lock (stage=submit), before anything is copied (G5-5):
+  - the Editor tree's branch has commits touching the module that this worktree lacks (the mirror would revert
+    landed work): git merge <that branch> in the worktree first;
+  - the module's Editor-tree copy has un-landed changes submitted from another live worktree (one module = one
+    agent; Library/Harness/submit/owners.json). -Takeover overrides. tools/land.ps1 releases a branch's modules.
+
 .EXAMPLE
   git worktree add ..\wt-foo -b agent/foo            # once per agent, from the checkout the Editor has open
   # work only in ..\wt-foo\AgentHarness\Assets\Game\Foo\, then from ..\wt-foo\AgentHarness:
@@ -27,6 +33,7 @@ param(
     [switch]$NoPlay,
     [switch]$KeepOnFail,
     [switch]$SkipCheck,   # skip step 1 (the transaction still protects the Editor tree; only for testing that)
+    [switch]$Takeover,    # submit over another worktree's un-landed changes to the module
     [int]$TimeoutSec = 180
 )
 $ErrorActionPreference = 'Stop'
@@ -111,6 +118,15 @@ if (-not $SkipCheck) {
     }
 }
 
+# The worktree's commit and branch (none for a plain copy of the project: the checks that need them are skipped).
+$wtHead = $null; $wtBranch = $null
+$g = Invoke-HarnessGit $work @('rev-parse', 'HEAD')
+if ($g.code -eq 0) {
+    $wtHead = $g.out.Trim()
+    $g = Invoke-HarnessGit $work @('symbolic-ref', '-q', '--short', 'HEAD')
+    if ($g.code -eq 0) { $wtBranch = $g.out.Trim() }
+}
+
 # ---- 2-4. Under the Editor lock: sync, loop, keep or revert ----------------------------------------------
 $timings['lockWaitSec'] = Enter-HarnessLock
 $report = $null
@@ -118,6 +134,35 @@ $journal = $null
 try {
     $recovered = Get-HarnessLastRecovery
     if ($recovered) { $sub['recoveredSubmit'] = $recovered }
+    $recovered = Get-HarnessLastLandRecovery
+    if ($recovered) { $sub['recoveredLand'] = $recovered }
+
+    # Never mirror over landed work this worktree lacks, nor over another live worktree's un-landed submit.
+    $refusal = $null
+    $editorHead = Invoke-HarnessGit $root @('rev-parse', 'HEAD')
+    $into = (Invoke-HarnessGit $root @('symbolic-ref', '-q', '--short', 'HEAD')).out.Trim()
+    $owners = Get-HarnessOwners
+    foreach ($m in $Module) {
+        if ($wtHead -and $editorHead.code -eq 0) {
+            $lg = Invoke-HarnessGit $root @('log', '--format=%h %s', '-n', '5', "$wtHead..$($editorHead.out.Trim())", '--', "Assets/Game/$m", "Assets/Game/$m.meta") -Check
+            $behind = @($lg.out -split "`n" | Where-Object { $_.Trim() })
+            if ($behind.Count -gt 0) {
+                $refusal = "the Editor tree's branch ($into) has commits touching Assets/Game/$m that this worktree does not have: $($behind -join ' | '). Submitting would revert them in the Editor tree. Run 'git merge $into' here first."
+                break
+            }
+        }
+        $o = $owners[$m]
+        if ($o -and -not (Test-HarnessSamePath $o.workRoot $work) -and (Test-Path -LiteralPath $o.workRoot)) {
+            $pending = @(Get-HarnessModuleChanges $m)
+            if ($pending.Count -gt 0) {
+                $info = [ordered]@{ module = $m; workRoot = $o.workRoot; branch = $o.branch; at = $o.at; pendingFiles = $pending.Count }
+                if ($Takeover) { $sub['takeover'] = $info; continue }
+                $sub['owner'] = $info
+                $refusal = "Assets/Game/$m has un-landed changes ($($pending.Count) files) submitted from another worktree: $($o.workRoot) (branch $($o.branch), $($o.at)). One module = one agent: leave it to that agent (it lands with tools/land.ps1), or pass -Takeover if that work is abandoned."
+                break
+            }
+        }
+    }
 
     # Plan against the Editor tree as it is now (other submits may have landed while we waited).
     $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -155,7 +200,10 @@ try {
     }
     foreach ($d in @(Get-CreatedDirs @(Get-RelDirs $work 'Assets/Game/Contracts'))) { [void]$created.Add($d) }
 
-    if ($conflicts.Count -gt 0) {
+    if ($refusal) {
+        $sub.contractsAdded = @()
+        $report = New-FailReport 'submit' $refusal
+    } elseif ($conflicts.Count -gt 0) {
         $sub.contractsAdded = @()
         $report = New-FailReport 'submit' "Assets/Game/Contracts is add-only, but these files differ from the Editor tree: $($conflicts -join ', '). Add a new file instead of changing one, or update the worktree (git merge master)."
     } else {
@@ -195,6 +243,10 @@ try {
             Complete-HarnessSubmit $journal
             $journal = $null
             $sub.kept = $true
+            # This worktree now owns the modules' un-landed Editor-tree copies (released by tools/land.ps1).
+            $owners = Get-HarnessOwners
+            foreach ($m in $Module) { $owners[$m] = [ordered]@{ workRoot = $work.Replace('\', '/'); branch = $wtBranch; runId = $runId; at = (Get-Date).ToString('o') } }
+            Save-HarnessOwners $owners
             # Copy the .meta files Unity generated for new files/folders back, so the agent commits stable GUIDs.
             $back = @()
             $cands = @($sub.contractsAdded | ForEach-Object { "$_.meta" }) + @($created | ForEach-Object { "$_.meta" })
