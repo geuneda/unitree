@@ -82,6 +82,12 @@ namespace Harness
         /// </summary>
         public string[] knownErrors = Array.Empty<string>();
 
+        /// <summary>
+        /// Folder (from the project root) of the golden images loop shots are compared with (G3-4):
+        /// &lt;goldenRoot&gt;/&lt;Unity version&gt;/&lt;scenario name&gt;/&lt;shot file&gt;.png. Written by tools/loop.ps1 -UpdateGolden.
+        /// </summary>
+        public string goldenRoot = "golden";
+
         [NonSerialized] public string loadError;
         [NonSerialized] public bool fromFile;
 
@@ -166,6 +172,7 @@ namespace Harness
             if (captureSize == null || captureSize.Length != 2 || captureSize[0] <= 0 || captureSize[1] <= 0) captureSize = Array.Empty<int>();
             generatedRoot = N(generatedRoot);
             buildScene = N(buildScene);
+            goldenRoot = N(goldenRoot).Length > 0 ? N(goldenRoot) : "golden";
             playScene = string.IsNullOrWhiteSpace(playScene) ? "first" : playScene.Trim().Replace('\\', '/');
             setup = string.IsNullOrWhiteSpace(setup) ? "attach" : setup.Trim().ToLowerInvariant();
         }

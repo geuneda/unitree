@@ -271,12 +271,14 @@ namespace Harness
         {
             if (m_Finished || !m_Ready) return;
             var st = ScenarioTime;
+            foreach (var s in m_Sequences.ToArray())
+                if (Time.frameCount >= s.nextFrame) CaptureFrame(s, st);
             while (m_NextCapture < m_Captures.Length && m_Captures[m_NextCapture].t <= st)
             {
                 DoCapture(m_Captures[m_NextCapture], m_NextCapture, st);
                 m_NextCapture++;
             }
-            if (st >= m_Scenario.durationSec && m_NextCapture >= m_Captures.Length && m_NextEvent >= m_Timeline.Count)
+            if (st >= m_Scenario.durationSec && m_NextCapture >= m_Captures.Length && m_NextEvent >= m_Timeline.Count && m_Sequences.Count == 0)
             {
                 if (m_PendingScreen > 0 && m_Wall.Elapsed.TotalSeconds - m_ScreenRequestedAt < 3.0) return; // let end-of-frame captures land
                 foreach (var (label, path, t) in m_ScreenQueue)
@@ -480,7 +482,12 @@ namespace Harness
             {
                 var screenLabel = !string.IsNullOrEmpty(c.name) ? c.name : "screen";
                 var screenPath = Path.Combine(m_OutDir, $"shot{index}_{Sanitize(screenLabel)}.png").Replace('\\', '/');
-                StartCoroutine(CaptureScreen(screenLabel, screenPath, st));
+                if (c.frames > 1)
+                {
+                    m_Shots.Add(new ShotResult { name = screenLabel, preset = "screen", path = screenPath, t = st, error = "\"frames\" (a sequence) is not supported with preset \"screen\": use \"main\" or a shot name" });
+                    return;
+                }
+                StartCoroutine(CaptureScreen(screenLabel, screenPath, st, c.golden));
                 return;
             }
 
@@ -508,26 +515,144 @@ namespace Harness
 
             var label = !string.IsNullOrEmpty(c.name) ? c.name : pose != null ? pose.name : !string.IsNullOrEmpty(c.camera) ? c.camera : "main";
             var path = Path.Combine(m_OutDir, $"shot{index}_{Sanitize(label)}.png").Replace('\\', '/');
+            var preset = pose == null ? (string.IsNullOrEmpty(c.camera) ? "main" : "camera") : pose.source == "scenario" ? "pose" : pose.name;
+            if (error == null && pose != null && pose.source != "scenario") m_UsedPresets.Add(pose.name);
+            if (error == null && c.frames > 1)
+            {
+                var seq = new Sequence { capture = c, label = label, path = path, preset = preset, template = template, pose = pose, count = c.frames, every = Mathf.Max(1, c.every) };
+                m_Sequences.Add(seq);
+                CaptureFrame(seq, st);
+                return;
+            }
             ShotResult r;
             if (error != null)
                 r = new ShotResult { name = label, path = path, error = error };
-            else if (pose != null)
-            {
-                if (pose.source != "scenario") m_UsedPresets.Add(pose.name);
-                r = HarnessCapture.Capture(template, pose, m_Scenario.width, m_Scenario.height, path, c.ui);
-                if (pose.source == "scenario") r.preset = "pose";
-            }
             else
             {
-                var tr = template.transform;
-                r = HarnessCapture.Capture(template, tr.position, tr.rotation, template.fieldOfView, m_Scenario.width, m_Scenario.height, path, c.ui);
-                r.preset = string.IsNullOrEmpty(c.camera) ? "main" : "camera";
+                PoseOf(template, pose, out var position, out var rotation, out var fov);
+                r = HarnessCapture.Capture(template, position, rotation, fov, m_Scenario.width, m_Scenario.height, path, c.ui);
+                r.preset = preset;
             }
             r.name = label;
             r.t = st;
+            r.golden = c.golden;
+            r.ignore = c.ignore ?? Array.Empty<ShotRect>();
             HarnessCapture.AddHints(r, template, c.ui);
             m_Shots.Add(r);
             m_CapturedLastFrame = true;
+        }
+
+        /// <summary>A shot pose, or the camera's own pose (it follows the camera frame after frame).</summary>
+        static void PoseOf(Camera template, ShotPose pose, out Vector3 position, out Quaternion rotation, out float fov)
+        {
+            if (pose != null)
+            {
+                position = pose.position;
+                rotation = pose.rotation;
+                fov = pose.fieldOfView > 0f ? pose.fieldOfView : template.fieldOfView;
+                return;
+            }
+            var tr = template.transform;
+            position = tr.position;
+            rotation = tr.rotation;
+            fov = template.fieldOfView;
+        }
+
+        // ---- sequences ("frames" > 1, G3-3) -------------------------------------------------------------------------
+
+        sealed class Sequence
+        {
+            public ScenarioCapture capture;
+            public string label, path, preset;
+            public Camera template;
+            public ShotPose pose;
+            public int count, every, taken, nextFrame;
+            public ContactSheet sheet;
+            public Color32[] previous;
+            public ShotResult result;
+            public double luma, std;
+            public float renderMs;
+            public readonly List<float> times = new List<float>();
+            public readonly List<float> motion = new List<float>();
+        }
+
+        readonly List<Sequence> m_Sequences = new List<Sequence>();
+
+        /// <summary>One frame of a sequence into its contact sheet; the sheet is written after the last one.</summary>
+        void CaptureFrame(Sequence s, float st)
+        {
+            m_CapturedLastFrame = true;
+            if (s.template == null)
+            {
+                CompleteSequence(s, $"the camera was destroyed after {s.taken} of {s.count} frames");
+                return;
+            }
+            PoseOf(s.template, s.pose, out var position, out var rotation, out var fov);
+            var r = HarnessCapture.Render(s.template, position, rotation, fov, m_Scenario.width, m_Scenario.height, s.capture.ui, out var px);
+            s.renderMs += r.renderMs;
+            if (px == null)
+            {
+                if (s.result == null) s.result = r;
+                CompleteSequence(s, r.error ?? "capture failed");
+                return;
+            }
+            if (s.result == null)
+            {
+                s.result = r;
+                s.sheet = new ContactSheet(s.count, r.width, r.height);
+            }
+            else
+            {
+                var a = s.result;
+                a.blank |= r.blank;
+                a.dark |= r.dark;
+                a.magenta |= r.magenta;
+                a.shadersCompiling |= r.shadersCompiling;
+                a.magentaRatio = Mathf.Max(a.magentaRatio, r.magentaRatio);
+                a.darkRatio = Mathf.Max(a.darkRatio, r.darkRatio);
+                a.colorBuckets = Mathf.Min(a.colorBuckets, r.colorBuckets);
+                a.ui = r.ui;
+                a.cameras = r.cameras;
+                a.drawn = r.drawn;
+                a.uiError = a.uiError ?? r.uiError;
+            }
+            s.luma += r.meanLuma;
+            s.std += r.stdLuma;
+            if (s.previous != null) s.motion.Add((float)Math.Round(HarnessCapture.LumaDifference(s.previous, px), 3));
+            s.previous = px;
+            s.sheet.Add(s.taken, px, r.width, r.height, st.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+            s.times.Add(st);
+            s.taken++;
+            s.nextFrame = Time.frameCount + s.every;
+            if (s.taken >= s.count) CompleteSequence(s, null);
+        }
+
+        void CompleteSequence(Sequence s, string error)
+        {
+            m_Sequences.Remove(s);
+            var r = s.result ?? new ShotResult();
+            r.name = s.label;
+            r.preset = s.preset;
+            r.path = s.path;
+            r.t = s.times.Count > 0 ? s.times[0] : ScenarioTime;
+            r.frames = s.taken;
+            r.every = s.every;
+            r.times = s.times.ToArray();
+            r.motion = s.motion.ToArray();
+            r.golden = s.capture.golden;
+            r.ignore = s.capture.ignore ?? Array.Empty<ShotRect>();
+            r.renderMs = s.renderMs;
+            if (s.taken > 0)
+            {
+                r.meanLuma = (float)(s.luma / s.taken);
+                r.stdLuma = (float)(s.std / s.taken);
+                r.sheet = s.sheet.Layout;
+                try { s.sheet.Save(s.path); }
+                catch (Exception e) { error = error ?? e.GetType().Name + ": " + e.Message; }
+            }
+            if (error != null) r.error = error;
+            if (s.template != null) HarnessCapture.AddHints(r, s.template, s.capture.ui);
+            m_Shots.Add(r);
         }
 
         // "screen": what the Game view shows, at the Game view's size (the other presets lay the UI out at the capture size).
@@ -536,14 +661,14 @@ namespace Harness
         double m_ScreenRequestedAt;
         readonly List<(string label, string path, float t)> m_ScreenQueue = new List<(string, string, float)>();
 
-        System.Collections.IEnumerator CaptureScreen(string label, string path, float st)
+        System.Collections.IEnumerator CaptureScreen(string label, string path, float st, bool golden)
         {
             m_PendingScreen++;
             m_ScreenRequestedAt = m_Wall.Elapsed.TotalSeconds;
             m_ScreenQueue.Add((label, path, st));
             yield return new WaitForEndOfFrame();
             m_ScreenQueue.Remove((label, path, st));
-            var r = new ShotResult { name = label, preset = "screen", path = path, t = st };
+            var r = new ShotResult { name = label, preset = "screen", path = path, t = st, golden = golden };
             var sw = Stopwatch.StartNew();
             Texture2D tex = null;
             try
@@ -679,6 +804,12 @@ namespace Harness
             }
             m_Inputs.Clear();
             EndIsolation();
+            // Sequences the scenario did not wait out (it failed or was stopped): their sheets with the frames taken.
+            foreach (var s in m_Sequences.ToArray())
+            {
+                try { CompleteSequence(s, $"the scenario ended after {s.taken} of {s.count} frames"); }
+                catch (Exception e) { Debug.LogException(e); }
+            }
 
             m_Result.success = error == null;
             m_Result.error = error;

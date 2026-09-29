@@ -4,18 +4,26 @@
   changing the harness, and per Unity version in a fresh clone (tools/fresh-clone-test.ps1 -SelfTest, P-1).
 
   1 loop x3: green, same build.fingerprint and play.events (-ExpectFingerprint), no blank/dark/magenta shots, every
-    shot 1280x720 with the HUD composited (G3-1); compile-check of every assembly (csc, the Editor's response files);
+    shot 1280x720 with the HUD composited (G3-1); golden images (G3-4): loop 1 writes them (-UpdateGolden, to
+    HarnessOut), loops 2-3 are the same pixel for pixel, the committed goldens of this Unity version (if any) are the
+    same, and harness_golden leaves "ignore" regions (from the top left) out and falls back to another patch of the
+    same major.minor; compile-check of every assembly (csc, the Editor's response files);
     one more loop with the scenario tools of P-5 (waitScene, waitTarget, a UI Toolkit click by name, KeyCode key names,
     a capture from a pose and one from a named camera); screen-space uGUI (G3-1) on a fixture that is never saved: an
-    overlay, a Screen Space - Camera canvas of the main camera and one of another camera composited in order, blended
-    in linear space, and put back; real input (G3-6): Space pressed on the real keyboard during a loop leaves
+    overlay, a Screen Space - Camera canvas of the main camera and one of a UI camera in its stack composited in order,
+    blended in linear space, and put back; cameras (G3-7) on a fixture: an overlay camera in the main camera's stack
+    (child of it, drawing a quad) seen from the main camera and from another pose, a minimap Base camera drawn after
+    the main camera in its viewport, one before it covered, a capture from the minimap camera by name drawing it alone,
+    everything put back; a play-mode fixture: a capture sequence (G3-3, contact sheet, motion) with an overlay canvas
+    and a stack camera made during the play; real input (G3-6): Space pressed on the real keyboard during a loop leaves
     play.events as they were, and the real devices, disabled while a scenario plays, are enabled again after it, after
     a failed play and after a stopped one
   2 C# compile error in Smoke -> stage=compile at the injected file/line, module Smoke; reverted -> green
   3 runtime exception in Smoke -> stage=runtime at the injected line; reverted -> green
   4 HLSL error in the Smoke shader -> stage=shader at the injected line, again in the next loop (no reimport);
-    reverted -> green. A material the pipeline cannot draw (Standard in URP, G3-5) -> magenta shots whose hint names
-    the renderer, loop still green; reverted -> no magenta
+    reverted -> green (and the golden images of item 4). A one-line shader change (specular halved) -> golden
+    "changed" with a diff image, loop green. A material the pipeline cannot draw (Standard in URP, G3-5) -> magenta
+    shots whose hint names the renderer and whose golden changed, loop still green; reverted -> no magenta, golden same
   5 mutable static without a reset -> stage=lint (static-reset); removed -> green
   6 two loops at once -> both green, one of them waited for the lock
   7 worktrees + submit.ps1: the compile-check gate refuses a broken module without touching the Editor tree; a forced
@@ -71,6 +79,8 @@ $ShaderBroken = 'float3 n = normalize(i.selftestMissing);'
 $SmokeBuilder = 'Assets/Game/Smoke/Builders/SmokeBuildStep.cs'
 $MagentaMarker = '"PedestalStone", "Universal Render Pipeline/Lit"'
 $MagentaBroken = '"PedestalStone", "Standard"'   # a Built-in pipeline shader: URP draws it with its error material
+$VisualMarker = 'half spec = pow(saturate(dot(n, h)), _Gloss) * atten;'
+$VisualChanged = 'half spec = pow(saturate(dot(n, h)), _Gloss) * atten * 0.5h;'   # a valid one-line change: specular halved
 
 $report = [ordered]@{ ok = $false; stage = ''; project = $root.Replace('\', '/'); projectVersion = (Get-HarnessProjectVersion); unityVersion = $null
     items = @(); fingerprint = $null; events = $null; lines = [ordered]@{}; shots = @() }
@@ -151,7 +161,7 @@ function Invoke-Tool([string]$Project, [string]$Name, [string]$Tag, [string[]]$A
     Read-ToolReport $dir $r
 }
 
-function Invoke-Loop([string]$Tag) { Invoke-Tool $root 'loop.ps1' $Tag }
+function Invoke-Loop([string]$Tag, [string[]]$Arguments = @()) { Invoke-Tool $root 'loop.ps1' $Tag $Arguments }
 
 function Wait-Until([scriptblock]$Condition, [int]$TimeoutSec = 60, $Tool = $null) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -238,10 +248,22 @@ function Get-Head([string]$Dir) { (Invoke-HarnessGit $Dir @('rev-parse', 'HEAD')
 function Invoke-Git([string]$Dir, [string[]]$Arguments) { [void](Invoke-HarnessGit $Dir $Arguments -Check) }
 
 # A reverted change must leave the Editor tree green again.
-function Test-GreenAgain([string]$Tag) {
-    $r = Invoke-Loop $Tag
+function Test-GreenAgain([string]$Tag, [string[]]$Arguments = @()) {
+    $r = Invoke-Loop $Tag $Arguments
     Test-Check 'green again after the revert' ([bool]$r.ok) (Get-Summary $r)
     $r
+}
+
+# Golden comparison per shot of a loop report: "name:status" (G3-4).
+function Get-Golden($r) { @($r.shotStats | ForEach-Object { "$($_.name):$(if ($_.golden) { $_.golden.status } else { 'none' })" }) }
+function Get-GoldenDetail($r) { (@($r.shotStats | ForEach-Object { "$($_.name) $(if ($_.golden) { $_.golden | ConvertTo-Json -Compress })" }) -join ' | ') }
+
+# harness_golden under the Editor lock: its result.
+function Invoke-GoldenCommand([hashtable]$Params) {
+    [void](Enter-HarnessLock)
+    try { $r = Invoke-UnityCommand -Name 'harness_golden' -Params $Params -TimeoutSec 120 } finally { Exit-HarnessLock }
+    if (-not $r.success) { throw "harness_golden failed: $($r.error)" }
+    $r.result
 }
 
 # ---- sample module written by 7-8 (ASCII) ---------------------------------------------------------------------------
@@ -332,8 +354,9 @@ $ScenarioToolsText = @'
 '@
 
 # Item 1's screen-space uGUI check (G3-1), an eval_file body: opens the play scene, adds canvases of the three kinds a
-# capture composites (an overlay, a Screen Space - Camera canvas of the main camera, one of another camera), captures the
-# main camera with and without UI and reopens the scene (the fixture is never saved).
+# capture composites (an overlay, a Screen Space - Camera canvas of the main camera, one of a UI camera in the main
+# camera's stack - URP layers cameras with the stack; a second full-screen Base camera would cover the scene), captures
+# the main camera with and without UI and reopens the scene (the fixture is never saved).
 $UiFixtureText = @'
 var scenePath = Harness.Editor.HarnessPaths.ResolvePlayScene("", out var sceneError);
 if (scenePath == null) throw new System.InvalidOperationException("no play scene: " + sceneError);
@@ -364,11 +387,15 @@ System.Func<string, UnityEngine.RenderMode, UnityEngine.Camera, UnityEngine.Colo
 };
 System.Func<UnityEngine.Canvas, string> describe = c => c.renderMode + "|" + (c.worldCamera != null ? c.worldCamera.name : "-") + "|" + c.planeDistance + "|" + ((UnityEngine.RectTransform)c.transform).rect.size;
 var result = new Dictionary<string, object>();
+var stack = UnityEngine.Rendering.Universal.CameraExtensions.GetUniversalAdditionalCameraData(main).cameraStack;
+UnityEngine.Camera other = null;
 try
 {
     var camGo = make("[selftest ui camera]", null);
-    var other = camGo.AddComponent<UnityEngine.Camera>();
-    other.depth = 10; other.clearFlags = UnityEngine.CameraClearFlags.Depth; other.cullingMask = 1 << 5;
+    other = camGo.AddComponent<UnityEngine.Camera>();
+    other.cullingMask = 1 << 5;
+    UnityEngine.Rendering.Universal.CameraExtensions.GetUniversalAdditionalCameraData(other).renderType = UnityEngine.Rendering.Universal.CameraRenderType.Overlay;
+    stack.Add(other);
     // (1053, 60) red at 50% over the scene, (1153, 643) green drawn with the scene, (127, 77) blue over the scene (x, y from the bottom left of 1280x720)
     var canvases = new[]
     {
@@ -417,10 +444,169 @@ try
 }
 finally
 {
+    if (other != null) stack.Remove(other);
     foreach (var o in made) if (o != null) UnityEngine.Object.DestroyImmediate(o);
     UnityEditor.SceneManagement.EditorSceneManager.OpenScene(scenePath);
 }
 return result;
+'@
+
+# Item 1's camera check (G3-7), an eval_file body: an overlay camera in the main camera's stack, child of it, drawing a red
+# quad straight ahead (an FPS weapon camera); a minimap Base camera drawn after the main camera in the top right quarter
+# (blue); a Base camera drawn before it (cyan, covered by the main camera's clear). Captures from the main camera, from
+# another pose (the quad hangs off the main camera: same place on screen) and from the minimap camera by name (alone,
+# full frame); checks that the cameras and the main camera are put back. Never saved.
+$CameraFixtureText = @'
+var scenePath = Harness.Editor.HarnessPaths.ResolvePlayScene("", out var sceneError);
+if (scenePath == null) throw new System.InvalidOperationException("no play scene: " + sceneError);
+UnityEditor.SceneManagement.EditorSceneManager.OpenScene(scenePath);
+var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+var main = Harness.HarnessCapture.FindMainCamera();
+var stack = UnityEngine.Rendering.Universal.CameraExtensions.GetUniversalAdditionalCameraData(main).cameraStack;
+var made = new List<UnityEngine.Object>();
+var result = new Dictionary<string, object>();
+const int layer = 30;   // not used by the smoke scene
+var maskBefore = main.cullingMask;
+var stackBefore = stack.Count;
+UnityEngine.Camera overlay = null;
+try
+{
+    main.cullingMask &= ~(1 << layer);   // only the overlay camera draws the quad
+    System.Func<string, UnityEngine.Transform, UnityEngine.Camera> camera = (name, parent) =>
+    {
+        var go = new UnityEngine.GameObject(name);
+        made.Add(go);
+        if (parent != null) go.transform.SetParent(parent, false);
+        return go.AddComponent<UnityEngine.Camera>();
+    };
+    overlay = camera("[selftest overlay camera]", main.transform);
+    overlay.cullingMask = 1 << layer;
+    UnityEngine.Rendering.Universal.CameraExtensions.GetUniversalAdditionalCameraData(overlay).renderType = UnityEngine.Rendering.Universal.CameraRenderType.Overlay;
+    stack.Add(overlay);
+    var quad = UnityEngine.GameObject.CreatePrimitive(UnityEngine.PrimitiveType.Quad);
+    made.Add(quad);
+    quad.name = "[selftest weapon]";
+    quad.layer = layer;
+    quad.transform.SetParent(overlay.transform, false);
+    quad.transform.localPosition = new UnityEngine.Vector3(0f, 0f, 2f);
+    quad.transform.localScale = UnityEngine.Vector3.one * 0.3f;
+    var mat = new UnityEngine.Material(UnityEngine.Shader.Find("Universal Render Pipeline/Unlit"));
+    made.Add(mat);
+    mat.SetColor("_BaseColor", UnityEngine.Color.red);
+    quad.GetComponent<UnityEngine.Renderer>().sharedMaterial = mat;
+    var minimap = camera("[selftest minimap camera]", null);
+    minimap.transform.SetPositionAndRotation(new UnityEngine.Vector3(0f, 80f, 0f), UnityEngine.Quaternion.Euler(90f, 0f, 0f));
+    minimap.rect = new UnityEngine.Rect(0.75f, 0.75f, 0.25f, 0.25f);
+    minimap.depth = main.depth + 1;
+    minimap.clearFlags = UnityEngine.CameraClearFlags.SolidColor;
+    minimap.backgroundColor = UnityEngine.Color.blue;
+    minimap.cullingMask = 0;
+    var under = camera("[selftest under camera]", null);
+    under.depth = main.depth - 1;
+    under.clearFlags = UnityEngine.CameraClearFlags.SolidColor;
+    under.backgroundColor = UnityEngine.Color.cyan;
+    under.cullingMask = 0;
+
+    var t = main.transform;
+    var mainPos = t.position; var mainRot = t.rotation;
+    var dirty = scene.isDirty;
+    var dir = "HarnessOut/selftest/camera-fixture";
+    System.IO.Directory.CreateDirectory(dir);
+    var atMain = Harness.HarnessCapture.Capture(main, t.position, t.rotation, main.fieldOfView, 1280, 720, dir + "/main.png", true);
+    var posePos = new UnityEngine.Vector3(0f, 30f, -40f);
+    var atPose = Harness.HarnessCapture.Capture(main, posePos, UnityEngine.Quaternion.LookRotation(-posePos), 55f, 1280, 720, dir + "/pose.png", true);
+    var alone = Harness.HarnessCapture.Capture(minimap, minimap.transform.position, minimap.transform.rotation, minimap.fieldOfView, 1280, 720, dir + "/minimap.png", true);
+
+    System.Func<string, UnityEngine.Color32[]> load = f => { var x = new UnityEngine.Texture2D(2, 2); UnityEngine.ImageConversion.LoadImage(x, System.IO.File.ReadAllBytes(f)); var p = x.GetPixels32(); UnityEngine.Object.DestroyImmediate(x); return p; };
+    System.Func<UnityEngine.Color32[], int, int, UnityEngine.Color32> at = (p, x, y) => p[y * 1280 + x];   // from the bottom left
+    System.Func<UnityEngine.Color32, bool> red = c => c.r > 150 && c.g < 60 && c.b < 60;
+    System.Func<UnityEngine.Color32, bool> blue = c => c.b > 200 && c.r < 40 && c.g < 40;
+    var m = load(dir + "/main.png"); var p2 = load(dir + "/pose.png"); var a = load(dir + "/minimap.png");
+    var cyan = 0;
+    foreach (var c in m) if (c.g > 200 && c.b > 200 && c.r < 40) cyan++;
+    var mp = Harness.HarnessCapture.HierarchyPath(main.transform);
+    result["cameras"] = string.Join(",", atMain.cameras);
+    result["camerasExpected"] = "[selftest under camera]," + mp + "," + mp + "/[selftest overlay camera] (overlay),[selftest minimap camera]";
+    result["poseCameras"] = string.Join(",", atPose.cameras);
+    result["aloneCameras"] = string.Join(",", alone.cameras);
+    result["error"] = (atMain.error ?? "") + (atPose.error ?? "") + (alone.error ?? "");
+    result["mainCenter"] = at(m, 640, 360).ToString();
+    result["mainQuad"] = red(at(m, 640, 360));
+    result["poseCenter"] = at(p2, 640, 360).ToString();
+    result["poseQuad"] = red(at(p2, 640, 360));
+    result["mainMinimap"] = blue(at(m, 1120, 630)) && !blue(at(m, 800, 630));
+    result["poseMinimap"] = blue(at(p2, 1120, 630));
+    result["aloneBlue"] = blue(at(a, 640, 360)) && blue(at(a, 20, 20));
+    result["cyanPixels"] = cyan;
+    result["mainPutBack"] = t.position == mainPos && t.rotation == mainRot;
+    result["targetsPutBack"] = minimap.targetTexture == null && under.targetTexture == null && overlay.targetTexture == null;
+    result["stack"] = stack.Count == stackBefore + 1 && stack[stack.Count - 1] == overlay;
+    result["sceneDirtied"] = scene.isDirty && !dirty;
+    result["renderMs"] = UnityEngine.Mathf.Round(atMain.renderMs);
+}
+finally
+{
+    if (overlay != null) stack.Remove(overlay);
+    main.cullingMask = maskBefore;
+    for (var i = made.Count - 1; i >= 0; i--) if (made[i] != null) UnityEngine.Object.DestroyImmediate(made[i]);
+    UnityEditor.SceneManagement.EditorSceneManager.OpenScene(scenePath);
+}
+return result;
+'@
+
+# Item 1's play-mode check (G3-3 with uGUI and a stack in play mode): on the next play, a Screen Space - Overlay canvas and
+# an overlay camera in the main camera's stack drawing a red quad are made (they end with the play); the scenario takes a
+# sequence of the main camera. Disarms itself on that play (or unused, after 120 s).
+$SequenceArmText = @'
+var deadline = System.DateTime.UtcNow.AddSeconds(120);
+System.Action<UnityEditor.PlayModeStateChange> onChange = null;
+onChange = c =>
+{
+    if (c != UnityEditor.PlayModeStateChange.EnteredPlayMode) return;
+    UnityEditor.EditorApplication.playModeStateChanged -= onChange;
+    if (System.DateTime.UtcNow > deadline) return;
+    var main = Harness.HarnessCapture.FindMainCamera();
+    const int layer = 30;
+    main.cullingMask &= ~(1 << layer);
+    var camGo = new UnityEngine.GameObject("[selftest play overlay camera]");
+    camGo.transform.SetParent(main.transform, false);
+    var overlay = camGo.AddComponent<UnityEngine.Camera>();
+    overlay.cullingMask = 1 << layer;
+    UnityEngine.Rendering.Universal.CameraExtensions.GetUniversalAdditionalCameraData(overlay).renderType = UnityEngine.Rendering.Universal.CameraRenderType.Overlay;
+    UnityEngine.Rendering.Universal.CameraExtensions.GetUniversalAdditionalCameraData(main).cameraStack.Add(overlay);
+    var quad = UnityEngine.GameObject.CreatePrimitive(UnityEngine.PrimitiveType.Quad);
+    quad.name = "[selftest play weapon]";
+    quad.layer = layer;
+    quad.transform.SetParent(camGo.transform, false);
+    quad.transform.localPosition = new UnityEngine.Vector3(0.5f, -0.3f, 2f);
+    quad.transform.localScale = UnityEngine.Vector3.one * 0.3f;
+    var mat = new UnityEngine.Material(UnityEngine.Shader.Find("Universal Render Pipeline/Unlit"));
+    mat.SetColor("_BaseColor", UnityEngine.Color.red);
+    quad.GetComponent<UnityEngine.Renderer>().sharedMaterial = mat;
+    var cgo = new UnityEngine.GameObject("[selftest play overlay]", typeof(UnityEngine.RectTransform));
+    cgo.layer = 5;
+    cgo.AddComponent<UnityEngine.Canvas>().renderMode = UnityEngine.RenderMode.ScreenSpaceOverlay;
+    var img = new UnityEngine.GameObject("Image", typeof(UnityEngine.RectTransform));
+    img.layer = 5;
+    img.transform.SetParent(cgo.transform, false);
+    img.AddComponent<UnityEngine.UI.Image>().color = new UnityEngine.Color(0f, 1f, 0f, 1f);
+    var rt = (UnityEngine.RectTransform)img.transform;
+    rt.anchorMin = rt.anchorMax = rt.pivot = new UnityEngine.Vector2(0f, 0f);
+    rt.anchoredPosition = new UnityEngine.Vector2(20f, 20f);
+    rt.sizeDelta = new UnityEngine.Vector2(160f, 90f);
+};
+UnityEditor.EditorApplication.playModeStateChanged += onChange;
+return "armed";
+'@
+$SequenceScenarioText = @'
+{
+    "name": "selftest-sequence",
+    "durationSec": 0.6,
+    "fixedDeltaTime": 0.0166667,
+    "captures": [
+        { "t": 0.1, "preset": "main", "name": "seq", "frames": 4, "every": 5 }
+    ]
+}
 '@
 
 # Item 1's real input checks (G3-6), eval_file bodies (no usings). The first one presses and releases Space on every real
@@ -495,12 +681,29 @@ function Invoke-Eval([string]$File) {
 function Get-DisabledDevices($State) { (@($State.disabled) | Sort-Object) -join ',' }
 function Invoke-Item1 {
     Start-Item 1 'loop x3: green, deterministic, compile-check'
+    # Golden images (G3-4) of this run: loop 1 writes them, loops 2-3 compare.
+    $gold = Join-Path $outAbs 'golden'
+    if (Test-Path -LiteralPath $gold) { Remove-Item -LiteralPath $gold -Recurse -Force }
     $runs = @()
     for ($i = 1; $i -le 3; $i++) {
-        $r = Invoke-Loop "1-loop$i"
+        $r = Invoke-Loop "1-loop$i" $(if ($i -eq 1) { @('-Golden', $gold, '-UpdateGolden') } else { @('-Golden', $gold) })
         $runs += $r
         Test-Check "loop $i green" ([bool]$r.ok) (Get-Summary $r)
     }
+    $written = @($runs[0].golden.updated)
+    Test-Check 'golden: loop 1 wrote its shots (-UpdateGolden)' ($written.Count -gt 0 -and $written.Count -eq @($runs[0].shots).Count -and -not $runs[0].golden.error) "$($written -join ',') $($runs[0].golden.error)"
+    $notSame = @($runs[1..2] | ForEach-Object { Get-Golden $_ } | Where-Object { $_ -notlike '*:same' })
+    $diffs = @($runs[1..2] | ForEach-Object { @($_.shotStats) } | ForEach-Object { if ($_.golden) { [double]$_.golden.maxDiff } })
+    Test-Check 'golden: loops 2-3 same as loop 1' ($notSame.Count -eq 0 -and $diffs.Count -eq 2 * $written.Count) "$((@($runs[1..2] | ForEach-Object { Get-Golden $_ }) -join ',')) maxDiff=$(($diffs | Measure-Object -Maximum).Maximum)"
+    $state.item['goldenMaxDiff'] = ($diffs | Measure-Object -Maximum).Maximum
+    # The goldens committed with the project, for this Unity version (another patch of it) if any.
+    $items3 = @($runs[2].shots | ForEach-Object { [ordered]@{ path = $_; name = [IO.Path]::GetFileNameWithoutExtension($_) } })
+    $committed = Invoke-GoldenCommand @{ shots = (ConvertTo-Json -InputObject $items3 -Depth 5 -Compress); key = 'default'; out = (Join-Path $outAbs 'golden-committed') }
+    if ($committed.from) {
+        $bad = @($committed.results | Where-Object { $_.status -ne 'same' } | ForEach-Object { "$($_.name):$($_.status) mean=$($_.meanDiff) ratio=$($_.changedRatio) $($_.diff)" })
+        Test-Check "golden: same as the committed goldens ($($committed.from))" ($bad.Count -eq 0) ($bad -join ' | ')
+    }
+    $state.item['committedGolden'] = $(if ($committed.from) { "$($committed.from): same $($committed.same)/$(@($committed.results).Count)" } else { "none for $($committed.version)" })
     $fps = @($runs | ForEach-Object { if ($_.build) { $_.build.fingerprint } } | Select-Object -Unique)
     $evs = @($runs | ForEach-Object { Get-Events $_ } | Select-Object -Unique)
     Test-Check 'same build.fingerprint' ($fps.Count -eq 1 -and [bool]$fps[0]) ($fps -join ', ')
@@ -545,6 +748,51 @@ function Invoke-Item1 {
     Test-Check 'uGUI: main camera canvas drawn with the scene (green), the other camera canvas over it (blue)' ([bool]$u.greenOk -and [bool]$u.blueOk) "green $($u.green) blue $($u.blue)"
     Test-Check 'uGUI: canvases and the HUD panel put back' ([bool]$u.canvasesRestored -and [bool]$u.panelRestored) "canvases=$($u.canvasesRestored) panel=$($u.panelRestored)"
     $state.item['uiFixture'] = [ordered]@{ ui = @($u.ui); red = $u.red; green = $u.green; blue = $u.blue; renderMs = $u.renderMs }
+
+    # Cameras (G3-7), in edit mode on a fixture that is never saved: a stack overlay camera hanging off the main camera,
+    # a minimap Base camera after it, one before it; from the main camera, from another pose, from the minimap by name.
+    $fixture = (Join-Path $outAbs 'camera-fixture.cs').Replace('\', '/')
+    Write-TextFile $fixture $CameraFixtureText
+    $k = Invoke-Eval $fixture
+    Test-Check 'cameras: drawn in order (under, main, its stack overlay, minimap)' ($k.cameras -eq $k.camerasExpected -and $k.poseCameras -eq $k.camerasExpected -and -not $k.error) "$($k.cameras) $($k.error)"
+    Test-Check 'cameras: the overlay camera draws its quad, also from another pose (it hangs off the main camera)' ([bool]$k.mainQuad -and [bool]$k.poseQuad) "main $($k.mainCenter) pose $($k.poseCenter)"
+    # Covered = its cyan clear shows nowhere (it would fill the frame); the knot's rim can have a few cyan pixels itself.
+    Test-Check 'cameras: the minimap in its viewport over the main camera, the camera before it covered' ([bool]$k.mainMinimap -and [bool]$k.poseMinimap -and [int]$k.cyanPixels -lt 9216) "minimap=$($k.mainMinimap)/$($k.poseMinimap) cyan=$($k.cyanPixels)"
+    Test-Check 'cameras: "camera": minimap draws that camera alone, full frame' ($k.aloneCameras -eq '[selftest minimap camera]' -and [bool]$k.aloneBlue) "$($k.aloneCameras) blue=$($k.aloneBlue)"
+    Test-Check 'cameras: main camera, targets and stack put back, scene not dirtied' ([bool]$k.mainPutBack -and [bool]$k.targetsPutBack -and [bool]$k.stack -and -not [bool]$k.sceneDirtied) "main=$($k.mainPutBack) targets=$($k.targetsPutBack) stack=$($k.stack) dirtied=$($k.sceneDirtied)"
+    $state.item['cameraFixture'] = [ordered]@{ cameras = $k.cameras; main = $k.mainCenter; pose = $k.poseCenter; renderMs = $k.renderMs }
+
+    # In play mode (G3-3): a capture sequence, with an overlay canvas and a stack camera the play made.
+    $arm = (Join-Path $outAbs 'sequence-arm.cs').Replace('\', '/')
+    $seqScenario = (Join-Path $outAbs 'sequence.json').Replace('\', '/')
+    Write-TextFile $arm $SequenceArmText
+    Write-TextFile $seqScenario $SequenceScenarioText
+    [void](Invoke-Eval $arm)
+    $r = Invoke-Tool $root 'loop.ps1' '1-sequence' @('-Scenario', $seqScenario)
+    $q = @($r.shotStats | Where-Object { $_.name -eq 'seq' })[0]
+    Test-Check 'sequence: loop green' ([bool]$r.ok) (Get-Summary $r)
+    Test-Check 'sequence: 4 frames every 5 in a 2x2 contact sheet, t per frame' ($q -and [int]$q.frames -eq 4 -and [int]$q.every -eq 5 -and $q.sheet -eq '2x2' -and @($q.times).Count -eq 4) "$(if ($q) { "frames=$($q.frames) every=$($q.every) sheet=$($q.sheet) times=$(@($q.times) -join ',')" })"
+    $motion = @($q.motion | ForEach-Object { [double]$_ })
+    Test-Check 'sequence: motion between frames (the knot spins)' ($motion.Count -eq 3 -and @($motion | Where-Object { $_ -le 0.5 }).Count -eq 0) ($motion -join ',')
+    Test-Check 'sequence: the play-mode overlay canvas and stack camera in the frames' (@($q.ui) -contains 'ugui:[selftest play overlay]' -and @($q.cameras | Where-Object { $_ -like '*[[]selftest play overlay camera] (overlay)' }).Count -eq 1) "ui=[$(@($q.ui) -join ',')] cameras=[$(@($q.cameras) -join ',')]"
+    $state.item['sequence'] = [ordered]@{ sheet = $q.sheet; motion = $motion; shot = @($r.shots)[0] }
+
+    # harness_golden: "ignore" regions (fractions from the top left) and another patch of the same major.minor.
+    $gi = Join-Path $outAbs 'golden-ignore'
+    if (Test-Path -LiteralPath $gi) { Remove-Item -LiteralPath $gi -Recurse -Force }
+    $v = "$($runs[2].unityVersion)" -split '\.'
+    $patch0 = "$($v[0]).$($v[1]).0a1"
+    $shot = @($runs[2].shots)[0]
+    $gdir = Join-Path $gi "$patch0/ignore"
+    [void][IO.Directory]::CreateDirectory($gdir)
+    Copy-Item -LiteralPath @($runs[2].shots)[1] -Destination (Join-Path $gdir (Split-Path -Leaf $shot))   # another shot as its golden
+    $compare = { param($ignore) $i = [ordered]@{ path = $shot; name = 'probe' }; if ($ignore) { $i['ignore'] = $ignore }; @((Invoke-GoldenCommand @{ shots = (ConvertTo-Json -InputObject @($i) -Depth 5 -Compress); golden = $gi; key = 'ignore'; out = (Join-Path $outAbs 'golden-ignore-out') }).results)[0] }
+    $plain = & $compare $null
+    $all = & $compare @([ordered]@{ x = 0; y = 0; w = 1; h = 1 })
+    $left = & $compare @([ordered]@{ x = 0; y = 0; w = 0.5; h = 1 })
+    $top = & $compare @([ordered]@{ x = 0; y = 0; w = 1; h = 0.5 })
+    Test-Check "golden: another shot is changed, with a diff image, from version $patch0" ($plain.status -eq 'changed' -and $plain.diff -and (Test-Path -LiteralPath $plain.diff) -and "$($plain.golden)" -like "*/$patch0/*") "$($plain.status) $($plain.golden) $($plain.diff)"
+    Test-Check 'golden: ignore everything -> same; ignore the left / top half -> changed only right / below it' ($all.status -eq 'same' -and $left.status -eq 'changed' -and [int]@($left.rect)[0] -ge 640 -and $top.status -eq 'changed' -and [int]@($top.rect)[1] -ge 360) "all=$($all.status) left=$($left.status) [$(@($left.rect) -join ',')] top=$($top.status) [$(@($top.rect) -join ',')]"
 
     # Real input (G3-6): Space pressed on the real keyboard during a loop does not reach the game; the real devices are
     # disabled only while a scenario plays, also when the play fails or is stopped.
@@ -635,21 +883,38 @@ function Invoke-Item4 {
         Test-Check "${what}: error at ${SmokeShader}:$line, module Smoke" ($e.file -eq $SmokeShader -and [int]$e.line -eq $line -and $e.module -eq 'Smoke') "$($e.file):$($e.line) $($e.module) $($e.msg)"
     }
     Restore-EditorFiles
-    [void](Test-GreenAgain '4-restored')
+    # The reverted state is this item's golden images (G3-4).
+    $gold = Join-Path $outAbs 'golden4'
+    if (Test-Path -LiteralPath $gold) { Remove-Item -LiteralPath $gold -Recurse -Force }
+    $r = Test-GreenAgain '4-restored' @('-Golden', $gold, '-UpdateGolden')
+    Test-Check 'golden written' (@($r.golden.updated).Count -gt 0) ($r.golden | ConvertTo-Json -Compress)
+
+    # A valid one-line shader change (specular halved): the loop is green, the golden comparison shows where it changed.
+    Protect-EditorFile $SmokeShader
+    [void](Edit-Line (Get-Abs $root $SmokeShader) $VisualMarker $VisualChanged)
+    $r = Invoke-Loop '4-visual' @('-Golden', $gold)
+    $changed = @($r.shotStats | Where-Object { $_.golden -and $_.golden.status -eq 'changed' })
+    $withDiff = @($changed | Where-Object { $_.golden.diff -and (Test-Path -LiteralPath $_.golden.diff) -and @($_.golden.rect).Count -eq 4 })
+    Test-Check 'shader change: loop green' ([bool]$r.ok) (Get-Summary $r)
+    Test-Check 'shader change: golden changed, with where (rect) and a diff image' ($changed.Count -gt 0 -and $withDiff.Count -eq $changed.Count -and [int]$r.golden.changed -eq $changed.Count) (Get-GoldenDetail $r)
+    $state.item['visualChange'] = @($r.shotStats | ForEach-Object { if ($_.golden) { "$($_.name) $($_.golden.status) mean=$($_.golden.meanDiff) ratio=$($_.golden.changedRatio)" } })
+    Restore-EditorFiles
 
     # A material the render pipeline cannot draw (G3-5): URP draws the Built-in Standard shader magenta, without an error.
     Protect-EditorFile $SmokeBuilder
     [void](Edit-Line (Get-Abs $root $SmokeBuilder) $MagentaMarker $MagentaBroken)
-    $r = Invoke-Loop '4-magenta'
+    $r = Invoke-Loop '4-magenta' @('-Golden', $gold)
     $m = @($r.shotStats | Where-Object { $_.magenta })
     $named = @($m | Where-Object { "$($_.hint)" -like '*Smoke/Pedestal*Standard*' })
     $shots = @($r.shotStats | ForEach-Object { "$($_.name) magenta=$($_.magenta) $($_.magentaRatio) $($_.hint)" }) -join ' | '
     Test-Check 'magenta material: loop green (reported, not a failure)' ([bool]$r.ok) (Get-Summary $r)
     Test-Check 'magenta material: magenta shots, hint names Smoke/Pedestal (Standard)' ($m.Count -gt 0 -and $named.Count -eq $m.Count) $shots
+    Test-Check 'magenta material: golden changed on the magenta shots' (@($m | Where-Object { -not $_.golden -or $_.golden.status -ne 'changed' }).Count -eq 0) (Get-GoldenDetail $r)
     Restore-EditorFiles
-    $r = Test-GreenAgain '4-magenta-restored'
+    $r = Test-GreenAgain '4-magenta-restored' @('-Golden', $gold)
     Test-Check 'no magenta after the revert' (@($r.shotStats | Where-Object { $_.magenta }).Count -eq 0) (@($r.shotStats | ForEach-Object { "$($_.name) $($_.magentaRatio)" }) -join ' | ')
-    $state.item['magenta'] = @($m | ForEach-Object { "$($_.name) $($_.magentaRatio)" })
+    Test-Check 'golden same again after the reverts' (@(Get-Golden $r | Where-Object { $_ -notlike '*:same' }).Count -eq 0 -and @(Get-Golden $r).Count -gt 0) (Get-GoldenDetail $r)
+    $state.item['magenta'] = @($m | ForEach-Object { "$($_.name) $($_.magentaRatio) golden=$($_.golden.status)" })
     Complete-Item
 }
 
@@ -820,11 +1085,12 @@ function Invoke-Item8 {
     Invoke-Git $B @('add', '-A')
     Invoke-Git $B ($gitId + @('commit', '--quiet', '-m', 'selftest: Probe module'))
 
-    # 8a. Land (fast-forward) while A's submit waits for the lock.
+    # 8a. Land (fast-forward) while A's submit waits for the lock. A's worktree is clean (7 put it back): the submit skips its
+    # compile-check gate, which can take as long as the whole land (4.9 s on 6000.6 in a fresh clone) and then never waits.
     $dl = Get-OutDir '8a-land'; $da = Get-OutDir '8a-waiting-submit'
     $tl = Start-Tool $B 'land.ps1' @('-Out', $dl)
     [void](Wait-Until { Test-Path -LiteralPath $LandJournal } 60 $tl)
-    $ta = Start-Tool $A 'submit.ps1' @('-Module', 'Smoke', '-Out', $da)
+    $ta = Start-Tool $A 'submit.ps1' @('-Module', 'Smoke', '-SkipCheck', '-Out', $da)
     $rl = Read-ToolReport $dl (Wait-Tool $tl)
     $ra = Read-ToolReport $da (Wait-Tool $ta)
     Test-Check 'land: green, merged, kept' ($rl.ok -and $rl.land.merged -and $rl.land.kept) (Get-Summary $rl)

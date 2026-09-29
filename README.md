@@ -22,7 +22,7 @@ Claude Code 같은 코딩 에이전트가 **Unity에서도 Three.js로 웹 3D를
 |---|---|
 | 1. 모든 게 텍스트 | 씬은 `IBuildStep` 빌더 코드가 생성(YAML 직접 수정 금지). HLSL `.shader`, UI Toolkit UXML/USS, 머티리얼·Volume·라이팅도 코드 |
 | 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크 |
-| 3. 눈으로 검증 | 캡처 PNG + 이미지 통계, 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로 |
+| 3. 눈으로 검증 | 캡처 PNG(화면의 카메라 스택·미니맵 + 스크린 공간 UI) + 이미지 통계, 연속 캡처 시트, 기준 이미지와의 diff 점수·바뀐 곳 PNG, 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로 |
 | 4. 에셋 없이 완성도 | 절차적 메시/노이즈/텍스처 베이크, 코드로 만든 URP 후처리, 스카이 반사 베이크 |
 | 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 worktree + 트랜잭션 submit / land |
 
@@ -42,10 +42,13 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
   "shots": ["…/HarnessOut/latest/shot0_closeup.png", "…/shot1_horizon.png", "…/shot2_overview.png"],
   "play": { "events": [{ "name": "SpinDirectionChanged", "count": 1 }, { "name": "SpinnerLap", "count": 2 }] },
   "render": { "batches": 45.8, "setPassCalls": 42.7, "triangles": 594544 },
+  "golden": { "version": "6000.3.11f1", "same": 3, "changed": 0, "missing": 0 },
   "durationSec": 3.6 }
 ```
 
 실패하면 `stage`(compile / build / shader / play / runtime / lint / shots)와 함께 `{"file","line","msg","module"}`가 나옵니다.
+샷은 커밋된 기준 이미지(`golden/<Unity 버전>/<시나리오>/`)와 비교됩니다. 같은 머신이면 픽셀까지 같아서, 셰이더 한 줄(스펙큘러 절반)도
+`changed` + 바뀐 곳을 칠한 diff PNG로 드러납니다(실패로 치지는 않음). 의도한 변경이면 `loop.ps1 -UpdateGolden`으로 갱신합니다.
 
 | 상황 (측정) | 한 바퀴 |
 |---|---|
@@ -125,7 +128,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1               # 끝낼 �
 사용자 전역 `Editor.log` 하나를 서로 덮어써서, 에디터를 둘 이상 띄우면 로그가 뒤섞입니다.
 
 위 과정 전체(클론 → 열기 → 설정 → 루프 3회 → 종료 → 삭제)를 `tools/fresh-clone-test.ps1` 하나로 검증할 수 있습니다(이 머신에서 ~110 s).
-하네스 자체의 검증 매트릭스(에러 주입·동시 루프·worktree submit/land)는 `tools/selftest.ps1`이 한 번에 돌리고(~3.5분),
+하네스 자체의 검증 매트릭스(에러 주입·동시 루프·worktree submit/land)는 `tools/selftest.ps1`이 한 번에 돌리고(~4분),
 `fresh-clone-test.ps1 -UnityVersion <버전> -SelfTest`는 그것을 다른 Unity 버전의 새 클론에서 돌립니다.
 
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)
@@ -223,11 +226,13 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
   CLAUDE.md                                에이전트용 사용법·규칙 (먼저 읽을 것)
   docs/ROADMAP.md                          아직 남은 격차 (워크플로우별 작업 순서 + 성질 1~5 + 이식성) + 검증 매트릭스
   Packages/com.geuneda.agentharness/       하네스 = UPM 패키지 (git URL: ...unitree.git?path=/AgentHarness/Packages/com.geuneda.agentharness)
-    Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioInput · ScenarioRunner · Procedural/
+    Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioInput · ScenarioRunner ·
+                                           HarnessCapture(+CaptureCameras · CaptureUi · ContactSheet) · Procedural/
     Editor/                                harness_* 에디터 커맨드, BuildContext / IBuildStep, 출시 빌드 필터
     Tools~/                                loop · submit · land · uc · compile-check · open · quit · install · uninstall · attach-test ·
                                            fresh-clone-test · selftest (.ps1) + templates/ (Unity는 ~ 폴더를 임포트하지 않는다)
   ProjectSettings/AgentHarness.json        하네스 설정: 모듈 폴더, 플레이할 씬, setup 모드
+  golden/<Unity 버전>/<시나리오>/           기준 이미지 (루프 샷과 비교, loop.ps1 -UpdateGolden이 씀)
   Assets/Game/<Module>/                    모듈 런타임 코드 (+ Shaders/, UI/), Builders/ 에 씬 빌드 스텝
   tools/*.ps1                              패키지 Tools~의 같은 이름 스크립트를 부르는 얇은 진입점 (모두 같은 파일) · scenarios/*.json
 ```

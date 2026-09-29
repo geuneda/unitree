@@ -47,11 +47,11 @@ function Test-HarnessWorktree { $script:WorkRoot -ne $script:ProjectRoot }
 # every modules[] entry {name, path}.
 function Get-HarnessConfig([string]$Root = $script:WorkRoot) {
     $c = [ordered]@{ setup = 'attach'; moduleRoots = @(); modules = @(); contracts = ''; generatedRoot = 'Assets/AgentHarness/Generated'
-        buildScene = 'Assets/AgentHarness/Main.unity'; playScene = 'first'; fromFile = $false }
+        buildScene = 'Assets/AgentHarness/Main.unity'; playScene = 'first'; goldenRoot = 'golden'; fromFile = $false }
     $f = Join-Path $Root 'ProjectSettings/AgentHarness.json'
     if (Test-Path -LiteralPath $f) {
         $j = [IO.File]::ReadAllText($f) | ConvertFrom-Json
-        foreach ($k in @('setup', 'moduleRoots', 'modules', 'contracts', 'generatedRoot', 'buildScene', 'playScene')) {
+        foreach ($k in @('setup', 'moduleRoots', 'modules', 'contracts', 'generatedRoot', 'buildScene', 'playScene', 'goldenRoot')) {
             if ($j.PSObject.Properties.Name -contains $k -and $null -ne $j.$k) { $c[$k] = $j.$k }
         }
         $c.fromFile = $true
@@ -59,7 +59,8 @@ function Get-HarnessConfig([string]$Root = $script:WorkRoot) {
     $norm = { param($p) if ($p) { "$p".Trim().Replace('\', '/').TrimEnd('/') } else { '' } }
     $c.moduleRoots = @(@($c.moduleRoots) | ForEach-Object { & $norm $_ } | Where-Object { $_ })
     $c.modules = @(@($c.modules) | Where-Object { $_ -and $_.name -and $_.path } | ForEach-Object { [pscustomobject]@{ name = "$($_.name)".Trim(); path = (& $norm $_.path) } })
-    foreach ($k in @('contracts', 'generatedRoot', 'buildScene')) { $c[$k] = & $norm $c[$k] }
+    foreach ($k in @('contracts', 'generatedRoot', 'buildScene', 'goldenRoot')) { $c[$k] = & $norm $c[$k] }
+    if (-not $c.goldenRoot) { $c.goldenRoot = 'golden' }
     $c.setup = "$($c.setup)".Trim().ToLowerInvariant()
     [pscustomobject]$c
 }
@@ -785,7 +786,9 @@ function Invoke-HarnessLoop {
         [switch]$NoPlay,
         [switch]$NoCompile,
         [int]$TimeoutSec = 180,
-        [System.Collections.IDictionary]$Timings = [ordered]@{}
+        [System.Collections.IDictionary]$Timings = [ordered]@{},
+        [string]$GoldenRoot,        # golden images (G3-4); default: goldenRoot of the config, under the work root
+        [switch]$UpdateGolden       # write this loop's shots as the golden images (a green loop only)
     )
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Off   # reads optional fields of Editor replies (error, file, ...) that may be absent
@@ -941,15 +944,23 @@ function Invoke-HarnessLoop {
     $report.runtimeErrors = $runtimeErrors
     $report['warningCount'] = $warningCount
     $report.shots = @($shotObjs | Where-Object { $_.path } | ForEach-Object { $_.path })
+    $statsByPath = @{}
     $report['shotStats'] = @($shotObjs | ForEach-Object {
         # Fields a result of an older package version does not have are left out.
         $has = @($_.PSObject.Properties.Name)
         $s = [ordered]@{ name = $_.name; preset = $_.preset; t = $_.t; width = $_.width; height = $_.height; meanLuma = [math]::Round($_.meanLuma, 1); stdLuma = [math]::Round($_.stdLuma, 1); blank = $_.blank; dark = [bool]$_.dark }
         if ($has -contains 'magenta') { $s['magenta'] = [bool]$_.magenta; $s['magentaRatio'] = [math]::Round([double]$_.magentaRatio, 4) }
+        if ($has -contains 'cameras' -and @($_.cameras).Count) { $s['cameras'] = @($_.cameras | Where-Object { $_ }) }
         if ($has -contains 'ui') { $s['ui'] = @($_.ui | Where-Object { $_ }) }
         if ($has -contains 'uiError' -and $_.uiError) { $s['uiError'] = $_.uiError }
+        if ($has -contains 'shadersCompiling' -and $_.shadersCompiling) { $s['shadersCompiling'] = $true }
+        if ($has -contains 'frames' -and [int]$_.frames -gt 1) {
+            $s['frames'] = [int]$_.frames; $s['every'] = [int]$_.every; $s['sheet'] = $_.sheet
+            $s['times'] = @($_.times | ForEach-Object { [math]::Round([double]$_, 3) }); $s['motion'] = @($_.motion | ForEach-Object { [math]::Round([double]$_, 2) })
+        }
         $s['error'] = $_.error
         $s['hint'] = $(if ($has -contains 'hint') { $_.hint } else { $null })
+        if ($_.path) { $statsByPath[[string]$_.path] = $s }
         $s
     })
     if ($stats -and $stats.success -and $stats.result.ok) {
@@ -976,7 +987,57 @@ function Invoke-HarnessLoop {
     $lintCount = @($lintIssues).Count
     $report.ok = ($runtimeErrors.Count -eq 0) -and $playOk -and ($blank -eq 0) -and ($shotObjs.Count -gt 0) -and ($lintCount -eq 0) -and ($shaderErrors.Count -eq 0)
     $report.stage = if ($report.ok) { 'done' } elseif ($shaderErrors.Count -gt 0) { 'shader' } elseif (-not $playOk) { 'play' } elseif ($runtimeErrors.Count -gt 0) { 'runtime' } elseif ($lintCount -gt 0) { 'lint' } else { 'shots' }
+
+    # ---- 5. Golden images (G3-4): how the shots differ from the golden ones - reported, never failing ---------------
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $g = Invoke-HarnessGolden -Shots $shotObjs -StatsByPath $statsByPath -Key $(if ($NoPlay) { 'capture' } elseif ($playResult -and $playResult.scenario) { "$($playResult.scenario)" } else { 'default' }) `
+        -OutDir $OutDir -GoldenRoot $GoldenRoot -Update:$UpdateGolden -LoopOk:$report.ok
+    if ($g) { $report['golden'] = $g; $Timings['goldenSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2) }
     $report
+}
+
+# Golden images of a loop's shots (harness_golden): per shot golden {status, meanDiff, changedRatio, ssim, rect, diff} into its
+# shotStats entry, and the summary. Nothing when there is no golden root yet (and no -Update). "screen" shots (Game view size)
+# and captures with "golden": false are left out.
+function Invoke-HarnessGolden {
+    param($Shots, [hashtable]$StatsByPath, [string]$Key, [string]$OutDir, [string]$GoldenRoot, [switch]$Update, [bool]$LoopOk)
+    $root = if (-not $GoldenRoot) { Join-Path $script:WorkRoot (Get-HarnessConfig).goldenRoot } elseif ([IO.Path]::IsPathRooted($GoldenRoot)) { $GoldenRoot } else { Join-Path $script:WorkRoot $GoldenRoot }
+    $root = [IO.Path]::GetFullPath($root).Replace('\', '/')
+    if (-not $Update -and -not (Test-Path -LiteralPath $root)) { return $null }
+    $g = [ordered]@{ root = $root; key = $Key }
+    if ($Update -and -not $LoopOk) { $g['error'] = 'not updated: the loop is not green'; return $g }
+    $items = @(@($Shots) | Where-Object { $_.path -and -not $_.error -and $_.preset -ne 'screen' -and -not ($_.PSObject.Properties.Name -contains 'golden' -and $_.golden -eq $false) } | ForEach-Object {
+        $i = [ordered]@{ path = [string]$_.path; name = [string]$_.name }
+        if ($_.PSObject.Properties.Name -contains 'ignore' -and @($_.ignore).Count) { $i['ignore'] = @($_.ignore | ForEach-Object { [ordered]@{ x = $_.x; y = $_.y; w = $_.w; h = $_.h } }) }
+        $i
+    })
+    if ($items.Count -eq 0) { $g['note'] = 'no shots to compare'; return $g }
+    $res = Invoke-UnityCommand -Name 'harness_golden' -TimeoutSec 120 -Params @{ shots = (ConvertTo-Json -InputObject $items -Depth 6 -Compress); golden = $root; key = $Key; out = $OutDir; update = [bool]$Update }
+    if (-not $res.success -or -not $res.result.ok) { $g['error'] = $(if ($res.success) { "$($res.result.error)$(@($res.result.results | Where-Object { $_.error } | ForEach-Object { " $($_.name): $($_.error)" }) -join ';')" } else { $res.error }); return $g }
+    $r = $res.result
+    $g['version'] = $r.version
+    if ($Update) {
+        $g['dir'] = $r.dir
+        $g['updated'] = @($r.results | ForEach-Object { Split-Path -Leaf $_.golden })
+        if (@($r.removed).Count) { $g['removed'] = @($r.removed) }
+        return $g
+    }
+    if ($r.from -and $r.from -ne $r.version) { $g['from'] = $r.from }   # goldens of another patch of this major.minor
+    if ($r.dir) { $g['dir'] = $r.dir }
+    $g['same'] = [int]$r.same; $g['changed'] = [int]$r.changed; $g['missing'] = [int]$r.missing
+    if ([int]$r.errors) { $g['errors'] = [int]$r.errors }
+    foreach ($x in @($r.results)) {
+        $s = $StatsByPath[[string]$x.path]
+        if (-not $s) { continue }
+        $d = [ordered]@{ status = $x.status }
+        if ($x.status -in @('same', 'changed')) { $d['meanDiff'] = [math]::Round([double]$x.meanDiff, 3); $d['changedRatio'] = [math]::Round([double]$x.changedRatio, 5); $d['ssim'] = [math]::Round([double]$x.ssim, 4); $d['maxDiff'] = [int]$x.maxDiff }
+        if ($x.rect) { $d['rect'] = @($x.rect) }
+        if ($x.diff) { $d['diff'] = $x.diff }
+        if ($x.error) { $d['error'] = $x.error }
+        $s['golden'] = $d
+    }
+    if ($g.missing -gt 0) { $g['hint'] = "no golden image for $($g.missing) shot(s) in $root/$($r.version)/$Key - when the shots look right, tools/loop.ps1 -UpdateGolden makes them the golden images" }
+    $g
 }
 
 # Fill durationSec/timings, write <OutDir>/report.json (UTF-8, no BOM) and return the JSON text.

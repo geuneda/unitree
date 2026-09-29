@@ -22,7 +22,7 @@
 |---|---|---|---|---|---|
 | W1 | 시나리오 입력 격리 | G3-6 | S | — | 완료 (2026-09-29) |
 | W2 | 캡처가 화면 전체를 본다 | G3-1, G3-5 | M | W1 | 완료 (2026-09-29) |
-| W3 | 시각 회귀와 움직임 | G3-4, G3-3, G3-7 | L | W1, W2 | 대기 |
+| W3 | 시각 회귀와 움직임 | G3-4, G3-3, G3-7 | L | W1, W2 | 완료 (2026-09-30) |
 | W4 | 렌더 설정을 코드로 | G1-1, P-4, G4-3, G4-2 | L | W3 | 대기 |
 | W5 | 루프 속도 | G2-3, G2-1 | L | — | 대기 |
 | W6 | 콘텐츠 헬퍼(a/b/c로 나눠 진행) | G1-3, G1-4, G4-1, G4-4 | L | W3, W4 (W6b는 W2) | 대기 |
@@ -49,7 +49,7 @@
 - 추가 검증: 스모크 씬 `"auto"` 캡처에 HUD가 1280x720으로 찍힘. attach-test에서 사내 프로젝트 A의 부트·로비 화면이 `"auto"`로 찍힘.
   셰이더 없는 머티리얼 주입 → `shotStats`에 마젠타 판정(selftest 항목으로 추가).
 
-### W3 시각 회귀와 움직임 (G3-7 → G3-4, G3-3)
+### W3 시각 회귀와 움직임 (G3-7 → G3-4, G3-3) — 완료 (2026-09-30, 아래 "해결됨")
 - G3-7(캡처에 카메라 스택 포함)을 먼저 한다: 기준 이미지는 플레이어가 보는 화면이어야 하는데, 지금 캡처는 카메라 하나 + UI라 스택의 다른 카메라가
   그리는 3D가 빠진다. 기준 이미지를 만든 뒤에 바꾸면 모든 기준 이미지를 다시 만들어야 한다.
 - 고치는 곳: `Tools~/loop.ps1`·`Tools~/Harness.psm1`(report.json에 diff 점수), 샘플의 `golden/`,
@@ -182,29 +182,24 @@
   - 현상: 에디터 오버헤드, autotick, Debug 코드 최적화가 섞인다. 지금은 변경 전후 비교에만 쓸 수 있다.
   - 방향: 개발 빌드 플레이어 + 런타임 Pipeline 서버로 같은 시나리오를 돌리는 `harness_perf`.
 
-- [ ] **G3-3 정지 이미지만 나온다**
-  - 현상: 움직임은 여러 컷과 EventBus 카운트로 추론해야 한다.
-  - 방향: 시나리오에 연속 캡처(N프레임) → 스프라이트 시트/GIF 출력.
+- **G3-3 정지 이미지만 나온다** → 2026-09-30 해결(W3, 아래 "해결됨"). 연속 캡처는 한 장의 시트(GIF는 만들지 않음).
 
-- [ ] **G3-4 시각 회귀 검사가 없다**
-  - 방향: `golden/` 기준 이미지와 픽셀 diff(SSIM 등) 점수를 report.json에 포함.
+- **G3-4 시각 회귀 검사가 없다** → 2026-09-30 해결(W3, 아래 "해결됨"). 다른 머신의 허용치는 P-3.
 
 - **G3-5 이미지 판정이 휴리스틱이다(마젠타 머티리얼)** → 2026-09-29 해결(W2, 아래 "해결됨"). `blank`·`dark`는 여전히 휴리스틱이다
-  (기준 이미지 비교는 G3-4).
+  (기준 이미지가 있으면 G3-4의 비교가 바뀐 화면을 잡는다).
 
 - **G3-6 실제 키보드·게임패드 입력이 시나리오 재생에 섞인다** → 2026-09-29 해결(W1, 아래 "해결됨").
 
-- [ ] **G3-7 캡처는 카메라 하나 + 스크린 공간 UI다** (2026-09-29, W2에서 남은 것)
-  - 현상: 오프스크린 캡처는 템플릿 카메라 하나를 렌더하고 캔버스·패널만 합성한다. URP 카메라 스택의 Overlay 카메라(FPS 무기, UI 카메라의 3D 모델)나
-    depth가 다른 Base 카메라(미니맵, 2D 게임의 레이어별 카메라)가 그리는 3D는 빠진다. 지금은 빈 샷일 때만 `hint`가 "화면에 그리는 다른 카메라"를 알려 준다.
-  - 방향: 템플릿의 `UniversalAdditionalCameraData.cameraStack`을 같은 RT에 순서대로 렌더(스택 카메라는 캡처 포즈를 따라간다 — 메인 카메라의 자식인 경우가
-    대부분), 화면에 그리는 다른 Base 카메라는 depth·viewport·clear 설정대로 합성. Built-in은 depth 순 카메라.
-  - 완료 기준: 스택·다중 카메라 픽스처에서 `"auto"`가 `"screen"`과 같은 레이어를 보여 준다(W3 기준 이미지 전에).
+- **G3-7 캡처는 카메라 하나 + 스크린 공간 UI다** → 2026-09-30 해결(W3, 아래 "해결됨"). 스택 Overlay 카메라의 캔버스는 렌더 요청이 그리지 않아
+  합성한다(아래 G3-8의 플레이어 캡처와 비교할 것).
 
 - [ ] **G3-8 에디터 캡처의 UI가 게임의 화면 크기 코드와 어긋날 수 있다** (2026-09-29, W2에서 남은 것)
   - 현상: 에디터에서는 게임이 Game 뷰 크기로 돈다. 캡처는 UI만 캡처 크기로 잠깐 다시 배치하므로 (1) 크기 변화 콜백(`OnRectTransformDimensionsChange`,
     `GeometryChangedEvent`)이 캡처마다 두 번 더 불리고, (2) `Screen.width/height`를 직접 읽어 배치한 UI·카메라(safe area 스크립트, 비율 맞춤 카메라)는
     Game 뷰 기준 그대로 찍힌다. 지금 우회는 그 캡처에 `"ui": false` 또는 `"screen"`.
+    (3) (2026-09-30, W3) 스택 Overlay 카메라(UI 카메라)의 캔버스는 URP 렌더 요청이 그리지 않아 숨은 직교 UI 카메라로 그려 카메라들 위에 합성한다 →
+    그보다 뒤에 그리는 Base 카메라(미니맵)와의 앞뒤, 원근 UI 카메라로 기울여 그린 캔버스가 게임과 다를 수 있다.
   - 방향: 개발 빌드 플레이어를 캡처 크기의 창으로 띄워 화면을 그대로 찍는 경로(W8) — 재배치 없음, `Screen.width` = 캡처 크기, 카메라 스택 포함.
     에디터 캡처는 빠른 루프용으로 두고 플레이어 캡처와의 차이를 보고한다.
   - 완료 기준: 사내 프로젝트 A 로비를 플레이어 720x1280 창으로 찍은 것과 에디터 `"auto"`가 같은 배치(다르면 원인이 report에 나옴).
@@ -271,6 +266,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
   - 2026-09-29(W1 매트릭스, 다른 에디터 없이): 새 클론 루프는 그대로(첫 루프 130.2/56.8/48.3, 2·3번 25.0/15.6/0.5)였는데, 같은 에디터 세션에서
     이어진 selftest 1번 루프 3회는 **6.3에 가까운 밝기**(61.2/56.8/48.3; 6.3은 65.1/60.5/50.3)로 녹색이었다(이전 실행은 여기서 검어 빨강).
     한 세션 안에서 검정 → 정상으로 돌아오기도 한다 = 비결정적. 해결로 치지 않는다(W4에서 원인부터).
+  - 2026-09-30(W3 매트릭스): 6.6 새 클론의 fingerprint가 `0ba32228…` → `c24b65e7…`로 바뀌었다. W2 커밋으로 떠도 같아서(덤프 동일) 코드가 아니라 이 머신의 6.6 쪽
+    변화다(원인 미상). selftest 1번의 기준 이미지 검사가 루프끼리의 조명 차이(maxDiff 225)를 잡는다 — W4의 원인 조사에 쓸 수 있다.
   - 방향: 프레임 디버거/RenderDoc으로 주광 그림자 패스(캐스케이드 아틀라스, `_MainLightShadowParams`)를 6.3과 비교한다. Unity 쪽 버그면
     최소 재현 프로젝트로 신고하고, 그 전까지 6.6에서는 소프트 그림자 캐스케이드를 쓰지 않는 설정을 샘플에 둘지 정한다.
     6000.6.x 새 패치가 나오면 `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`로 다시 본다.
@@ -293,6 +290,9 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
       (F-1과 같은 종류의 문제) 확인해야 한다.
     - 결정성: Apple Silicon(ARM64) JIT의 부동소수점 결과가 x64와 달라서 fingerprint가 OS·CPU마다 다를 수 있다(F-6처럼 절차적 베이크 결과가 바뀜).
       기준을 "같은 머신 안에서 결정적"으로 둘지 먼저 정해야 한다.
+      (2026-09-30, W3에서 정함) 기준 이미지(`golden/`)는 Unity 버전별로 두고, 보장은 "같은 머신·같은 버전이면 픽셀까지 같다"(측정 diff 0, 새 클론 포함).
+      다른 GPU·드라이버·OS를 위한 허용치(채널 차이 24 초과 픽셀 ≤ 0.01%, 평균 차이 ≤ 0.5, `Editor/HarnessGolden.cs`)는 재지 않았다 → Mac(또는 다른 Windows
+      머신)에서 샘플 기준 이미지와의 점수를 재서 허용치를 정하고, 넘으면 머신별 폴더를 둘지 정한다.
     - README에 macOS용 Unity CLI 설치 방법이 없다.
     - O-4·O-7·O-8에서 만든 `open.ps1`·`quit.ps1`·`fresh-clone-test.ps1`은 경로를 `/`로 쓰고, 자식 PowerShell을 현재 호스트(`Get-HarnessPowerShell`)로,
       에디터를 `unity editors --installed`의 위치로 띄운다(`.app`이면 `Contents/MacOS/Unity`). 그래도 macOS에서 확인할 것:
@@ -329,20 +329,26 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
-**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~3.5분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
+**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~4분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
 (새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~5분), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
 
 1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark·magenta 샷 없음, 모든 샷 1280x720에
    HUD 합성(`ui`) + `compile-check -IncludeHarness`
+   + 기준 이미지(G3-4): 루프 1이 임시 폴더에 쓰고(`-UpdateGolden`) 2·3이 픽셀까지 같음, 커밋된 이 버전의 기준 이미지와 같음(있을 때),
+   `harness_golden`의 `ignore`(왼쪽 위 기준)와 같은 major.minor의 다른 패치 폴더 대체
    + 시나리오 도구 루프 한 번: `waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처
-   + uGUI 합성(G3-1, 편집 모드 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·다른 카메라의 캔버스 → 순서, 색 공간 블렌드 오차 ≤ 2, 되돌림)
+   + uGUI 합성(G3-1, 편집 모드 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·스택 UI 카메라의 캔버스 → 순서, 색 공간 블렌드 오차 ≤ 2, 되돌림)
+   + 카메라(G3-7, 편집 모드 픽스처: 메인 카메라 자식인 스택 Overlay 카메라의 쿼드가 메인·다른 포즈 모두 화면 중앙, 미니맵 Base 카메라가 viewport에,
+   앞 depth 카메라는 덮임, `"camera"`로 미니맵만 전체 화면, 메인 카메라 위치·다른 카메라 타깃·스택 되돌림, 씬 dirty 아님)
+   + 연속 캡처(G3-3, 플레이 중 eval로 만든 오버레이 캔버스·스택 카메라가 2x2 시트의 모든 프레임에, `motion` > 0)
    + 실제 입력 격리(G3-6): 플레이 동안 실제 키보드 장치에 스페이스를 넣어도 `play.events` 그대로·`isolatedDevices` 누름 > 0, 실패한 플레이·중간에
    멈춘 플레이 뒤에도 실제 장치가 다시 켜짐)
 2. C# 컴파일 에러 주입 → `stage=compile`, file/line/module 정확 → 원복 후 녹색
 3. 런타임 예외 주입 → `stage=runtime`, 정확한 줄 → 원복 후 녹색
-4. HLSL 에러 주입 → `stage=shader`, 재임포트 없는 다음 루프에서도 검출 → 원복 후 녹색. 파이프라인이 못 그리는 머티리얼(받침대 → `Standard`, G3-5)
-   → 샷 `magenta` + `hint`에 `Smoke/Pedestal`, 루프는 녹색 → 원복 후 마젠타 없음
+4. HLSL 에러 주입 → `stage=shader`, 재임포트 없는 다음 루프에서도 검출 → 원복 후 녹색(그 샷을 이 항목의 기준 이미지로). 셰이더 한 줄(스펙큘러 절반, G3-4)
+   → 루프 녹색, golden `changed` + `rect` + diff PNG. 파이프라인이 못 그리는 머티리얼(받침대 → `Standard`, G3-5)
+   → 샷 `magenta` + `hint`에 `Smoke/Pedestal` + golden `changed`, 루프는 녹색 → 원복 후 마젠타 없음·golden `same`
 5. 리셋 없는 static 추가 → `stage=lint` → 원복
 6. 루프 2개 동시 실행 → 두 번째가 대기 후 성공
 7. worktree 격리(G5-2): 에이전트 worktree 2개. A가 깨진 코드를 `submit.ps1 -SkipCheck` → `stage=compile` + `reverted` + `restore.ok`,
@@ -354,12 +360,14 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
    (selftest는 이미 병합됨·미커밋·에디터 트리 직접 수정 거부까지 보고, 끝나면 worktree·`selftest/*` 브랜치·테스트 커밋을 스스로 걷어낸다)
 9. 새 클론(O-8): `tools/`·`ProjectSettings/`·`Packages/`·`.gitignore`·에디터 시작 코드를 바꿨으면 임시 커밋 후
    `tools/fresh-clone-test.ps1 -SelfTest -ExpectFingerprint <1의 fingerprint>` 녹색(클론이 메인 트리와 같은 fingerprint), `shots/`를 Read로 확인.
+   루프 요약의 `golden`: 샘플 버전(6000.3.11f1)은 커밋된 기준 이미지와 `same=3`(새 Library의 첫 임포트도 같은 픽셀), 다른 버전은 `missing`.
    지원 버전(CLAUDE.md "Unity 버전")마다 `-UnityVersion <v>`로도 돌린다(fingerprint는 그 버전의 값)
 10. 기존 프로젝트(P-2): 하네스 패키지·설치/제거 스크립트·런타임을 바꿨으면, 기준선 커밋이 있는 테스트 클론마다
    `tools/attach-test.ps1 -Project <클론> [-Scene ...] [-Module ...]` 녹색 — install → 설치분만 바뀜 → 기존 씬으로 루프 3회 녹색(fingerprint·events 동일)
    → 출시 빌드에 `Harness.*` 없음 → uninstall 뒤 `git status` 비어 있음. `shots/`를 Read로 확인. 지금 쓰는 클론(`../ah-p2`, 기준선 커밋 포함):
    BagelGame(`-Module Game=Assets/Game,UI=Assets/UI`), Fluid-Sim(`-Scene "Assets/Scenes/Fluid Particles.unity"`), 사내 프로젝트 A(비공개 클론, 이 머신에만;
-   `-Scenario ../ah-p2/brd-attach.json`(부트 대화상자까지) 또는 `brd-lobby-auto.json`(테스트 서버로 로비까지, `"auto"`·`"screen"` 나란히 — 끝나면 에디터
+   `-Scenario ../ah-p2/brd-attach.json`(부트 대화상자까지) 또는 `brd-lobby-auto.json`(테스트 서버로 로비까지, `"auto"`·`"screen"` 나란히; `brd-lobby-w3.json`은
+   여기에 로비 연속 캡처를 더한 것 — 끝나면 에디터
    PlayerPrefs `dev.force_login.server_environment`를 0으로), `-KnownErrors '^\[Firebase\] Dependency'`, `-NoBuild`). 배포 경로를 바꿨으면
    `-Source git+file:///<저장소>?path=/AgentHarness/Packages/com.geuneda.agentharness#<브랜치>`(커밋된 것, 부트스트랩 포함)로도.
 
@@ -368,6 +376,76 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G3-7 캡처는 카메라 하나 + 스크린 공간 UI다** · **G3-4 시각 회귀 검사가 없다** · **G3-3 정지 이미지만 나온다** (2026-09-30, W3)
+  - 현상(전): 캡처는 템플릿 카메라 하나를 렌더하고 UI만 합성해서 URP 스택의 Overlay 카메라(무기, UI 카메라)와 다른 Base 카메라(미니맵)가 빠졌다.
+    실제 Game 뷰와 나란히 찍어 보니 반대 경우도 있었다: depth가 높은 전체 화면 Depth-only **Base** 카메라는 Game 뷰에서 앞 카메라의 씬을 지우는데
+    (URP는 Base 카메라를 겹쳐 그리지 않는다 — 겹치려면 스택), 캡처는 그 카메라의 캔버스를 씬 위에 합성해 게임에 없는 화면을 찍었다(W2 uGUI 픽스처가 그 구성).
+    기준 이미지가 없어서 렌더가 바뀌어도(셰이더 한 줄) 루프 결과는 같았고, 움직임은 여러 컷과 이벤트 수로만 추론했다.
+  - 방법(G3-7, `Runtime/CaptureCameras.cs`):
+    - 템플릿이 메인 카메라이고 화면에 그리면: 화면에 그리는 Base 카메라(활성·Game·타깃 텍스처 없음·디스플레이 1·하네스의 숨은 카메라 아님·URP Overlay 아님)를
+      depth 순(같으면 경로 순 — URP의 정렬은 같은 depth끼리 순서가 없다)으로 같은 RT에 렌더하고, 템플릿 자리에 캡처 카메라를 넣는다. 캡처 카메라는 템플릿의
+      스택(활성 Overlay), 렌더러(`GetRenderer(i)`로 인덱스를 찾아 `SetRenderer` — URP는 같은 렌더러 종류끼리만 쌓는다), `volumeTrigger`를 복사한다.
+      `StandardRequest` 렌더 요청은 URP 17.0·17.3·17.6 모두 `Render(context, [camera])`로 스택까지 그린다(소스 확인). Built-in은 depth 순 `Camera.Render`.
+    - 포즈가 템플릿과 다르면 템플릿을 그 포즈로 잠깐 옮겼다가 로컬 위치·회전을 되돌린다 → 자식(무기와 그것을 그리는 Overlay 카메라)이 같은 화면 위치로 따라온다.
+      Overlay 카메라만 옮기면 무기 오브젝트가 남아서 안 보이고, 안 옮기면 월드를 그리는 Overlay(외곽선 등)가 어긋난다. 렌더는 여전히 복사한 캡처 카메라가 한다
+      (템플릿의 TAA 히스토리·aspect를 건드리지 않음). 캡처 카메라의 aspect는 자기 viewport 모양(분할 화면).
+    - 다른 Base 카메라는 캡처 동안 `targetTexture`를 캡처 RT로 바꿔(그 카메라의 캔버스가 캡처 크기로 배치된다) 렌더하고 되돌린 뒤 `ForceUpdateCanvases`.
+      `"ui": false`면 그 카메라가 그리는 캔버스의 레이어를 culling mask에서 잠깐 뺀다.
+    - `"camera": X`(메인 카메라가 아님)이거나 메인 카메라가 텍스처에 그리면: 그 카메라와 스택만, viewport 전체로.
+    - 스택 Overlay 카메라의 Screen Space - Camera 캔버스는 **렌더 요청에서 그려지지 않았다**(요청한 베이스 카메라와 다른 Base 카메라의 캔버스는 그려짐 —
+      Unity가 UI를 요청한 카메라에 대해서만 준비하는 것으로 보인다. Overlay 카메라에 타깃을 줘도 같음). → `CaptureUi`가 그 캔버스를 카메라들 위에 합성한다
+      (그 Overlay의 그리기 순서로; 한계는 G3-8 (3)).
+    - 보고: `shotStats[].cameras`(그린 순서, Overlay는 `" (overlay)"`), `ui`는 카메라가 그린 캔버스(카메라 순서) 다음 합성 레이어. 빈 샷의 `hint`는 화면에 그리는데
+      캡처가 그리지 않은 카메라만 짚는다.
+  - 방법(G3-3, `Runtime/ScenarioRunner.cs`, `Runtime/ContactSheet.cs`): 캡처에 `"frames": N`(+ `"every": k`). 포즈는 첫 프레임에 정하고(`"main"`·`"camera"`는
+    카메라를 따라감) k프레임마다 `HarnessCapture.Render`(파일 없이 픽셀)로 찍어 박스 필터로 줄여 한 장의 시트에 넣는다(열 = ⌈√N⌉, 폭 ≤ 1920, 칸 위 캡션 띠에
+    3x5 비트맵 숫자로 t — 처음엔 칸 안에 써서 게임 HUD를 가렸다). `motion` = 이웃 프레임의 평균 |Δ밝기|(0..255). 통계는 프레임 평균, blank·dark·magenta는
+    하나라도. 시나리오 끝은 시퀀스를 기다리고, 실패·중단이면 찍은 만큼의 시트 + `error`. GIF는 만들지 않았다 — 에이전트는 Read로 한 장을 보고, GIF의 256색
+    팔레트는 기준 이미지 비교에도 못 쓴다.
+  - 방법(G3-4, `Editor/HarnessGolden.cs` `harness_golden`, `Tools~/Harness.psm1` `Invoke-HarnessGolden`, `loop.ps1 -UpdateGolden`/`-Golden`):
+    - 위치: `golden/<Unity 버전>/<시나리오 name>/<샷 파일>.png`(설정 `goldenRoot`, worktree면 그 worktree의 것). 버전마다 렌더가 달라서(P-4, fingerprint도 버전별)
+      버전별로 두고, 그 버전 폴더가 없으면 같은 major.minor의 가장 가까운 패치(`golden.from`, 아래 버전 우선).
+    - 점수(Unity `LoadImage`로 읽어 C#에서): `meanDiff`(채널 평균 |차이|), `maxDiff`, `changedRatio`(채널 차이 > 24인 픽셀), SSIM(8x8 블록 루마), `rect`(바뀐 범위,
+      왼쪽 위 기준), diff PNG(샷을 어둡게, 바뀐 픽셀 빨강, 뺀 영역 파랑, 범위 노란 테두리). `same` = 비율 ≤ 0.01% 이고 평균 ≤ 0.5. 크기가 다르면 `size`.
+    - 결정성 기준(P-3과 같이 정함): 같은 머신·같은 버전이면 픽셀까지 같다(고정 시간 간격; 아래 측정 diff 0). 허용치는 다른 GPU·드라이버용이고 아직 재지 않았다(P-3).
+    - 실패로 치지 않는다: 의도한 변경 중에도 루프는 녹색이고, 에이전트가 `golden.changed`와 diff PNG를 보고 판단한다. 갱신은 `-UpdateGolden`(녹색일 때만, 그
+      폴더의 PNG를 이번 샷으로 교체). 빼는 것: 캡처의 `"golden": false`, `"ignore": [{x,y,w,h}]`(이미지 비율, 왼쪽 위 기준 — Read로 PNG를 보고 쓰기 쉽게),
+      `"screen"` 샷(Game 뷰 크기). `-NoPlay`는 키 `capture`.
+    - 샘플은 6000.3.11f1의 `default` 시나리오 3장(2.9 MB)을 커밋했다. 다른 버전은 `missing`(6.6은 P-4 때문에 만들 수 없다).
+    - 기준 이미지가 드러낸 비결정성: 새 클론(새 Library)의 **첫 루프** closeup(t=0.5)에 지형·하늘·후처리가 없었다(`meanDiff` 67.6, `changedRatio` 75%; 2·3번 루프와
+      horizon·overview는 `same`). 에디터가 처음 만난 셰이더 변형을 백그라운드에서 컴파일하며 그동안 그 오브젝트를 빼기 때문이다(Editor 설정 Asynchronous Shader
+      Compilation; 편집 모드 픽스처의 첫 캡처에서도 새 Unlit 쿼드가 빠짐). 메인 트리에서 재현: 에디터를 닫고 `Library/ShaderCache*`·`LastSceneManagerSetup.txt`를 지우고
+      열어 루프 → 같은 `meanDiff` 67.649. 캡처만 동기로 바꾸는 네 가지는 모두 안 됐다(`ShaderUtil.allowAsyncCompilation`, 명령 버퍼 `SetAsyncCompilation`, 캡처 동안만
+      설정 끄기 — 앞 프레임의 Game·Scene 뷰가 비동기로 요청해 둔 변형이 그대로 빠짐, `anythingCompiling` 대기 — 메인 스레드를 막으면 20 s 동안 끝나지 않음).
+      설정을 루프 전부터 끄면 같다 → `harness_setup`에 `syncShaders`(`EditorSettings.asyncShaderCompilation = false`): `setup: harness`면 적용(샘플의
+      `ProjectSettings/EditorSettings.asset` 한 줄을 커밋), `attach`면 `recommendations`만. 켜진 프로젝트에서는 캡처 순간 컴파일 중이면 `shotStats[].shadersCompiling` + `hint`.
+      적용 뒤 캐시를 지운 첫 루프 `same` 3/3(플레이 2.46 s, 히치 0), 캐시를 지운 selftest 1번 녹색(픽스처 첫 캡처 209 ms에 쿼드 있음).
+  - 검증(이 머신, 에디터를 하나씩):
+    - 실제 Game 뷰와 비교(플레이 중 eval로 만든 픽스처, `"screen"` 366x305와 `"main"`·다른 포즈 1280x720): 메인 카메라 자식 스택 Overlay의 빨간 쿼드, 미니맵
+      Base 카메라(오른쪽 위 1/4, 파랑)와 그 캔버스의 노란 점, 스택 UI 카메라의 초록 캔버스, HUD — 네 가지가 세 샷 모두에 같은 레이어로 나옴(전에는 쿼드·미니맵이
+      없었다). 다른 포즈(overview)에서도 쿼드가 같은 화면 위치. 전체 화면 Depth-only Base 카메라 구성은 Game 뷰가 씬을 지우고 이제 캡처도 같다.
+    - 샘플 샷은 그대로(밝기 64.8/60.1/50.0, fingerprint `977545a7…`), 루프 3.49 s(`goldenSec` 0.2 — 샷 3장 PNG 디코드 + 비교). 캡처 비용: 카메라 픽스처(Base 3개 +
+      Overlay 1개) 126 ms, uGUI 픽스처 132 ms(W2 127–159).
+    - 같은 코드 3회: 기준 이미지와 `maxDiff` 0(세 샷 모두). 셰이더 한 줄(스펙큘러 절반): closeup `meanDiff` 0.591·`changedRatio` 1.12%·SSIM 0.9955, horizon
+      0.039·0.083%, overview 0.008·0.015%(하이라이트 138픽셀) — 처음 정한 허용치(비율 0.05%)는 overview를 `same`으로 봐서 0.01% + 평균 0.5로 좁혔다. diff PNG가
+      하이라이트 두 곳을 짚음. 받침대 `Standard`(마젠타): 12.2 / 3.5 / 0.24, `rect`가 받침대.
+    - 연속 캡처: closeup 8프레임 6간격 → 3x3 시트, Space 뒤 CW→CCW가 칸마다 보임, `motion` 17.3–19.3. 메인 카메라 4프레임 5간격 → 2x2, `motion` 2.2–2.3,
+      플레이 중 만든 오버레이 캔버스·스택 카메라가 모든 프레임에(selftest 1번).
+    - 매트릭스(동기 셰이더 컴파일 수정 뒤): 샘플 selftest 1–8 녹색 219.6 s(`977545a7…`, 줄 61/68/87; 1번 36.1 s에 기준 이미지·카메라·연속 캡처 검사, 커밋된 기준
+      이미지와 `same` 3/3, 루프 3.48–3.52 s; 4번 33.6 s; `syncShaders` 뒤 다시 219.0 s).
+      9: 새 클론 6000.3.11f1 녹색 314.6 s(`977545a7…` = 메인 트리, **새 Library의 첫 루프부터 커밋된 기준 이미지와 `same=3`**), 6000.0.84f1 녹색 291.1 s(`d9a6d092…`,
+      기준 이미지 `missing`), 6000.6.3f1 2–8 녹색·1 빨강 352.2 s(P-4: selftest 루프 2는 `same`, 3은 `changed` maxDiff 225 + `dark` — 이제 기준 이미지 비교도 잡는다).
+      6.6 fingerprint가 `c24b65e7…`로 바뀌었다(W2까지 `0ba32228…`): W2 커밋(`a9133c4`)으로 뜬 6.6 새 클론도 `c24b65e7…`이고 fingerprint 덤프가 W3와 바이트까지
+      같다 → W3 때문이 아니라 이 머신의 6.6 쪽 변화(원인 미상, P-4와 같은 버전). 6.6에서 8번 "land 도중 submit이 락을 기다림"이 두 번 빨갰다 — 기다려야 할
+      submit의 compile-check 게이트가 4.88 s로 land 전체(4.89 s)만큼 걸려 줄을 서기 전에 land가 끝남 → 그 submit을 `-SkipCheck`로(worktree는 깨끗) 바꾼 뒤 6.6 녹색
+      (6.6 재실행 352.2 s: 2–8 녹색, 1은 P-4만), 메인 트리 7·8 녹색(대기 3.4 s).
+      10: BagelGame 녹색 56.1 s(`619be553…`, `cameras` = `Core/MainCamera`, 출시 빌드 `Managed/` 132개·`Harness.*` 0개), Fluid-Sim(Built-in) 녹색 32.1 s(`54880f05…`,
+      `cameras` = `Shadow Camera, Main Camera` — 명령 버퍼로 그림자 맵을 그리는 depth 낮은 카메라를 메인 카메라가 덮어 밝기 23.0/14.9/22.2, W2 23.0/15.0/22.1과 이
+      시뮬레이션의 흔들림 ±0.1 안; 103개·0개), 사내 프로젝트 A 녹색 127.1 s(`6664b723…`, 로비 시나리오에 연속 캡처를 더한 변형 `brd-lobby-w3.json`: `"auto"`
+      37.7/92.0/120.4/145.7 ≈ W2, 카메라는 `Main Camera` 하나, 로비 첫 구매 팝업 6프레임 3x2 시트 `motion` 0.9–1.3; 끝난 뒤 서버 선택 PlayerPrefs를 1 → 0으로
+      되돌림). 세 프로젝트 모두 `harness_setup` 권장 사항에 `syncShaders`가 나오고(attach는 바꾸지 않음), 제거 뒤 `git status` 비어 있음.
+  - 남은 것: 다른 머신의 허용치(P-3), Overlay 카메라 캔버스의 합성(G3-8 (3)), 기준 이미지는 샘플 버전(6.3)만.
 
 - [x] **G3-1 오프스크린 캡처에 스크린 공간 UI가 안 찍힌다** · **G3-5 마젠타 머티리얼을 따로 잡지 못한다** (2026-09-29, W2)
   - 현상(전): 프리셋 캡처는 카메라 오프스크린 렌더라 UI Toolkit 패널·오버레이 캔버스가 빠졌다. `"screen"`은 Game 뷰 탭이 보일 때만 되고 크기가 사용자

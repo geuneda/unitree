@@ -72,6 +72,8 @@ function Get-LoopSummary($r) {
         compileErrors = @($r.compileErrors); runtimeErrors = @($r.runtimeErrors).Count
         editorErrors = @($r.editorErrors | ForEach-Object { $_.msg }); warningCount = $r.warningCount
         fpsAvg = if ($r.fps) { $r.fps.avg } else { $null }; error = $r.error
+        # The committed golden images of this Unity version (reported, not a failure): a fresh import renders the same?
+        golden = if ($r.golden) { "same=$($r.golden.same) changed=$($r.golden.changed) missing=$($r.golden.missing)$(if ($r.golden.from) { " from=$($r.golden.from)" })$(if ($r.golden.error) { " error=$($r.golden.error)" })" } else { $null }
     }
 }
 

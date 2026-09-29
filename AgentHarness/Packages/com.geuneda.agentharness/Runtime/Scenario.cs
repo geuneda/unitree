@@ -62,6 +62,9 @@ namespace Harness
     /// camera: render from this camera (GameObject name or path) instead of the main camera.
     /// pos (+ lookAt or rot as Euler angles, fov): render from this pose, with the settings of the main camera (or camera).
     /// ui: composite the screen-space UI (overlay canvases, UI Toolkit panels) laid out at the capture size (default true).
+    /// frames (&gt; 1): a sequence - this many frames, one every <see cref="every"/> frames from t, in one contact sheet PNG
+    /// (not with "screen"). The pose is fixed at the first frame, except "main"/"camera" captures, which follow the camera.
+    /// golden: compare with the golden image (default true); ignore: regions left out of that comparison (changing text).
     /// </summary>
     [Serializable]
     public sealed class ScenarioCapture
@@ -75,6 +78,10 @@ namespace Harness
         public float[] rot;
         public float fov;
         public bool ui = true;
+        public int frames;
+        public int every = 1;
+        public bool golden = true;
+        public ShotRect[] ignore = Array.Empty<ShotRect>();
     }
 
     /// <summary>A scene that finished loading during the scenario (t = scenario clock, -1 before it started).</summary>

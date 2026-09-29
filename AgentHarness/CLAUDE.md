@@ -46,9 +46,12 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 `shotStats[].blank=true`(평평/검은 화면)면 렌더가 깨진 것이다. `dark=true`(픽셀 98% 이상이 거의 검정)는 실패로 치지 않지만
 조명이 빠진 화면일 가능성이 크다 — PNG를 열어 본다. `magenta=true`(에러 셰이더의 마젠타가 0.05% 이상)도 실패로 치지 않지만 거의 항상
 렌더 파이프라인이 못 그리는 머티리얼이다(URP 프로젝트에서 `Shader.Find("Standard")` 같은 Built-in 셰이더, 없는·깨진 셰이더) — `hint`가 그 렌더러를 짚는다.
-샷에는 스크린 공간 UI(uGUI 캔버스·UI Toolkit 패널)가 캡처 크기로 다시 배치돼 합성돼 있다(`shotStats[].ui`, 아래 "시나리오").
+샷에는 화면에 그리는 카메라들(`shotStats[].cameras`: 스택·미니맵 포함)과 스크린 공간 UI(uGUI 캔버스·UI Toolkit 패널, 캡처 크기로 다시 배치)가
+들어 있다(`shotStats[].ui`, 아래 "시나리오"). **`golden.changed` > 0이면** 기준 이미지와 달라진 샷이다(실패 아님): 의도한 변경이 아니면
+`shotStats[].golden.diff` PNG(바뀐 픽셀 빨강, 바뀐 곳 노란 테두리)를 연다. 의도한 변경이고 샷이 맞으면 `-UpdateGolden`으로 갱신해 함께 커밋한다(아래 "기준 이미지").
 
-옵션: `-Scenario tools/scenarios/x.json`, `-Out HarnessOut/x`, `-NoPlay`(편집 모드 캡처만), `-NoCompile`.
+옵션: `-Scenario tools/scenarios/x.json`, `-Out HarnessOut/x`, `-NoPlay`(편집 모드 캡처만), `-NoCompile`,
+`-UpdateGolden`(녹색이면 이번 샷을 기준 이미지로), `-Golden <폴더>`(기준 이미지 루트, 기본 설정 `goldenRoot` = `golden`).
 **여러 에이전트가 동시에 작업하면** 이 폴더를 직접 고치지 말고 각자 worktree에서 `tools/submit.ps1`을 쓰고, 끝나면 커밋해서
 `tools/land.ps1`로 병합한다(아래 "병렬 에이전트").
 
@@ -65,7 +68,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
   "fps": {"avg","min","p95ms","p99ms","hitches","cpuMainAvgMs","samples","editorFocused"},
   "shots": ["C:/.../HarnessOut/latest/shot0_closeup.png", ...],
   "durationSec": 3.5, "unityVersion": "6000.3.11f1",   // 루프를 돌린 에디터 버전
-  "timings": {"lockWaitSec","editorWaitSec","compileSec","buildSec","playSec","collectSec"},   // editorWaitSec: 시작 시 리로드·busy 대기(있을 때만)
+  "timings": {"lockWaitSec","editorWaitSec","compileSec","buildSec","playSec","collectSec","goldenSec"},   // editorWaitSec: 시작 시 리로드·busy 대기(있을 때만)
   "build": {"fingerprint","steps":[{"type","module","ms","error","file","line"}], ...},
   "play": {"success","probeReady","frames","gameSec","modules","failedModules","inputEventsApplied",
            "events":[{"name":"SpinnerLap","count":2}],     // EventBus 발행 횟수 → 게임플레이를 기계적으로 검증
@@ -75,8 +78,14 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
            "waits":[{"type","target","t","waitedSec","frames"}], "clicks":[{"target","t","x","y","via"}]},
   "render": {"batches","setPassCalls","drawCalls","triangles","vertices"},
   "shotStats": [{"name","preset","t","width","height","meanLuma","stdLuma","blank","dark","magenta","magentaRatio",
-                 "ui":["ugui:<캔버스 경로>","uitk:<PanelSettings>"],   // 합성한 UI(아래부터), 합성 실패는 "uiError"
-                 "error","hint"}],   // hint: blank·magenta의 이유(화면에 그리는 다른 카메라, 마젠타로 그린 렌더러)
+                 "cameras":["Stage/Main Camera","Stage/Main Camera/Weapon (overlay)","Minimap"],   // 그린 카메라(아래부터)
+                 "ui":["ugui:<캔버스 경로>","uitk:<PanelSettings>"],   // 샷의 UI(아래부터), 합성 실패는 "uiError"
+                 "shadersCompiling": true,   // 캡처 순간 셰이더가 백그라운드 컴파일 중(비동기 컴파일이 켜진 프로젝트만): 오브젝트가 빠졌을 수 있다
+                 "frames","every","sheet":"3x3","times":[],"motion":[],   // 연속 캡처("frames" > 1)만: 시트 PNG, 프레임 사이 움직임
+                 "golden":{"status":"same|changed|size|missing|error","meanDiff","changedRatio","ssim","maxDiff",
+                           "rect":[x,y,w,h],"diff":"<바뀐 곳 PNG>"},   // 기준 이미지가 있을 때만
+                 "error","hint"}],   // hint: blank·magenta의 이유(화면에 그리지 않은 다른 카메라, 마젠타로 그린 렌더러)
+  "golden": {"root","key","version","from","dir","same","changed","missing","updated":[],"hint","error"},   // 기준 이미지(G3-4), 실패 아님
   "lint": [{"rule","module","file","message"}], "warningCount": 0,
   "submit": {"phase","synced","kept","reverted","written","deleted","contractsAdded","metaWrittenBack",   // submit.ps1만.
              "errorModules","restore","check","owner","takeover"},   // timings에 checkSec/syncSec/restoreSec 추가
@@ -117,10 +126,11 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 ```
 Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json: com.unity.pipeline 의존)
   Runtime/                     런타임 계약: GameRoot, IGameModule, EventBus, HarnessProbe, HarnessConfig, ShotPreset(+ShotPose), ScriptedInput,
-                               ScenarioInput(KeyNames, InputHookReplay), ScenarioRunner, HarnessCapture(+CaptureUi: 스크린 공간 UI 합성)
+                               ScenarioInput(KeyNames, InputHookReplay), ScenarioRunner, HarnessCapture(+CaptureCameras: 화면의 카메라들,
+                               CaptureUi: 스크린 공간 UI 합성, ContactSheet: 연속 캡처 시트)
                                (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
   Runtime/Procedural/          MeshBuilder, Noise(Perlin/fBm/Ridged/Worley/Rng), TextureBaker, PMath
-  Editor/                      [CliCommand] harness_* 와 BuildContext/IBuildStep, HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
+  Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교) 와 BuildContext/IBuildStep, HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
   UI/                          DefaultRuntimeTheme.tss (UI Toolkit 기본 테마, 텍스트)
   Tools~/                      도구 본체(.ps1, Harness.psm1) + templates/ (진입점, 기본 시나리오, 기존 프로젝트용 안내서, HarnessInput.cs)
 ProjectSettings/AgentHarness.json   하네스 설정: setup 모드, 모듈 루트/폴더, contracts, 생성물 경로, 빌드·플레이 씬
@@ -137,6 +147,7 @@ tools/fresh-clone-test.ps1     새 클론 검증: 짧은 경로에 클론 → op
 tools/attach-test.ps1          기존 프로젝트 붙이기 검증: install → open → 루프 N회 → 출시 빌드 → quit → uninstall → git status
 tools/selftest.ps1             검증 매트릭스 1–8 자동 실행(에러 주입·동시 루프·worktree submit/land)
 tools/scenarios/*.json         플레이 시나리오        HarnessOut/           캡처·result.json·report.json (gitignore)
+golden/<Unity 버전>/<시나리오>/  기준 이미지(커밋): 루프 샷과 비교 (loop.ps1 -UpdateGolden이 씀)
 AgentScripts/                  eval_file / run_script 용 임시 C# (gitignore)
 ```
 
@@ -206,7 +217,8 @@ public sealed class FooBuildStep : IBuildStep
 | 커맨드 | 하는 일 |
 |---|---|
 | `harness_build` | Builders의 IBuildStep을 Order 순으로 빈 씬에 실행 → `buildScene` 저장. `{ok, fingerprint, steps[], cacheHits, deletedAssets}`. `dry_run`, `no_cache`. 빌드 스텝이 없고 `playScene`이 build가 아니면(기존 프로젝트) 플레이 씬을 열고 에셋 기준 fingerprint만(`skipped`) |
-| `harness_capture` | `{"preset":"all"\|"<name>"\|"main","out":"HarnessOut/capture","scene":"","ui":true}` 편집 모드 오프스크린 PNG(프로젝트 캡처 크기, 스크린 공간 UI 합성) + `meanLuma/stdLuma/blank/dark/magenta/ui`. 샷 = 씬의 ShotPreset + 설정 `shots`. 플레이 씬을 먼저 연다(`"scene":"open"`이면 열린 씬 그대로) |
+| `harness_capture` | `{"preset":"all"\|"<name>"\|"main","out":"HarnessOut/capture","scene":"","ui":true}` 편집 모드 오프스크린 PNG(프로젝트 캡처 크기, 화면의 카메라들 + 스크린 공간 UI 합성) + `meanLuma/stdLuma/blank/dark/magenta/cameras/ui`. 샷 = 씬의 ShotPreset + 설정 `shots`. 플레이 씬을 먼저 연다(`"scene":"open"`이면 열린 씬 그대로) |
+| `harness_golden` | `{"shots":"[{\"path\",\"name\",\"ignore\":[{x,y,w,h}]}]","golden":"","key":"default","out":"","update":false}` 샷을 `<golden>/<Unity 버전>/<key>/<파일>`과 비교(샷마다 status·meanDiff·changedRatio·ssim·rect, 바뀌었으면 `<out>/golden/<샷>.diff.png`) 또는 그 폴더에 씀(`update`). 루프가 매번 부른다 |
 | `harness_play` | `{"scenario":"tools/scenarios/default.json"\|"{...inline}","out":"HarnessOut/play"}` 즉시 반환 → `harness_play_status` 폴링 |
 | `harness_play_status` | `entering\|running\|exiting\|done\|failed` + 끝나면 `result`(result.json) |
 | `harness_console` | `{"since":<mark>,"until":<seq>}` 최신 컴파일 에러(file,line,msg,module) + mark 이후 런타임 에러/경고 수. `until` 뒤의 에러는 `teardownErrors`, 설정 `knownErrors`에 맞으면 `knownErrors`. 응답의 `mark`를 다음에 넘긴다 |
@@ -214,7 +226,7 @@ public sealed class FooBuildStep : IBuildStep
 | `harness_lint` | static-reset / module-asmdef / module-boundary 규칙 검사 |
 | `harness_shaders` | Assets/ 셰이더의 현재 컴파일 에러(file, line, msg, module). 셰이더 에러는 로그가 아니라 상태라 매 루프 조회 |
 | `harness_ping` | domainReloads, isCompiling, isPlaying, compileFailed, mark, unityVersion |
-| `harness_setup` | `setup: harness`면 프로젝트 설정 멱등 적용(Domain Reload off, runInBackground, 템플릿 샘플 삭제). `attach`면 아무것도 안 바꾸고 `recommendations`만(`{"apply":"domainReload"}`로 명시 적용). Debug 코드 최적화(세션 한정)는 둘 다 |
+| `harness_setup` | `setup: harness`면 프로젝트 설정 멱등 적용(Domain Reload off, runInBackground, 동기 셰이더 컴파일(`syncShaders`), 템플릿 샘플 삭제). `attach`면 아무것도 안 바꾸고 `recommendations`만(`{"apply":"domainReload,syncShaders"}`로 명시 적용). Debug 코드 최적화(세션 한정)는 둘 다 |
 | `harness_sync_csproj` | .sln/.csproj 생성(사용자 외부 에디터 설정은 복원) — compile-check msbuild 백엔드용 |
 | `harness_quit` | 응답 ~0.3s 뒤 `EditorApplication.Exit(0)`(저장 확인 없음). 직접 부르지 말고 `tools/quit.ps1`(락 + 종료 대기) |
 
@@ -255,21 +267,54 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
 - 캡처 `preset`: 샷 이름(씬의 ShotPreset 또는 설정 `shots`) · `"auto"`(이름순 다음 샷, 없으면 메인 카메라) · `"main"`(메인 카메라 그대로) ·
   `"screen"`(Game 뷰 그대로, 해상도는 Game 뷰 크기 = 사용자 레이아웃, Game 뷰 탭이 보여야 함).
   `"camera": "<이름>"`이면 그 카메라로, `"pos": [x,y,z]` + `"lookAt": [x,y,z]`(또는 `"rot"` 오일러) + `"fov"`면 그 자리에서 찍는다(설정은 메인 카메라).
-- `"screen"` 말고는 오프스크린 렌더에 **스크린 공간 UI를 캡처 크기로 다시 배치해 합성**한다(G3-1, `Runtime/CaptureUi.cs`) → HUD·메뉴·팝업이 Game 뷰 크기와
-  상관없이 같은 모양으로 찍힌다. 합성한 것은 `shotStats[].ui`(아래부터 그린 순서):
-  - 템플릿 카메라(메인 카메라, `"camera"`면 그 카메라)의 Screen Space - Camera 캔버스 → 캡처 카메라가 씬과 함께 그린다(게임처럼 후처리 포함).
-  - 화면에 그리는 다른 카메라의 Screen Space - Camera 캔버스 → 씬 위(카메라 depth 순), 그 위에 Screen Space - Overlay 캔버스와 UI Toolkit
-    패널(sortingOrder 순, 같으면 UI Toolkit이 위). 레이어마다 투명 RT에 그려 프리멀티플라이드 알파로 합성(프로젝트 색 공간, 선형이면 선형 공간).
-  - 캔버스의 렌더 모드·카메라·plane distance, PanelSettings의 타깃 텍스처를 잠깐 바꿨다가 같은 프레임에 되돌린다(레이아웃 포함). 그 사이 UI 코드의
+- `"screen"` 말고는 오프스크린으로 **Game 뷰가 합치는 카메라들을** 한 RT에 렌더한다(G3-7, `Runtime/CaptureCameras.cs`, `shotStats[].cameras` = 그린 순서):
+  - 템플릿이 메인 카메라면(`"camera"` 없음) 화면에 그리는 Base 카메라 전부를 depth 순으로(viewport·clear 그대로 — 미니맵·분할 화면), 각 카메라의 URP 카메라
+    스택(Overlay)까지 그리고, 메인 카메라 자리에 캡처 카메라(캡처 포즈, 메인 카메라 설정·렌더러·스택)가 들어간다. 게임처럼 뒤에 그린 전체 화면 카메라는
+    앞의 것을 덮는다(URP는 Base 카메라를 겹쳐 그리지 않는다 — 겹치려면 스택. 실제 Game 뷰로 확인했다).
+  - 포즈가 메인 카메라와 다르면(샷 프리셋, `pos`) **메인 카메라를 그 포즈로 잠깐 옮긴다** → 거기 달린 것(무기와 그것을 그리는 Overlay 카메라)이 같은 화면
+    위치로 따라온다. 다른 Base 카메라(미니맵)는 제자리. 같은 프레임에 원래 로컬 위치·회전으로 되돌린다(편집 모드에서 씬을 dirty로 만들지 않음).
+  - `"camera": "<이름>"`이 메인 카메라가 아니면 그 카메라와 그 스택만 전체 화면으로 그린다. 메인 카메라가 텍스처에 그리는 게임(화면에 안 나옴)도 그 카메라만.
+  - 다른 카메라는 캡처 동안 `targetTexture`를 캡처 RT로 바꿨다가 되돌린다(그 카메라의 캔버스가 캡처 크기로 배치된다). Built-in은 depth 순 `Camera.Render`.
+- 그 위에 **스크린 공간 UI를 캡처 크기로 다시 배치해 합성**한다(G3-1, `Runtime/CaptureUi.cs`) → HUD·메뉴·팝업이 Game 뷰 크기와
+  상관없이 같은 모양으로 찍힌다. 샷의 UI는 `shotStats[].ui`(아래부터 그린 순서):
+  - 캡처가 그린 Base 카메라의 Screen Space - Camera 캔버스 → 그 카메라가 씬과 함께 그린다(게임처럼 후처리 포함, 메인 카메라 것은 캡처 카메라가).
+  - 스택 Overlay 카메라의 캔버스(UI 카메라) → 카메라들 위에 합성. URP 렌더 요청은 요청한 카메라의 UI만 준비해서 Overlay 카메라의 캔버스를 그리지 않는다
+    (Game 뷰 프레임은 모든 카메라를 준비). 캡처가 그리지 않은 카메라(`"camera"` 캡처일 때 화면의 다른 카메라)의 캔버스도 여기.
+  - 그 위에 Screen Space - Overlay 캔버스와 UI Toolkit 패널(sortingOrder 순, 같으면 UI Toolkit이 위). 레이어마다 투명 RT에 그려 프리멀티플라이드 알파로
+    합성(프로젝트 색 공간, 선형이면 선형 공간).
+  - 캔버스의 렌더 모드·카메라·plane distance, PanelSettings의 타깃 텍스처, 카메라 타깃을 잠깐 바꿨다가 같은 프레임에 되돌린다(레이아웃 포함). 그 사이 UI 코드의
     `OnRectTransformDimensionsChange`·`GeometryChangedEvent`가 캡처 크기와 Game 뷰 크기로 한 번씩 더 불린다. `Screen.width`를 직접 읽어 배치한
-    UI는 Game 뷰 기준 그대로다. 게임이 그걸로 이상해지면 캡처에 `"ui": false`(`harness_capture {"ui":false}`). (ROADMAP G3-8, W8의 플레이어 캡처로)
-  - 빠지는 것: 타깃 텍스처가 있는 패널(게임의 render-to-texture UI), 다른 디스플레이, 카메라 스택의 다른 카메라가 그리는 3D(무기 오버레이, 미니맵) →
-    `"screen"`이나 `"camera"`. 캡처가 비었는데(`blank`) 화면에 그리는 다른 카메라가 있으면 `hint`가 알려 준다. (카메라 스택: ROADMAP G3-7, W3)
+    UI는 Game 뷰 기준 그대로다. 게임이 그걸로 이상해지면 캡처에 `"ui": false`(`harness_capture {"ui":false}`; 다른 카메라의 캔버스 레이어도 뺀다). (ROADMAP G3-8, W8의 플레이어 캡처로)
+  - 빠지는 것: 타깃 텍스처가 있는 패널(게임의 render-to-texture UI), 다른 디스플레이 → `"screen"`. 캡처가 비었는데(`blank`) 화면에 그리는
+    카메라 중 그리지 않은 것이 있으면 `hint`가 알려 준다.
   - UI Toolkit 패널은 내부 API(`RuntimePanel.Update`, `UIElementsRuntimeUtility.RepaintPanel/RenderPanel`, 리플렉션)로 즉시 그린다. 없는 Unity 버전이면
     `uiError`로 보고한다(selftest 1번이 버전마다 HUD를 확인, ROADMAP O-9).
+- **연속 캡처(G3-3)**: `{"t": 1.0, "preset": "main", "name": "spin", "frames": 8, "every": 4}` → t부터 4프레임마다 8장을 **한 장의 PNG(시트)**로
+  (왼쪽→오른쪽, 위→아래, 칸 위에 그 프레임의 t; 시트 폭 최대 1920). `shotStats[]`에 `frames`, `every`, `sheet`(열x행), `times`, `motion`(이웃 프레임의
+  평균 밝기 차이 0..255 — 0이면 아무것도 안 움직였다). blank·dark·magenta는 한 프레임이라도 그러면 참, 밝기는 평균. 포즈는 첫 프레임에 정해지고
+  (`"auto"`·샷 이름·`pos`), `"main"`·`"camera"`는 카메라를 따라간다. 시나리오는 시퀀스가 끝날 때까지 기다린다. `"screen"`과는 못 쓴다.
+  GIF는 만들지 않는다(에이전트는 Read로 시트를 본다).
 - 캡처 크기: 시나리오 `"width"`·`"height"` → 설정 `captureSize` → 프로젝트 방향(Player Settings 기본 방향이 세로, 또는 세로만 허용한 자동 회전이면
   720x1280) → 1280x720. Game 뷰 크기는 쓰지 않는다.
 - 새 게임플레이를 넣으면 `default.json`의 입력/캡처와 기대 이벤트 수를 같이 갱신한다.
+
+### 기준 이미지 (golden/, G3-4)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -UpdateGolden   # 녹색이고 샷이 맞을 때: 이 샷들을 기준 이미지로 (커밋한다)
+powershell -ExecutionPolicy Bypass -File tools/loop.ps1                 # 이후 매 루프: 기준 이미지와 비교 → report.golden, shotStats[].golden
+```
+- 위치: `golden/<Unity 버전>/<시나리오 "name">/<샷 파일>.png`(설정 `goldenRoot`, worktree면 그 worktree의 것). `-UpdateGolden`은 그 폴더의 PNG를 이번 샷으로
+  바꾼다(없어진 샷의 PNG는 지움). 루프가 빨가면 쓰지 않는다(`golden.error`). `-NoPlay`의 샷은 `<버전>/capture/`.
+- Unity 버전마다 따로 둔다(URP 버전마다 렌더가 다르다, P-4). 그 버전 폴더가 없으면 같은 major.minor의 가장 가까운 패치 것과 비교한다(`golden.from`).
+  샘플은 6000.3.11f1의 `default` 시나리오 3장을 커밋해 두었다(다른 버전은 `missing`).
+- 판정(`Editor/HarnessGolden.cs`): 채널 차이가 24 넘는 픽셀이 0.01% 넘거나 평균 차이(`meanDiff`, 0..255)가 0.5 넘으면 `changed`. 같은 머신·같은 버전은
+  **픽셀까지 같다**(고정 시간 간격: 측정 diff 0). 허용치는 다른 GPU·드라이버용인데 아직 재지 않았다(ROADMAP P-3). 크기가 다르면 `size`.
+  `changed`면 `<Out>/golden/<샷>.diff.png`: 샷을 어둡게, 바뀐 픽셀 빨강(진할수록 많이), 뺀 영역 파랑, 바뀐 범위 노란 테두리(`rect` = `[x, y, w, h]`, 왼쪽 위 기준).
+- **실패로 치지 않는다** — 루프는 의도한 변경 중에도 녹색이다. 의도하지 않은 `changed`(다른 모듈 작업, 렌더 설정 이전 W4)를 잡는 용도.
+- 매번 다른 글자(시계·네트워크 값)가 있는 샷: 캡처에 `"ignore": [{"x": 0.8, "y": 0, "w": 0.2, "h": 0.1}]`(이미지 비율, 왼쪽 위 기준)로 그 영역을 빼거나
+  `"golden": false`, 또는 `"ui": false` 샷을 따로 둔다. `"screen"` 샷(Game 뷰 크기)은 비교하지 않는다. 연속 캡처는 시트 이미지를 비교한다.
+- 비용: 샷 3장 비교 ~0.2 s(`timings.goldenSec`). 샷 PNG 한 장 ~1 MB라 기준 이미지를 자주 갈면 저장소가 커진다 — 의도한 화면 변경일 때만 갱신한다.
 
 ## 병렬 에이전트: worktree + submit + land (남의 컴파일 에러에 막히지 않기)
 
@@ -368,21 +413,25 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
   `-Keep`은 녹색이어도 클론과 에디터를 남긴다(비교·디버깅용).
 - `-UnityVersion <설치된 버전>`: 클론의 `ProjectVersion.txt`를 그 버전으로 바꿔서 연다(P-1; 이때 `git status` 변경은 보고만 한다).
 - `-SelfTest`: 루프 뒤 클론에서 `tools/selftest.ps1`(매트릭스 1–8, 루프의 fingerprint를 기대값으로)까지 돌린다 → `selftest.json`,
-  report의 `selftest`(`stage=selftest`). worktree는 클론 옆(`ah-fresh-st-a/-b`)에 생겼다가 지워진다. 전체 ~4분.
+  report의 `selftest`(`stage=selftest`). worktree는 클론 옆(`ah-fresh-st-a/-b`)에 생겼다가 지워진다. 전체 ~5분.
 - 언제: `tools/`, `ProjectSettings/`, `Packages/`, `.gitignore`, 에디터 시작 경로(`[InitializeOnLoad]`)를 바꿨을 때와 공개 전.
 
 ## 하네스 자기 검증 (tools/selftest.ps1)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~3.5분
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~4분
 powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 977545a7
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
-- 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark/magenta 없음, 모든 샷 1280x720에 HUD 합성) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
-  uGUI 합성(편집 모드, 저장하지 않는 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·다른 카메라의 캔버스 → 순서, 선형 공간 블렌드 오차 ≤ 2, 되돌림) +
+- 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark/magenta 없음, 모든 샷 1280x720에 HUD 합성, 기준 이미지: 루프 1이 `HarnessOut/selftest/golden`에
+  쓰고 2·3이 픽셀까지 같음, 커밋된 이 버전의 기준 이미지와 같음, `harness_golden`의 `ignore`·패치 버전 대체) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
+  uGUI 합성(편집 모드, 저장하지 않는 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·스택 UI 카메라의 캔버스 → 순서, 선형 공간 블렌드 오차 ≤ 2, 되돌림) +
+  카메라(G3-7, 픽스처: 메인 카메라 자식인 스택 Overlay 카메라가 그리는 쿼드가 메인·다른 포즈 모두 화면 중앙, 미니맵 Base 카메라가 오른쪽 위, 앞 depth 카메라는 덮임,
+  `"camera"`로 미니맵만, 메인 카메라·타깃·스택 되돌림, 씬 dirty 아님) + 플레이 중 픽스처(오버레이 캔버스·스택 카메라)와 연속 캡처(2x2 시트, `motion` > 0) +
   실제 입력 격리(플레이 동안 실제 키보드 장치에 스페이스를 넣어도 events 그대로·`isolatedDevices` 누름 > 0, 실패·중단한 플레이 뒤에도 실제 장치가 다시 켜짐) +
   `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 ·
-  4 HLSL 에러(재임포트 없는 다음 루프에서도) + 파이프라인이 못 그리는 머티리얼(받침대를 `Standard`로 → 샷 `magenta`, `hint`에 `Smoke/Pedestal`, 루프는 녹색) · 5 리셋 없는 static(lint) · 6 루프 2개 동시 · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
+  4 HLSL 에러(재임포트 없는 다음 루프에서도) + 되돌린 상태를 기준 이미지로 → 셰이더 한 줄(스펙큘러 절반) → golden `changed`(rect·diff PNG), 루프는 녹색 +
+  파이프라인이 못 그리는 머티리얼(받침대를 `Standard`로 → 샷 `magenta`, `hint`에 `Smoke/Pedestal`, golden `changed`, 루프는 녹색 → 되돌리면 `same`) · 5 리셋 없는 static(lint) · 6 루프 2개 동시 · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
   다른 worktree의 새 모듈·계약은 락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부) ·
   8 land(fast-forward + 그 사이 submit 락 대기, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
   병합 직후 kill → `recoveredLand`). 에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
@@ -406,7 +455,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   |---|---|---|---|---|
   | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `d9a6d092…` | 61 / 68 / 87 | 1–9 녹색, 샷은 6.3과 같은 밝기 |
   | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `977545a7…` | 61 / 68 / 87 | 1–9 녹색 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `0ba32228…` | 61 / 68 / 87 | 2–8 녹색, **1은 대개 빨강**: 첫 플레이 뒤 조명이 검다(`dark`, ROADMAP P-4; 비결정적이라 녹색일 때도 있음) |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `c24b65e7…`(2026-09-30; 09-29까지 `0ba32228…` — 같은 커밋도 바뀜, 이 머신의 6.6 쪽 변화) | 61 / 68 / 87 | 2–8 녹색, **1은 대개 빨강**: 첫 플레이 뒤 조명이 검다(`dark`, 루프끼리 기준 이미지 차이, ROADMAP P-4; 비결정적이라 녹색일 때도 있음) |
 
   fingerprint는 버전마다 다르다(URP가 만드는 머티리얼·에셋 직렬화가 다르다). 같은 버전 안에서만 매번 같아야 한다.
 - 다른 버전으로 열면 Unity가 다시 쓰는 파일(커밋하지 않는다): `Packages/packages-lock.json`, `Assets/Settings/*RPAsset.asset`·
@@ -438,6 +487,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   (`scene`이 있으면 그 씬이 로드됐을 때만). 시나리오 `"preset"`·`"auto"`와 `harness_capture`가 ShotPreset과 함께 쓴다.
 - `knownErrors`: 정규식 목록. 프로젝트가 원래 내는 에러(예: 저장소에 없는 SDK 데스크톱 라이브러리)를 `knownErrors`로 돌려 루프를 막지 않게 한다.
 - `captureSize`: `[w, h]` 크기를 주지 않은 캡처(시나리오·`harness_capture`)의 크기. 없으면 세로 프로젝트 720x1280, 그 외 1280x720.
+- `goldenRoot`: 기준 이미지 폴더(프로젝트 루트 기준, 기본 `golden`). 위 "기준 이미지".
 
 - `attach`에서 `harness_build`는 하네스가 만든 적 없는 씬·에셋(`AgentHarnessGenerated` 라벨 없음)을 덮어쓰거나 지우지 않고, Build Settings를 바꾸지 않는다.
 - 씬에 저장 안 한 변경이 있으면 play/capture/build는 씬을 바꾸지 않고 실패한다(`unsaved changes in ...`). 생성된 buildScene은 예외.
@@ -519,6 +569,20 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   다른 창에서 누른 키가 게임 이벤트가 됐다(루프 ~25회에 1회 `play.events`가 달랐다, G3-6) → 시나리오 동안 실제 장치를 끈다. Input System의
   `LeavePlayMode`는 백그라운드 때문에 꺼진 장치만 켜고 `DisableDevice`로 끈 장치는 그대로 두므로, 끈 쪽이 반드시 다시 켜야 한다(러너 `Finish`,
   에디터의 `EnteredEditMode`). 실제 장치는 플레이 진입·에디터 포커스 때 상태 이벤트(sync)를 보내므로 "막은 입력"은 이벤트 수가 아니라 누름으로 센다.
+- **URP는 Base 카메라를 겹쳐 그리지 않는다.** Depth-only(Uninitialized) Base 카메라를 depth를 높여 하나 더 두면 Game 뷰에서 앞 카메라의 씬이 지워지고
+  그 카메라 것만 남는다(Built-in은 겹쳐진다). UI 카메라·무기 카메라는 메인 카메라의 스택에 Overlay로 넣는다. W2까지의 캡처는 그런 카메라의 캔버스를
+  씬 위에 합성해 게임과 다르게 찍었다 → G3-7 캡처는 화면의 카메라를 실제 순서대로 그린다.
+- **URP 렌더 요청(`RenderPipeline.SubmitRenderRequest`)은 스택 Overlay 카메라의 Screen Space - Camera 캔버스를 그리지 않는다**(요청한 베이스 카메라의 캔버스는
+  그린다). Unity가 UI를 요청한 카메라에 대해서만 준비하는 것으로 보인다 — Game 뷰 프레임은 모든 카메라를 넘기므로 그려진다. 캡처는 그 캔버스를 따로 그려 합성한다.
+  또 Screen Space - Camera 캔버스의 `rect`는 카메라 `targetTexture`를 바꾼 직후 `ForceUpdateCanvases`로 읽으면 한 번 늦게 따라왔다. 렌더할 때 다시 맞춰져서
+  찍힌 결과는 캡처 크기 배치였다(미니맵 카메라 캔버스의 40px 요소가 캡처에서도 40px).
+- **에디터는 처음 만난 셰이더 변형을 백그라운드에서 컴파일하고 그동안 그 오브젝트를 빼고 그린다**(Editor 설정 Asynchronous Shader Compilation). 새 클론(새 Library)의
+  첫 플레이 t=0.5 캡처에 지형·하늘·후처리가 없었고(매듭만; 기준 이미지 `changed`, `meanDiff` 67.6), 편집 모드 픽스처의 첫 캡처엔 새 Unlit 쿼드가 없었다.
+  재현: 에디터를 닫고 `Library/ShaderCache*`와 `Library/LastSceneManagerSetup.txt`를 지운 뒤 열어 루프 한 번. 캡처만 동기로 바꾸는 방법은 모두 안 됐다 —
+  `ShaderUtil.allowAsyncCompilation = false`, `ShaderUtil.SetAsyncCompilation(cmd, false)` 명령 버퍼, 캡처 동안만 `EditorSettings.asyncShaderCompilation` 끄기
+  (앞 프레임의 Game·Scene 뷰가 이미 비동기로 요청해 둔 변형은 그대로 빠진다), 캡처 전에 `ShaderUtil.anythingCompiling`을 기다리기(메인 스레드를 막으면
+  컴파일이 끝나지 않는다: 20 s 동안 참). → 프로젝트 설정으로 끈다: `harness_setup`의 `syncShaders`(`setup: harness`면 적용, 샘플은 커밋됨; `attach`면 권장만).
+  켜진 프로젝트에서 캡처 순간에 컴파일 중이었으면 `shotStats[].shadersCompiling`과 `hint`.
 - `Object.FindObjectsByType`은 `HideFlags.DontSave` 오브젝트를 돌려주지 않는다. 캡처·클릭 대상 탐색도 그걸 쓰므로, 에디터 테스트 픽스처는 일반 오브젝트로
   만들고(편집 모드에서 스크립트로 만든 오브젝트는 씬을 dirty로 만들지 않았다) 끝나면 씬을 다시 연다(selftest 1번의 uGUI 픽스처).
 - Input System 패키지가 있는 프로젝트의 Active Input Handling을 Old로 바꾸면 Input System이 "백엔드를 켤까요?" 모달을 띄워 에디터 메인 스레드가 멈춘다.

@@ -32,7 +32,7 @@ namespace Harness.Editor
     /// </summary>
     public static class HarnessSetup
     {
-        static readonly string[] s_Settings = { "domainReload", "runInBackground", "frameTimingStats" };
+        static readonly string[] s_Settings = { "domainReload", "runInBackground", "frameTimingStats", "syncShaders" };
 
         static readonly string[] s_TemplateJunk =
         {
@@ -44,13 +44,13 @@ namespace Harness.Editor
 
         [CliCommand("harness_setup",
             "Idempotently apply the harness project settings. setup 'harness' (ProjectSettings/AgentHarness.json): Enter Play Mode " +
-            "without Domain Reload (scene reload kept), Run In Background, Frame Timing Stats, remove URP template sample content, " +
-            "create the module roots and generated folders. setup 'attach' (an existing project): changes no project setting and " +
-            "deletes nothing; it reports recommendations, and --apply 'domainReload,runInBackground,frameTimingStats' applies those. " +
+            "without Domain Reload (scene reload kept), Run In Background, Frame Timing Stats, synchronous shader compilation, remove " +
+            "URP template sample content, create the module roots and generated folders. setup 'attach' (an existing project): changes " +
+            "no project setting and deletes nothing; it reports recommendations, and --apply 'domainReload,runInBackground,frameTimingStats,syncShaders' applies those. " +
             "Debug code optimization (Editor session only) always. Returns {ok, setup, changed[], issues[], recommendations[]}.",
             Tags = new[] { "harness", "settings" })]
         public static object Setup(
-            [CliArg("apply", "Attached project: comma-separated settings to change anyway (domainReload, runInBackground, frameTimingStats, or 'all').")] string apply = "")
+            [CliArg("apply", "Attached project: comma-separated settings to change anyway (domainReload, runInBackground, frameTimingStats, syncShaders, or 'all').")] string apply = "")
         {
             var config = HarnessPaths.Config;
             var changed = new List<string>();
@@ -75,6 +75,9 @@ namespace Harness.Editor
 
             if (wanted.Contains("runInBackground") && !PlayerSettings.runInBackground) { PlayerSettings.runInBackground = true; changed.Add("PlayerSettings.runInBackground=true"); }
             if (wanted.Contains("frameTimingStats") && !PlayerSettings.enableFrameTimingStats) { PlayerSettings.enableFrameTimingStats = true; changed.Add("PlayerSettings.enableFrameTimingStats=true"); }
+            // A shader variant compiles when it is first drawn; asynchronously, the Editor leaves its objects out meanwhile,
+            // so the first captures after an import miss them (and differ from the golden images). Synchronous: that frame waits.
+            if (wanted.Contains("syncShaders") && EditorSettings.asyncShaderCompilation) { EditorSettings.asyncShaderCompilation = false; changed.Add("EditorSettings.asyncShaderCompilation=false"); }
 
             if (config.IsHarnessProject)
             {
@@ -119,6 +122,7 @@ namespace Harness.Editor
             {
                 if (!DomainReloadDisabled()) issues.Add("Enter Play Mode: Domain Reload is enabled (run harness_setup)");
                 if (!PlayerSettings.runInBackground) issues.Add("PlayerSettings.runInBackground is false (run harness_setup)");
+                if (EditorSettings.asyncShaderCompilation) issues.Add("Asynchronous Shader Compilation is on: captures right after an import miss objects whose shaders compile (run harness_setup)");
             }
             if (UnityEditor.Compilation.CompilationPipeline.codeOptimization != UnityEditor.Compilation.CodeOptimization.Debug)
                 issues.Add("Code optimization is Release: stack-trace line numbers are imprecise (run harness_setup)");
@@ -136,6 +140,14 @@ namespace Harness.Editor
                     current = "Domain Reload on entering Play Mode",
                     recommended = "off (Enter Play Mode Options)",
                     why = "every play of the loop pays a domain reload (timings.playEnterSec). Only safe when every mutable static is reset in a [RuntimeInitializeOnLoadMethod(SubsystemRegistration)] method; harness_lint checks module code only",
+                });
+            if (EditorSettings.asyncShaderCompilation)
+                list.Add(new
+                {
+                    setting = "syncShaders",
+                    current = "Asynchronous Shader Compilation on (Editor settings)",
+                    recommended = "off",
+                    why = "the Editor leaves an object out of the frame while its shader variant compiles, so the first captures after an import (or on a new machine) miss objects and differ from the golden images (shotStats[].shadersCompiling). Off: the Editor waits for the compile in that frame",
                 });
             return list;
         }

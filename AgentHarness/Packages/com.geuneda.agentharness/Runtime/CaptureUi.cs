@@ -16,7 +16,10 @@ namespace Harness
     /// draws each layer into a transparent texture - uGUI and UI Toolkit shaders leave premultiplied color and coverage
     /// alpha there - and composites the layers over the camera render in their sorting order, in the project's color space.
     /// Canvases in Screen Space - Camera of the template camera are drawn with the scene by the capture camera (with its
-    /// post-processing, as in the game); those of other on-screen cameras go over the scene, below the overlays.
+    /// post-processing, as in the game); those of the other Base cameras the capture renders (<see cref="CaptureCameras"/>)
+    /// are drawn by them, laid out at the capture size by their target; those of stack overlay cameras (which a render
+    /// request does not draw) and of on-screen cameras the capture does not render (a capture from another camera) go
+    /// over the cameras, below the overlays.
     /// What it changes (a canvas's render mode, camera and plane distance, a PanelSettings' target texture and clear) is put
     /// back in the same frame, the layout included; UI code that reacts to a size change (OnRectTransformDimensionsChange,
     /// GeometryChangedEvent) sees the capture size and then the Game view size again.
@@ -27,7 +30,7 @@ namespace Harness
         {
             public string name;
             public int band;            // 0 = Screen Space - Camera canvases of other cameras, 1 = overlays
-            public float cameraDepth;   // band 0: the canvas's camera
+            public float cameraDepth;   // band 0: the canvas's camera - its place among the cameras drawn, else after them by depth
             public int sortingLayer;    // canvases: SortingLayer value (separates camera renders)
             public float order;         // Canvas.sortingOrder / PanelSettings.sortingOrder
             public int kind;            // 0 canvas, 1 UI Toolkit panel (over a canvas of the same order)
@@ -50,6 +53,8 @@ namespace Harness
 
         readonly List<Layer> m_Layers = new List<Layer>();
         readonly List<Canvas> m_SceneCanvases = new List<Canvas>();
+        readonly List<Canvas> m_CameraCanvases = new List<Canvas>();   // drawn by the other cameras the capture renders
+        readonly List<Camera> m_Drawn = new List<Camera>();
         readonly List<SavedCanvas> m_Saved = new List<SavedCanvas>();
         Camera m_SceneCamera;
         GameObject m_UiCameraObject;
@@ -58,25 +63,38 @@ namespace Harness
         Texture2D m_LayerTex;
         int m_Width, m_Height;
 
-        public bool Empty => m_Layers.Count == 0 && m_SceneCanvases.Count == 0;
+        public bool Empty => m_Layers.Count == 0 && m_SceneCanvases.Count == 0 && m_CameraCanvases.Count == 0;
 
-        /// <summary>The screen-space UI of the loaded scenes, relative to the camera a capture copies (nothing is changed yet).</summary>
-        public static CaptureUi Collect(Camera template)
+        /// <summary>
+        /// The screen-space UI of the loaded scenes, relative to the camera a capture copies and the real cameras whose
+        /// drawing it includes, in draw order (<paramref name="drawn"/>, the template standing for the capture camera).
+        /// Nothing is changed yet.
+        /// </summary>
+        public static CaptureUi Collect(Camera template, IReadOnlyList<Camera> drawn = null, ICollection<Camera> overlays = null)
         {
             var ui = new CaptureUi();
+            if (drawn != null) ui.m_Drawn.AddRange(drawn);
             foreach (var c in UnityCompat.FindObjects<Canvas>(FindObjectsInactive.Exclude))
             {
                 if (!c.isActiveAndEnabled || !c.isRootCanvas || c.renderMode == RenderMode.WorldSpace) continue;
                 var cam = c.renderMode == RenderMode.ScreenSpaceCamera ? c.worldCamera : null;
                 if (cam != null && template != null && cam == template) { ui.m_SceneCanvases.Add(c); continue; }
+                var stacked = cam != null && overlays != null && overlays.Contains(cam);
+                if (cam != null && !stacked && ui.m_Drawn.Contains(cam)) { ui.m_CameraCanvases.Add(c); continue; }
                 var layer = new Layer { name = "ugui:" + HarnessCapture.HierarchyPath(c.transform), canvas = c, order = c.sortingOrder,
                     sortingLayer = SortingLayer.GetLayerValueFromID(c.sortingLayerID) };
-                if (cam != null)
+                if (stacked)
                 {
-                    // Drawn by another camera: over the scene when that camera draws to the screen, else not on screen at all.
+                    // A canvas of a stack overlay camera the capture drew: over the cameras, in the stack's order.
+                    layer.band = 0;
+                    layer.cameraDepth = ui.m_Drawn.IndexOf(cam);
+                }
+                else if (cam != null)
+                {
+                    // Drawn by a camera the capture did not draw: over the scene when that camera draws to the screen, else not on screen at all.
                     if (!cam.isActiveAndEnabled || cam.targetTexture != null || cam.targetDisplay != 0) continue;
                     layer.band = 0;
-                    layer.cameraDepth = cam.depth;
+                    layer.cameraDepth = 100000f + cam.depth;
                 }
                 else
                 {
@@ -120,15 +138,40 @@ namespace Harness
         /// </summary>
         public void AttachSceneCanvases(Camera capture, RenderTexture target)
         {
-            if (m_SceneCanvases.Count == 0) return;
-            m_SceneCamera = capture;
-            capture.targetTexture = target;
-            foreach (var c in m_SceneCanvases)
+            if (m_SceneCanvases.Count == 0 && m_CameraCanvases.Count == 0) return;
+            if (m_SceneCanvases.Count > 0)
             {
-                Save(c);
-                c.worldCamera = capture;
+                m_SceneCamera = capture;
+                capture.targetTexture = target;
+                foreach (var c in m_SceneCanvases)
+                {
+                    Save(c);
+                    c.worldCamera = capture;
+                }
             }
-            Canvas.ForceUpdateCanvases();
+            Canvas.ForceUpdateCanvases();   // also the canvases of the other cameras, whose target is the capture's now
+        }
+
+        /// <summary>The canvases drawn with the cameras, in the cameras' draw order (then sorting layer, order, path).</summary>
+        List<string> DrawnCanvasNames()
+        {
+            var canvases = new List<Canvas>(m_SceneCanvases);
+            canvases.AddRange(m_CameraCanvases);
+            int CameraIndex(Canvas c)
+            {
+                var i = m_Drawn.IndexOf(c.worldCamera);
+                return i < 0 ? int.MaxValue : i;
+            }
+            canvases.Sort((a, b) =>
+            {
+                int ia = CameraIndex(a), ib = CameraIndex(b);
+                if (ia != ib) return ia.CompareTo(ib);
+                int la = SortingLayer.GetLayerValueFromID(a.sortingLayerID), lb = SortingLayer.GetLayerValueFromID(b.sortingLayerID);
+                if (la != lb) return la.CompareTo(lb);
+                if (a.sortingOrder != b.sortingOrder) return a.sortingOrder.CompareTo(b.sortingOrder);
+                return string.CompareOrdinal(HarnessCapture.HierarchyPath(a.transform), HarnessCapture.HierarchyPath(b.transform));
+            });
+            return canvases.ConvertAll(c => "ugui:" + HarnessCapture.HierarchyPath(c.transform));
         }
 
         /// <summary>
@@ -137,10 +180,8 @@ namespace Harness
         /// </summary>
         public List<string> Composite(Color32[] pixels, int width, int height)
         {
-            RestoreCanvases();   // the scene canvases are drawn
-            var names = new List<string>();
-            foreach (var c in m_SceneCanvases) names.Add("ugui:" + HarnessCapture.HierarchyPath(c.transform));
-            names.Sort(string.CompareOrdinal);
+            RestoreCanvases();   // the canvases of the cameras are drawn
+            var names = DrawnCanvasNames();
             if (m_Layers.Count == 0) return names;
             m_Width = width;
             m_Height = height;

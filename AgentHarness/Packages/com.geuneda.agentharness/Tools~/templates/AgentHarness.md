@@ -18,12 +18,16 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   실패는 아니지만 읽어 본다.
 - **매 루프 후 `shots`의 PNG를 Read 툴로 직접 연다.** `shotStats[].blank`(평평한 화면)는 실패, `dark`(98% 검정)는 의심,
   `magenta`는 렌더 파이프라인이 못 그리는 머티리얼(URP에서 Built-in 셰이더, 없는·깨진 셰이더)일 가능성이 크다. `hint`가 있으면 이유다
-  (마젠타로 그린 렌더러, 화면에 그리는 다른 카메라). 샷에는 스크린 공간 UI가 합성돼 있다(`shotStats[].ui`, 아래 "캡처").
+  (마젠타로 그린 렌더러, 화면에 그리는 다른 카메라). 샷에는 화면에 그리는 카메라들(`shotStats[].cameras`)과 스크린 공간 UI(`shotStats[].ui`)가
+  들어 있다(아래 "캡처").
+- **기준 이미지(golden)가 있으면** 샷마다 `shotStats[].golden.status`(`same`/`changed`/`missing`)와 바뀐 곳(`rect`, `diff` 이미지)이 나온다.
+  실패로 치지 않는다. 의도하지 않았는데 `changed`면 `diff` PNG(바뀐 픽셀 빨강)를 연다. 화면을 의도대로 바꿨고 샷이 맞으면
+  `tools/loop.ps1 -UpdateGolden`으로 기준 이미지를 갱신해 커밋한다(아래 "기준 이미지").
 - `play`: `probeReady`, `frames`, `events`(하네스 모듈의 EventBus 발행 수), `scenes`(로드된 씬과 시각), `waits`, `clicks`, `inputBackends`,
   `isolatedDevices`(시나리오 동안 끈 실제 장치와 막은 키·버튼 누름 수 — 사람이 그 사이 키보드를 만져도 결과가 같다).
   `fps`는 에디터 플레이 모드 값이라 변경 전후 비교용.
 - `timings.playEnterSec`: 플레이 진입 시간. 이 프로젝트가 Domain Reload를 켜 두었으면 여기에 리로드 시간이 들어간다.
-- 옵션: `-Scenario tools/scenarios/x.json`, `-NoPlay`(편집 모드 캡처만), `-Out HarnessOut/x`.
+- 옵션: `-Scenario tools/scenarios/x.json`, `-NoPlay`(편집 모드 캡처만), `-Out HarnessOut/x`, `-UpdateGolden`(녹색일 때 샷을 기준 이미지로).
 - 커맨드 하나: `& ./tools/uc.ps1 <command> '<JSON>'` (예: `harness_capture '{"preset":"main"}'`, `harness_console`, `harness_ping`).
   목록은 `unity command --detail compact`. 임시 C#(`eval_file`)은 `HarnessOut/scripts/`에 둔다(HarnessOut은 git이 무시한다).
 - 에디터 없이 컴파일 검사: `tools/compile-check.ps1 [-Module <이름>]` (asmdef 폴더든 `Assembly-CSharp` 폴더든 모듈 코드를 컴파일하는 어셈블리를 검사).
@@ -44,9 +48,11 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
     { "t": 0.1, "type": "click", "target": "PlayButton" },                          // uGUI/씬 오브젝트 이름·경로 또는 UI Toolkit 요소 이름
     { "t": 0.3, "type": "waitScene", "scene": "Level1", "timeoutSec": 60 },         // 그 씬이 로드될 때까지 시계 정지
     { "t": 1.0, "type": "keyTap", "key": "Space", "hold": 0.1 } ],
-  "captures": [ { "t": 0.05, "preset": "main", "name": "menu" },                    // 메인 카메라 + 스크린 공간 UI(캡처 크기로 배치)
+  "captures": [ { "t": 0.05, "preset": "main", "name": "menu" },                    // 화면의 카메라들 + 스크린 공간 UI(캡처 크기로 배치)
                 { "t": 1.5, "preset": "screen" },                                    // Game 뷰 그대로(Game 뷰 크기)
-                { "t": 2.5, "name": "top", "pos": [0, 30, -0.1], "lookAt": [0, 0, 0], "fov": 50 } ] }
+                { "t": 2.0, "preset": "main", "name": "run", "frames": 8, "every": 4 },   // 연속 캡처: 8프레임을 한 장의 시트로
+                { "t": 2.5, "name": "top", "pos": [0, 30, -0.1], "lookAt": [0, 0, 0], "fov": 50,
+                  "ignore": [ { "x": 0.8, "y": 0, "w": 0.2, "h": 0.1 } ] } ] }             // 기준 이미지 비교에서 뺄 곳(시계 등)
 ```
 - `t`는 첫 씬 로드 뒤 **게임 시간**(초). `fixedDeltaTime`이면 매번 같은 프레임에서 캡처한다. 로딩(네트워크, Addressables)은 벽시계로 걸려서
   고정 `t`로는 "로딩이 끝났을 때"를 맞출 수 없다 → `waitTarget`/`waitScene`으로 기다린다. 기다린 시간은 `play.waits`에 나오고, 제한 시간
@@ -65,11 +71,29 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   옛 `HarnessInput.cs`가 새 버전으로 바뀐다(고친 사본은 경고만).
 - 캡처 `preset`: `"auto"`(샷이 없으면 메인 카메라) · `"main"` · `"screen"`(Game 뷰 그대로, Game 뷰 탭이 보여야 함) · 샷 이름(설정 `shots`) ·
   `"camera": "<카메라 이름>"` · `"pos"` + `"lookAt"`/`"rot"` + `"fov"`(그 자리에서, 메인 카메라 설정으로).
-- `"screen"` 말고는 카메라를 오프스크린으로 렌더하고 **스크린 공간 UI(uGUI 캔버스, UI Toolkit 패널)를 캡처 크기로 다시 배치해 합성**한다 → 메뉴·HUD·팝업이
-  사람의 Game 뷰 크기와 상관없이 같은 모양으로 찍힌다. 합성한 것은 `shotStats[].ui`(아래부터). 메인 카메라의 Screen Space - Camera 캔버스는 씬과 함께
-  (후처리 포함), 다른 카메라의 캔버스는 그 위, 오버레이 캔버스·UI Toolkit 패널은 맨 위에(sortingOrder 순). 캔버스 모드·패널 타깃을 잠깐 바꿨다 같은 프레임에
-  되돌린다 — UI 코드가 크기 변화에 반응해 게임이 이상해지면 그 캡처에 `"ui": false`. 카메라 스택의 다른 카메라가 그리는 3D는 빠진다(`"screen"`, `"camera"`).
+- `"screen"` 말고는 오프스크린으로 **Game 뷰가 합치는 카메라들을 같은 순서로** 렌더한다: 화면에 그리는 Base 카메라를 depth 순으로(viewport·clear
+  그대로, 미니맵·분할 화면), 각 카메라의 URP 카메라 스택까지, 메인 카메라 자리에 캡처 포즈의 카메라. 포즈가 메인 카메라와 다르면 메인 카메라를 그 포즈로
+  잠깐 옮겨서 거기 달린 것(무기 오버레이 카메라와 무기)이 따라온다. 그린 카메라는 `shotStats[].cameras`(아래부터). `"camera": "<이름>"`이면 그 카메라와
+  그 스택만 전체 화면으로. URP에서 전체 화면 Base 카메라 두 개는 게임에서도 뒤의 것이 앞의 것을 덮는다(겹쳐 그리려면 카메라 스택).
+- 그 위에 **스크린 공간 UI(uGUI 캔버스, UI Toolkit 패널)를 캡처 크기로 다시 배치해 합성**한다 → 메뉴·HUD·팝업이 사람의 Game 뷰 크기와 상관없이 같은
+  모양으로 찍힌다. `shotStats[].ui`(아래부터): 메인 카메라와 다른 Base 카메라의 Screen Space - Camera 캔버스는 그 카메라가 그리고(후처리 포함), 스택
+  Overlay 카메라의 캔버스(렌더 요청으로는 그려지지 않는다)는 카메라들 위에, 오버레이 캔버스·UI Toolkit 패널은 맨 위에(sortingOrder 순). 캔버스 모드·카메라
+  타깃·패널 타깃을 잠깐 바꿨다 같은 프레임에 되돌린다 — UI 코드가 크기 변화에 반응해 게임이 이상해지면 그 캡처에 `"ui": false`.
+- 연속 캡처: `"frames": N`(+ `"every": k`프레임 간격)이면 t부터 N프레임을 **한 장의 PNG(시트, 칸마다 t)**로 찍는다. `shotStats[]`에 `frames`, `sheet`(열x행),
+  `times`, `motion`(프레임 사이 평균 밝기 차이, 0이면 아무것도 안 움직임). 포즈는 첫 프레임에 고정(`"main"`·`"camera"`는 카메라를 따라감).
 - 캡처 크기: 시나리오 `"width"`/`"height"` → 설정 `captureSize` → 세로 게임(Player Settings 기본 방향)이면 720x1280, 아니면 1280x720.
+
+## 기준 이미지 (golden/)
+
+- `tools/loop.ps1 -UpdateGolden`: 루프가 녹색이면 샷을 `golden/<Unity 버전>/<시나리오 name>/<샷 파일>.png`로 쓴다(그 폴더의 다른 PNG는 지움). 커밋한다.
+- 이후 루프마다 같은 이름의 기준 이미지와 비교한다(`report.golden`: `same`/`changed`/`missing` 수, 샷마다 `shotStats[].golden`: `meanDiff`, `changedRatio`,
+  `ssim`, `rect` = 바뀐 곳 `[x, y, w, h]` 픽셀(왼쪽 위 기준), `diff` = 바뀐 픽셀을 빨강으로 칠한 PNG). 같은 머신·같은 버전이면 픽셀까지 같다.
+  채널 차이 24 초과 픽셀이 0.01% 넘거나 평균 차이가 0.5 넘으면 `changed`. 실패로 치지 않는다.
+- 에디터의 Asynchronous Shader Compilation이 켜져 있으면 임포트 직후·새 머신의 첫 캡처에서 셰이더가 컴파일 중인 오브젝트가 빠진다(`shotStats[].shadersCompiling`).
+  기준 이미지를 쓰려면 끈다: `& ./tools/uc.ps1 harness_setup '{"apply":"syncShaders"}'`(Editor 설정 한 줄; 그동안 그 프레임이 컴파일을 기다린다).
+- Unity 버전마다 따로 둔다(렌더가 다르다). 그 버전 폴더가 없으면 같은 major.minor의 가장 가까운 버전 것을 쓴다(`golden.from`).
+- 매번 다른 글자(시계, 네트워크 값)가 있는 샷은 캡처에 `"ignore": [{ "x", "y", "w", "h" }]`(이미지 비율, 왼쪽 위 기준)로 그 영역을 빼거나 `"golden": false`.
+  `"screen"` 샷(Game 뷰 크기)은 비교하지 않는다. `-NoPlay`의 샷은 `golden/<버전>/capture/`.
 
 ## 규칙 (기존 프로젝트)
 
@@ -77,7 +101,8 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
    (`& ./tools/uc.ps1 eval_file '{"file":"HarnessOut/scripts/x.cs"}'`, 저장은 `EditorSceneManager.SaveScene`/`AssetDatabase.SaveAssets`).
    C#·셰이더·UXML/USS·JSON 같은 텍스트 에셋은 직접 고친다.
 2. 하네스는 프로젝트 설정을 바꾸지 않는다. `& ./tools/uc.ps1 harness_setup`은 권장 사항만 보여 주고, 바꾸려면 명시한다:
-   `harness_setup '{"apply":"domainReload"}'`(플레이 진입이 빨라지지만 모든 가변 static을 SubsystemRegistration에서 초기화해야 한다).
+   `harness_setup '{"apply":"domainReload"}'`(플레이 진입이 빨라지지만 모든 가변 static을 SubsystemRegistration에서 초기화해야 한다),
+   `'{"apply":"syncShaders"}'`(셰이더를 동기 컴파일 — 임포트 직후의 캡처에도 모든 오브젝트가 찍힌다).
 3. 에디터 조작은 `tools/*.ps1`로만(프로젝트별 락). `unity command`로 직접 play/build를 부르지 않는다.
 4. 여러 에이전트가 동시에 일하면 `ProjectSettings/AgentHarness.json`의 `modules`에 모듈 폴더를 등록하고, 각자 git worktree에서
    `tools/submit.ps1 -Module <이름>` → 커밋 → `tools/land.ps1`. 에러의 `module`도 이 등록으로 채워진다. asmdef 없는 폴더도 된다
@@ -97,6 +122,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   "shots": [ { "name": "overview", "scene": "Level1", "pos": [0, 20, -20], "lookAt": [0, 0, 0], "fov": 50 } ],   // 이름 있는 캡처 포즈
   "knownErrors": [ "^\\[Analytics\\] init failed" ],   // 이 프로젝트가 원래 내는 에러(정규식): knownErrors로 보고, 루프를 막지 않음
   "captureSize": [ 720, 1560 ],            // 크기를 주지 않은 캡처의 크기(없으면 세로 게임 720x1280, 그 외 1280x720)
+  "goldenRoot": "golden",                  // 기준 이미지 폴더(프로젝트 루트 기준)
   "generatedRoot": "Assets/AgentHarness/Generated", "buildScene": "Assets/AgentHarness/Main.unity",   // 코드 빌더(IBuildStep)를 쓸 때
   "installAdded": [], "installReplaced": []   // 설치가 더한/올린 의존성(uninstall이 되돌림) - 손대지 않는다
 }
@@ -107,7 +133,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
 - `open.ps1`의 `dialog`: 에디터가 모달 대화상자(Safe Mode, 이용 약관 등)에 막혀 있다 → 사람에게 답을 부탁하고 `open.ps1`을 다시 부른다(그 에디터를 기다린다).
   `deprecatedPackages`가 함께 나오면 Unity가 열 때마다 묻는 지원 종료 패키지다 → `Packages/manifest.json`에서 빼거나 바꾼다.
 - `stage=editor`: 에디터가 없거나 응답이 없다 → `tools/open.ps1`. 시작 시 컴파일 에러면 Safe Mode다(`Logs/Editor.log`의 `error CS`).
-- `stage=shots`(`blank`): 화면이 비었다. `hint`를 본다(화면에 그리는 카메라가 따로 있으면 `"camera"`로). 편집 모드(`-NoPlay`)에서는 플레이 중에만
+- `stage=shots`(`blank`): 화면이 비었다. `hint`와 `cameras`를 본다(메인 카메라가 텍스처에 그리는 게임이면 화면에 그리는 카메라를 `"camera"`로). 편집 모드(`-NoPlay`)에서는 플레이 중에만
   그리는 게임이 검게 나온다. 카메라가 런타임에 생기는 게임이면 메인 카메라가 없다고 나온다.
 - `stage=play` + `waitScene/waitTarget ... after Ns`: 그 씬·요소가 제한 시간 안에 나오지 않았다. 에러 메시지의 로드된 씬 목록과 `Logs/Editor.log`를 본다
   (게임이 로그인·입력을 기다리는 중일 수 있다 → 그 버튼을 `waitTarget` + `click`).
@@ -118,4 +144,4 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
 
 `powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1` (에디터를 닫은 뒤). 설치가 더한 것만 지운다:
 패키지 의존성(올린 버전은 원래대로), `tools/`의 진입점·기본 시나리오·이 문서, 설정 파일, 설치가 만든 `CLAUDE.md`, `HarnessOut/`.
-`Assets/AgentHarness/HarnessInput.cs`는 게임 코드가 쓰고 있으면 남긴다.
+`Assets/AgentHarness/HarnessInput.cs`는 게임 코드가 쓰고 있으면 남긴다. 커밋한 `golden/`은 프로젝트의 것이라 남긴다.
