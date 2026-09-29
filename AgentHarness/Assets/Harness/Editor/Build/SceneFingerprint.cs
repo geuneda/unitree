@@ -54,8 +54,17 @@ namespace Harness.Editor
 
             var text = sb.ToString() + "\n--assets--\n" + assetSb;
             r.hash = Sha1(text);
-            // Kept for diffing when two builds disagree: Library/Harness/fingerprint.txt (+ per-asset dumps).
-            try { File.WriteAllText(HarnessPaths.Combine(HarnessPaths.StateDir, "fingerprint.txt"), text + "\n--asset dumps--\n" + s_AssetDump); } catch { }
+            // Kept for diffing when two builds disagree: Library/Harness/fingerprint.txt (+ per-asset dumps). The last
+            // different dump is kept as fingerprint.prev.txt, so a changed fingerprint can be diffed after the fact.
+            try
+            {
+                var file = HarnessPaths.Combine(HarnessPaths.StateDir, "fingerprint.txt");
+                var dump = text + "\n--asset dumps--\n" + s_AssetDump;
+                if (File.Exists(file) && File.ReadAllText(file) != dump)
+                    File.Copy(file, HarnessPaths.Combine(HarnessPaths.StateDir, "fingerprint.prev.txt"), true);
+                File.WriteAllText(file, dump);
+            }
+            catch { }
             s_AssetDump.Clear();
             return r;
         }

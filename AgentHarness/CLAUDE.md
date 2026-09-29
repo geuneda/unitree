@@ -24,7 +24,7 @@
 
 ```powershell
 unity status                      # state "ready" 인 에디터가 있어야 한다. 없으면:
-unity open <이 폴더 절대경로>      # 그 다음 unity status 가 ready 가 될 때까지 대기
+unity open <이 폴더 절대경로>      # 그 다음 unity status 가 ready 가 될 때까지 대기 (첫 루프는 Debug 전환 재컴파일을 ~30s 기다린다)
 powershell -ExecutionPolicy Bypass -File tools/loop.ps1
 ```
 
@@ -49,7 +49,7 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1
   "fps": {"avg","min","p95ms","p99ms","hitches","cpuMainAvgMs","samples","editorFocused"},
   "shots": ["C:/.../HarnessOut/latest/shot0_closeup.png", ...],
   "durationSec": 3.5,
-  "timings": {"lockWaitSec","compileSec","buildSec","playSec","collectSec"},
+  "timings": {"lockWaitSec","editorWaitSec","compileSec","buildSec","playSec","collectSec"},   // editorWaitSec: 시작 시 리로드·busy 대기(있을 때만)
   "build": {"fingerprint","steps":[{"type","module","ms","error","file","line"}], ...},
   "play": {"success","probeReady","frames","gameSec","modules","failedModules","inputEventsApplied",
            "events":[{"name":"SpinnerLap","count":2}]},     // EventBus 발행 횟수 → 게임플레이를 기계적으로 검증
@@ -287,7 +287,14 @@ powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke -
 - 프로젝트는 짧은 경로(60자 이하)에 둔다. 길면 Windows 260자 제한으로 Unity 패키지 파일 로드가 실패한다. `%TEMP%` 아래도 피한다(Burst DLL 차단). 스카이박스 앰비언트는 라이팅 베이크가 필요해서 Trilight + `ctx.BakeSkyReflection()`을 쓴다.
 - 캡처 카메라는 메인 카메라 설정(후처리 포함)을 복사해 오프스크린 렌더한다. 메인 카메라가 없으면 캡처 실패.
 - 에디터 플레이 모드 FPS는 에디터 오버헤드·autotick 영향을 받는다. 절대값이 아니라 **변경 전후 비교**용이다(`editorFocused` 확인).
-- Code Optimization은 Debug(정확한 예외 줄 번호). Release면 throw 위치가 메서드 끝 줄로 보고된다.
+- Code Optimization은 Debug(정확한 예외 줄 번호). Release면 throw 위치가 메서드 끝 줄로 보고되고, **절차적 메시·텍스처의 float 결과가 달라져
+  build fingerprint도 바뀐다**(스모크 씬: Debug `b012cf35…`, Release `6b977ecd…`). `CompilationPipeline.codeOptimization`은 에디터 세션 동안만
+  유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다 → `HarnessCodeOptimization`([InitializeOnLoad])이
+  세션마다 이 프로젝트만 Debug로 되돌린다(재컴파일 1회). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다.
+- 에디터를 막 열면 `unity status`가 ready여도 Pipeline 서버가 잠시 **503 Server Busy**를 준다. 루프 시작 ping은 연결 끊김·401과 함께
+  busy도 에디터 프로세스가 살아 있는 동안 최대 120s 기다린다(`timings.editorWaitSec`, 재시작 직후 ~27s).
+- 에디터를 코드로 닫기: `AgentScripts/quit.cs`에 `UnityEditor.EditorApplication.Exit(0);`를 쓰고 `uc.ps1 eval_file`(응답은 빈 본문 오류지만 1–2s 뒤 정상 종료).
+  PowerShell에서 `uc.ps1`을 `powershell -File`로 부르면 JSON 인자의 따옴표가 벗겨진다 → `& ./tools/uc.ps1 ...`처럼 같은 프로세스에서 호출.
 - PowerShell 5.1: `tools/*.ps1`은 ASCII만 쓴다(BOM 없는 UTF-8 비ASCII는 깨진다). 인자는 `uc.ps1`에 JSON 한 덩어리로.
 - 직전 컴파일이 실패한 상태에서 Pipeline `recompile`은 컴파일 시작 전의 옛 실패를 보고할 수 있다. `Invoke-HarnessRecompile`(loop.ps1)은
   컴파일 세대 번호로 이를 피한다 — 직접 `recompile_status`만 믿지 말 것.
@@ -304,7 +311,8 @@ powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke -
 - `stage=editor`: 에디터가 없거나 응답 없음. `unity status`; 열려 있는데 연결이 안 되면 Safe Mode(시작 시 컴파일 에러)일 수 있다 →
   `unity pipeline list`, `Logs/Editor.log`에서 `error CS` 확인 후 소스 수정 → 에디터 재시작. `editor_status`가 `blocked_by_dialog`면 사람에게 다이얼로그를 닫아 달라고 한다.
 - 플레이가 끝나지 않음: 시나리오 타임아웃(duration+70s) 후 자동 종료. 수동: `tools/uc.ps1 editor_stop`.
-- 빌드 fingerprint가 매번 바뀜: 빌더가 비결정적(시드 없는 랜덤, 시간, Dictionary 순회 순서 등). `Library/Harness/fingerprint.txt` 두 개를 diff.
+- 빌드 fingerprint가 매번 바뀜: 빌더가 비결정적(시드 없는 랜덤, 시간, Dictionary 순회 순서 등)이거나 Code Optimization이 Release다
+  (`build.warnings`에 경고). 덤프가 바뀌면 직전 덤프가 `Library/Harness/fingerprint.prev.txt`로 남으니 `fingerprint.txt`와 diff한다.
 - `stage=submit`: worktree에서 `loop.ps1`을 돌렸거나(→ `submit.ps1`), 기존 Contracts 파일을 고쳤거나(추가만 허용), `-Module` 폴더가 없거나,
   다른 worktree가 그 모듈을 미병합 상태로 올려 두었거나(`submit.owner`), 에디터 트리 브랜치에 이 worktree에 없는 그 모듈 커밋이 있다(→ `git merge master`). `error`를 읽는다.
 - report에 `recoveredSubmit`: 이전 submit이 도중에 죽어 이번 실행이 되돌렸다. 그 에이전트는 다시 submit하면 된다.
@@ -313,5 +321,5 @@ powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke -
 - report에 `recoveredLand`: 이전 land가 도중에 죽어 이번 실행이 병합을 되돌렸다. 그 에이전트는 다시 land하면 된다. 되돌리기가 실패하면
   저널이 `Library/Harness/land/failed-<runId>.json`으로 옮겨지고(`recoveredLand.error`), stash는 `refs/agentharness/land/<runId>`에 남는다
   (`git stash apply <sha>`로 직접 복원).
-- 하네스 상태 파일: `Library/Harness/`(play_state.json, console.ndjson, compile.json, buildcache.json, fingerprint.txt,
+- 하네스 상태 파일: `Library/Harness/`(play_state.json, console.ndjson, compile.json, buildcache.json, fingerprint(.prev).txt,
   submit/(pending.json, owners.json), land/).

@@ -600,14 +600,17 @@ function Invoke-HarnessLoop {
 
     # ---- 0. Editor reachable, not playing -----------------------------------------------------------
     $ping = Invoke-UnityCommand -Name 'harness_ping' -TimeoutSec 10
-    # The previous lock holder may have just triggered a domain reload: if the Editor process is alive, wait it out.
+    # The previous lock holder may have just triggered a domain reload, or the Editor has just started and still answers
+    # 503 "Server Busy" although 'unity status' says ready: if the Editor process is alive, wait it out.
     $ep = Get-HarnessEndpoint
-    if (-not $ping.success -and $ping.unreachable -and $ep -and (Get-Process -Id $ep.Pid -ErrorAction SilentlyContinue)) {
+    if (-not $ping.success -and ($ping.unreachable -or $ping.busy) -and $ep -and (Get-Process -Id $ep.Pid -ErrorAction SilentlyContinue)) {
         $sw = [Diagnostics.Stopwatch]::StartNew()
-        while (-not $ping.success -and $sw.Elapsed.TotalSeconds -lt 60) {
+        # A fresh Editor also recompiles once for Debug code optimization (HarnessCodeOptimization): ~30 s measured.
+        while (-not $ping.success -and $sw.Elapsed.TotalSeconds -lt 120) {
             Start-Sleep -Milliseconds 250
             $ping = Invoke-UnityCommand -Name 'harness_ping' -TimeoutSec 10
         }
+        $Timings['editorWaitSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
     }
     if (-not $ping.success) {
         $report.stage = 'editor'

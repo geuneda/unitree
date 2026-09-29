@@ -7,6 +7,24 @@ using UnityEngine;
 
 namespace Harness.Editor
 {
+    /// <summary>
+    /// CompilationPipeline.codeOptimization lasts one Editor session: a restarted Editor comes back as Release (the
+    /// user-wide "Code Optimization On Startup" preference, which is left alone). Release moves exception lines to the
+    /// method's closing brace and changes procedural float results, i.e. the build fingerprint. Re-apply Debug for this
+    /// project whenever an Editor session starts (one extra recompile).
+    /// </summary>
+    [InitializeOnLoad]
+    static class HarnessCodeOptimization
+    {
+        static HarnessCodeOptimization()
+        {
+            if (Application.isBatchMode) return;
+            if (UnityEditor.Compilation.CompilationPipeline.codeOptimization == UnityEditor.Compilation.CodeOptimization.Debug) return;
+            UnityEditor.Compilation.CompilationPipeline.codeOptimization = UnityEditor.Compilation.CodeOptimization.Debug;
+            Debug.Log("[Harness] Code optimization set to Debug for this Editor session (exact exception lines, stable build fingerprint)");
+        }
+    }
+
     /// <summary>Project settings the harness depends on, applied through Editor APIs (never by editing ProjectSettings YAML).</summary>
     public static class HarnessSetup
     {

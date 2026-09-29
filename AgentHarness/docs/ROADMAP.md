@@ -123,6 +123,7 @@
   에디터를 코드로 닫는 믿을 만한 방법이 없다. `EditorApplication.delayCall` 경유 `Exit`도 백그라운드 에디터에선 실행되지 않는다.
   2026-09-29 클론 검증 중 메인 에디터가 정상 종료 절차로 꺼졌는데 원인을 로그로 특정하지 못했다.
   확인된 우회: `eval`로 `EditorApplication.Exit(0)`를 **직접** 호출하면 백그라운드 에디터도 정상 종료된다 → `harness_quit`으로 만들 것.
+  2026-09-29 재확인: `uc.ps1 eval_file`로 3회 모두 1–2s 안에 정상 종료(응답은 빈 본문이라 `unexpected reply (HTTP 200)`).
 - [ ] **O-5 `%TEMP%` 아래 프로젝트에서 Burst JIT DLL 로드가 막힌다** (LoadLibrary error 4551 = Windows 애플리케이션 제어 정책).
   editorErrors로만 보고된다. 프로젝트를 Temp에 두지 말 것.
 - [ ] **O-6 도메인 리로드 직후 Unity Search 인덱서 예외** (`UnityEditor.Search.SearchInit.IndexationOnStartup`, ArgumentOutOfRange).
@@ -153,6 +154,25 @@
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **F-6 에디터를 재시작하면 예외 줄 번호와 build fingerprint가 바뀜** (2026-09-29)
+  - 현상: 메모리 부족으로 에디터가 꺼진 뒤 다시 열자 같은 코드의 fingerprint가 `b012cf35…` → `6b977ecd…`, 런타임 예외 줄이 68 → 74(메서드 끝).
+    새 세션끼리는 결정적이었다(재시작 2회, 모듈 추가·삭제 리로드, `no_cache` 재빌드 모두 `6b977ecd…`).
+  - 원인: `harness_setup`이 바꾸는 `CompilationPipeline.codeOptimization`은 **에디터 세션 동안만** 유지된다. 재시작하면 사용자 전역
+    "Code Optimization On Startup"(Release)로 돌아간다. Release JIT에서는 절차적 메시·텍스처의 float 결과가 달라진다
+    (`fingerprint.prev.txt` diff: `SpinnerKnot.asset`, `TerrainMesh.asset`, `TerrainAlbedo.png` 세 줄만 다름). `build.warnings`에만 보고돼 놓쳤다.
+  - 수정: `HarnessCodeOptimization`([InitializeOnLoad], Harness.Editor)이 세션이 시작될 때 이 프로젝트만 Debug로 되돌린다(배치 모드 제외,
+    재컴파일 1회). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다. 빌드 덤프가 바뀌면 직전 덤프를
+    `Library/Harness/fingerprint.prev.txt`로 남겨 다음에는 바로 diff할 수 있게 했다.
+  - 검증: `EditorApplication.Exit(0)` → `unity open` → ready 직후 첫 루프부터 녹색, fingerprint `b012cf35…`, 경고 없음(2회).
+    그 세션에서 매트릭스 1–6 녹색: fingerprint 3회 동일, 컴파일 61행·**런타임 68행**·셰이더 87행 정확, lint, 동시 루프 두 번째 2.96s 대기 후 녹색.
+    루프(변경 없음) 3.4–3.5s.
+
+- [x] **F-7 에디터를 막 열면 첫 루프가 `stage=editor`로 실패** (2026-09-29)
+  - 원인: `unity status`가 ready여도 Pipeline 서버가 잠시 503 "Server Busy"를 준다. 루프 시작 ping은 연결 끊김·401(`unreachable`)만
+    재시도하고 busy는 바로 실패로 처리했다(재시작 직후 루프 2회 연속 0.2s 만에 `stage=editor`).
+  - 수정: 에디터 프로세스가 살아 있으면 busy도 기다린다(최대 120s, F-6의 Debug 재컴파일 포함). 기다린 시간은 `timings.editorWaitSec`.
+  - 검증: 재시작 → ready 직후 루프가 26.9s(`editorWaitSec`) 기다린 뒤 녹색. 3회 재시작 모두 첫 루프 녹색.
 
 - [x] **G5-5 worktree 브랜치 병합(landing)이 수동이다** (2026-09-29)
   - 원인: submit한 파일은 에디터 트리에 미커밋 사본으로 남아 `git merge`가 "untracked working tree files would be overwritten"으로 거부한다.
