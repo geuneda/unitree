@@ -61,6 +61,11 @@ function Finish([int]$Code) {
 function Fail([string]$Message) { $result['error'] = $Message; Finish 1 }
 # File text with LF line ends: a package from git is checked out with the machine's line ends (CRLF on Windows).
 function Read-Text([string]$Path) { [IO.File]::ReadAllText($Path).Replace("`r`n", "`n") }
+# An unchanged copy of an earlier templates/HarnessInput.cs (its SHA-256 is in templates/HarnessInput.previous.txt).
+function Test-PreviousShim([string]$Text) {
+    $hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($utf8.GetBytes($Text))).Replace('-', '').ToLowerInvariant()
+    @(Get-Content -LiteralPath (Join-Path $templates 'HarnessInput.previous.txt') | Where-Object { $_ -match '^[0-9a-f]{64}' } | ForEach-Object { $_.Substring(0, 64) }) -contains $hash
+}
 
 # ---- 0. The project ------------------------------------------------------------------------------------------
 $root = [IO.Path]::GetFullPath($Project).TrimEnd('\', '/')
@@ -212,14 +217,21 @@ foreach ($t in @(@{ rel = 'tools/scenarios/default.json'; src = 'default-scenari
     Add-Step $t.rel 'create' { [void][IO.Directory]::CreateDirectory((Split-Path -Parent $dst)); [IO.File]::WriteAllText($dst, $text, $utf8) }.GetNewClosure()
 }
 
-# The legacy input shim: the game's own file once written (uninstall removes it only while unchanged and unused).
+# The legacy input shim: the game's own file once written (uninstall removes it only while unchanged and unused). An
+# unchanged copy of an older template is updated (installing again with -InputShim is how an attached project gets it).
 if ($InputShim) {
     $rel = 'Assets/AgentHarness/HarnessInput.cs'
     $dst = Join-Path $root $rel
-    if (Test-Path -LiteralPath $dst) { Add-Step $rel 'keep' $null }
-    else {
-        $text = Read-Text (Join-Path $templates 'HarnessInput.cs')
+    $text = Read-Text (Join-Path $templates 'HarnessInput.cs')
+    if (-not (Test-Path -LiteralPath $dst)) {
         Add-Step $rel 'create' { [void][IO.Directory]::CreateDirectory((Split-Path -Parent $dst)); [IO.File]::WriteAllText($dst, $text, $utf8) }.GetNewClosure()
+    } elseif ((Read-Text $dst) -eq $text) {
+        Add-Step $rel 'keep' $null
+    } elseif (Test-PreviousShim (Read-Text $dst)) {
+        Add-Step $rel 'modify' { [IO.File]::WriteAllText($dst, $text, $utf8) }.GetNewClosure()
+    } else {
+        Add-Step $rel 'keep' $null
+        $result.warnings += "$rel was changed after install and is not updated: compare it with templates/HarnessInput.cs of the package (while a scenario plays, members return the scenario's input only - the hook's `"begin`"/`"end`")"
     }
     if ($handler -eq 1) { $result.warnings += "-InputShim: Active Input Handling is 'Input System Package', where UnityEngine.Input (and so HarnessInput) throws; scenarios drive the Input System directly" }
 }

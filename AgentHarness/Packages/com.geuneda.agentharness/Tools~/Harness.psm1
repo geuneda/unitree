@@ -954,6 +954,7 @@ function Invoke-HarnessLoop {
         $has = @($playResult.PSObject.Properties.Name)
         if ($has -contains 'inputBackends') { $report.play['inputBackends'] = @($playResult.inputBackends) }
         if ($has -contains 'inputHooks' -and @($playResult.inputHooks).Count) { $report.play['inputHooks'] = @($playResult.inputHooks) }
+        if ($has -contains 'isolatedDevices' -and @($playResult.isolatedDevices).Count) { $report.play['isolatedDevices'] = @($playResult.isolatedDevices | ForEach-Object { [ordered]@{ name = $_.name; presses = $_.presses } }) }
         if ($has -contains 'activeScene') { $report.play['activeScene'] = $playResult.activeScene }
         if ($has -contains 'scenes') { $report.play['scenes'] = @($playResult.scenes | ForEach-Object { [ordered]@{ name = $_.name; mode = $_.mode; t = [math]::Round($_.t, 3); wallSec = [math]::Round($_.wallSec, 2) } }) }
         if ($has -contains 'waits' -and @($playResult.waits).Count) { $report.play['waits'] = @($playResult.waits | ForEach-Object { [ordered]@{ type = $_.type; target = $_.target; t = [math]::Round($_.t, 3); waitedSec = [math]::Round($_.waitedSec, 2); frames = $_.frames } }) }

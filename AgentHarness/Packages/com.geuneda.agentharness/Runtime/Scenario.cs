@@ -107,6 +107,14 @@ namespace Harness
         public string via;   // ugui | world | uitk
     }
 
+    /// <summary>A real input device the scenario kept out, with the number of its key or button presses the game did not get (G3-6).</summary>
+    [Serializable]
+    public sealed class IsolatedDevice
+    {
+        public string name;
+        public int presses;   // events with a key or button press (a mouse move or the state a device reports on focus is kept out too, not counted)
+    }
+
     [Serializable]
     public sealed class FpsStats
     {
@@ -164,6 +172,7 @@ namespace Harness
         public int inputEventsApplied;
         public string[] inputBackends = Array.Empty<string>();   // inputSystem (virtual devices) and/or hook (the game's [AgentHarnessInput] methods)
         public string[] inputHooks = Array.Empty<string>();      // those methods (Type.Method)
+        public IsolatedDevice[] isolatedDevices = Array.Empty<IsolatedDevice>();   // real Input System devices off during the scenario
         public ClickTarget[] clicks = Array.Empty<ClickTarget>();
         public SceneLoad[] scenes = Array.Empty<SceneLoad>();
         public ScenarioWait[] waits = Array.Empty<ScenarioWait>();

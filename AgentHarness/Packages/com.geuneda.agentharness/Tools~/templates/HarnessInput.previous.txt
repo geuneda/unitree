@@ -1,0 +1,4 @@
+# SHA-256 (UTF-8, LF line ends) of earlier versions of templates/HarnessInput.cs. install.ps1 -InputShim replaces an
+# unchanged copy of one of them with the current template; uninstall.ps1 treats one as unchanged. When you change the
+# template, add the hash of the version you replace.
+85fe9ec88bed9ab658614eda36035479d9755757b40726a3de1e38c5b7117d4d  P-5 (2026-09-29): real input mixed into scenario input (G3-6)

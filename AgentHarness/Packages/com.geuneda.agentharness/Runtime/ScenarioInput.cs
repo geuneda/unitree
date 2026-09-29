@@ -86,7 +86,9 @@ namespace Harness
     /// matched by name, so the game needs no reference to the harness). tools/templates/HarnessInput.cs is a drop-in
     /// UnityEngine.Input with such a method. The Editor finds the methods (Harness.Editor.HarnessInputHooks).
     /// Events: keyDown/keyUp (key = KeyCode name), mouseDown/mouseUp (key = button 0-4), mousePos (value = screen pixels,
-    /// origin bottom left; mouseMove is sent as the new position), scroll (value), releaseAll, end.
+    /// origin bottom left; mouseMove is sent as the new position), scroll (value), releaseAll. Every hook also gets "begin"
+    /// when a scenario starts (take the scenario's input only from now on) and "end" when it is over, from
+    /// <see cref="ScenarioRunner"/>, with or without input events.
     /// </summary>
     public sealed class InputHookReplay : IScenarioInput
     {
@@ -115,6 +117,6 @@ namespace Harness
             }
         }
 
-        public void Dispose() => m_Hook("end", null, default);
+        public void Dispose() { }   // "end" comes from the runner
     }
 }

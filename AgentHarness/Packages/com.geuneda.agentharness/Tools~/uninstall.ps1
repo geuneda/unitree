@@ -37,6 +37,11 @@ function Finish([int]$Code) {
 function Fail([string]$Message) { $result['error'] = $Message; Finish 1 }
 # File text with LF line ends: a package from git is checked out with the machine's line ends (CRLF on Windows).
 function Read-Text([string]$Path) { [IO.File]::ReadAllText($Path).Replace("`r`n", "`n") }
+# An unchanged copy of an earlier templates/HarnessInput.cs (its SHA-256 is in templates/HarnessInput.previous.txt).
+function Test-PreviousShim([string]$Text) {
+    $hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($utf8.GetBytes($Text))).Replace('-', '').ToLowerInvariant()
+    @(Get-Content -LiteralPath (Join-Path $templates 'HarnessInput.previous.txt') | Where-Object { $_ -match '^[0-9a-f]{64}' } | ForEach-Object { $_.Substring(0, 64) }) -contains $hash
+}
 
 if (-not $Project) { Fail '-Project is required (or run tools/uninstall.ps1 of the project)' }
 $root = [IO.Path]::GetFullPath($Project).TrimEnd('\', '/')
@@ -194,7 +199,8 @@ foreach ($d in $scratch) {
 # The legacy input shim (install.ps1 -InputShim) is the game's once code reads input through it.
 $shim = Join-Path $root 'Assets/AgentHarness/HarnessInput.cs'
 if (Test-Path -LiteralPath $shim) {
-    $same = (Read-Text $shim) -eq (Read-Text (Join-Path $templates 'HarnessInput.cs'))
+    $shimText = Read-Text $shim
+    $same = $shimText -eq (Read-Text (Join-Path $templates 'HarnessInput.cs')) -or (Test-PreviousShim $shimText)
     $users = @(if ($same) { Get-ChildItem -LiteralPath (Join-Path $root 'Assets') -Recurse -Filter *.cs -File | Where-Object { $_.FullName -ne $shim -and [IO.File]::ReadAllText($_.FullName).Contains('HarnessInput.') } | ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace('\', '/') } })
     if ($same -and $users.Count -eq 0) {
         $shimDir = Split-Path -Parent $shim

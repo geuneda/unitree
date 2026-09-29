@@ -170,5 +170,113 @@ namespace Harness
             m_RuntimeSettings = null;
         }
     }
+
+    /// <summary>
+    /// Keeps real devices out of a scenario (G3-6). While a scenario plays, the native devices (the keyboard, mouse and
+    /// gamepads the backend reports) are disabled, so the game gets the scenario's input only. Otherwise a key pressed in
+    /// another window mixes into the replay: <see cref="ScriptedInput"/> makes input ignore Editor focus, and a binding such
+    /// as "&lt;Keyboard&gt;/space" takes the real keyboard as it takes the virtual one. The devices are disabled on the
+    /// managed side only (keepSendingEvents, as TouchSimulation does with the mouse): their events still arrive, and are
+    /// marked handled instead of changing state; the ones with a key or button press are counted (<see cref="Report"/>).
+    /// Each device is hard-reset when isolated (no key held, the pointer at 0,0), so every run starts from the same state.
+    /// A device that is disabled already (by the game, TouchSimulation, or while the Editor is in the background) is left
+    /// alone, and isolated if it is enabled during the scenario (focus comes back, a gamepad is plugged in). Dispose enables
+    /// exactly the devices it disabled.
+    /// </summary>
+    public sealed class RealInputIsolation : IDisposable
+    {
+        // Devices disabled by an isolation and not enabled again: RestoreAll (the Editor, when play mode is over) puts them
+        // back should a scenario not have ended normally.
+        static readonly HashSet<InputDevice> s_Disabled = new HashSet<InputDevice>();
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() => RestoreAll();
+
+        readonly HashSet<InputDevice> m_Isolated = new HashSet<InputDevice>();
+        readonly List<InputDevice> m_Order = new List<InputDevice>();
+        readonly Dictionary<InputDevice, int> m_Presses = new Dictionary<InputDevice, int>();
+        readonly Action<InputEventPtr, InputDevice> m_OnEvent;
+        readonly Action<InputDevice, InputDeviceChange> m_OnDeviceChange;
+        bool m_Disposed;
+
+        RealInputIsolation()
+        {
+            m_OnEvent = OnEvent;
+            m_OnDeviceChange = OnDeviceChange;
+        }
+
+        public static RealInputIsolation Begin()
+        {
+            var iso = new RealInputIsolation();
+            InputSystem.onEvent += iso.m_OnEvent;
+            InputSystem.onDeviceChange += iso.m_OnDeviceChange;
+            foreach (var device in InputSystem.devices.ToArray()) iso.Isolate(device);   // a copy: disabling notifies onDeviceChange
+            return iso;
+        }
+
+        /// <summary>Every device isolated during the scenario, with the number of its key or button presses kept from the game.</summary>
+        public IsolatedDevice[] Report() => m_Order.ConvertAll(d => new IsolatedDevice { name = d.name, presses = m_Presses[d] }).ToArray();
+
+        void Isolate(InputDevice device)
+        {
+            if (m_Disposed || device == null || !device.native || !device.added || !device.enabled) return;
+            InputSystem.DisableDevice(device, keepSendingEvents: true);
+            if (device.enabled) return;
+            InputSystem.ResetDevice(device, alsoResetDontResetControls: true);
+            m_Isolated.Add(device);
+            s_Disabled.Add(device);
+            if (m_Presses.ContainsKey(device)) return;
+            m_Presses[device] = 0;
+            m_Order.Add(device);
+        }
+
+        void OnDeviceChange(InputDevice device, InputDeviceChange change)
+        {
+            if (change == InputDeviceChange.Added || change == InputDeviceChange.Reconnected || change == InputDeviceChange.Enabled)
+                Isolate(device);
+        }
+
+        void OnEvent(InputEventPtr eventPtr, InputDevice device)
+        {
+            if (device == null || !m_Isolated.Contains(device)) return;
+            // Editor updates carry the Editor's input (Game view not focused), never the game's.
+            if (InputState.currentUpdateType == InputUpdateType.Editor) return;
+            var type = eventPtr.type;
+            if (type == DeviceRemoveEvent.Type || type == DeviceConfigurationEvent.Type) return;
+            eventPtr.handled = true;
+            // Presses only: a device also reports its state when play mode starts or the Editor gets focus (a sync).
+            if (eventPtr.HasButtonPress()) m_Presses[device]++;
+        }
+
+        public void Dispose()
+        {
+            if (m_Disposed) return;
+            m_Disposed = true;
+            InputSystem.onEvent -= m_OnEvent;
+            InputSystem.onDeviceChange -= m_OnDeviceChange;
+            foreach (var device in m_Isolated) Enable(device);
+            m_Isolated.Clear();
+        }
+
+        /// <summary>Enables the devices a scenario left disabled (none when every scenario ended normally); how many.</summary>
+        public static int RestoreAll()
+        {
+            if (s_Disabled.Count == 0) return 0;
+            var n = 0;
+            foreach (var device in new List<InputDevice>(s_Disabled))
+                if (Enable(device)) n++;
+            s_Disabled.Clear();
+            return n;
+        }
+
+        static bool Enable(InputDevice device)
+        {
+            s_Disabled.Remove(device);
+            if (!device.added || device.enabled) return false;
+            try { InputSystem.EnableDevice(device); }
+            catch (Exception e) { Debug.LogException(e); }
+            return true;
+        }
+    }
 }
 #endif

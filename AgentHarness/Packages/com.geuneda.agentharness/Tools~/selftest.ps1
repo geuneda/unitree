@@ -5,7 +5,9 @@
 
   1 loop x3: green, same build.fingerprint and play.events (-ExpectFingerprint), no blank shots; compile-check of
     every assembly (csc, the Editor's response files); one more loop with the scenario tools of P-5 (waitScene,
-    waitTarget, a UI Toolkit click by name, KeyCode key names, a capture from a pose and one from a named camera)
+    waitTarget, a UI Toolkit click by name, KeyCode key names, a capture from a pose and one from a named camera);
+    real input (G3-6): Space pressed on the real keyboard during a loop leaves play.events as they were, and the real
+    devices, disabled while a scenario plays, are enabled again after it, after a failed play and after a stopped one
   2 C# compile error in Smoke -> stage=compile at the injected file/line, module Smoke; reverted -> green
   3 runtime exception in Smoke -> stage=runtime at the injected line; reverted -> green
   4 HLSL error in the Smoke shader -> stage=shader at the injected line, again in the next loop (no reimport);
@@ -322,7 +324,76 @@ $ScenarioToolsText = @'
 }
 '@
 
+# Item 1's real input checks (G3-6), eval_file bodies (no usings). The first one presses and releases Space on every real
+# (native) keyboard every few input updates of the next play session - queued on the Input System device, the path the
+# OS's key events take - like a person typing in another window. It disarms itself when play mode exits (or unused, after 120 s).
+$RealInputArmText = @'
+const string key = "AgentHarness.selftest.realInput";
+UnityEditor.SessionState.SetInt(key, 0);
+var deadline = System.DateTime.UtcNow.AddSeconds(120);
+var updates = 0;
+var queued = 0;
+System.Action tick = () =>
+{
+    if (!UnityEngine.Application.isPlaying) return;
+    updates++;
+    if (updates % 6 != 0) return;
+    var down = (updates / 6) % 2 == 1;
+    foreach (var d in UnityEngine.InputSystem.InputSystem.devices)
+    {
+        var kb = d as UnityEngine.InputSystem.Keyboard;
+        if (kb == null || !kb.native) continue;
+        if (down) UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState(UnityEngine.InputSystem.Key.Space));
+        else UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState());
+        queued++;
+    }
+    UnityEditor.SessionState.SetInt(key, queued);
+};
+System.Action<UnityEditor.PlayModeStateChange> onChange = null;
+onChange = c =>
+{
+    if (c == UnityEditor.PlayModeStateChange.EnteredPlayMode)
+    {
+        if (System.DateTime.UtcNow > deadline) { UnityEditor.EditorApplication.playModeStateChanged -= onChange; return; }
+        UnityEngine.InputSystem.InputSystem.onBeforeUpdate += tick;
+    }
+    else if (c == UnityEditor.PlayModeStateChange.ExitingPlayMode)
+    {
+        UnityEngine.InputSystem.InputSystem.onBeforeUpdate -= tick;
+        UnityEditor.EditorApplication.playModeStateChanged -= onChange;
+    }
+};
+UnityEditor.EditorApplication.playModeStateChanged += onChange;
+return "armed";
+'@
+
+# The real devices, the disabled ones among them, and how many Space events the armed play queued.
+$RealInputStateText = @'
+var native = new List<string>();
+var disabled = new List<string>();
+foreach (var d in UnityEngine.InputSystem.InputSystem.devices)
+{
+    if (!d.native) continue;
+    native.Add(d.name);
+    if (!d.enabled) disabled.Add(d.name);
+}
+return new Dictionary<string, object> { { "injected", UnityEditor.SessionState.GetInt("AgentHarness.selftest.realInput", -1) }, { "native", native }, { "disabled", disabled } };
+'@
+
+# A play that fails (waitTarget times out) and one that is stopped in the middle.
+$RealInputFailText = '{ "name": "selftest-fail", "durationSec": 1, "events": [ { "t": 0.1, "type": "waitTarget", "target": "SelftestNoSuchTarget", "timeoutSec": 0.5 } ] }'
+$RealInputLongText = '{ "name": "selftest-long", "durationSec": 30, "events": [ { "t": 0.5, "type": "keyTap", "key": "Space" } ] }'
+
 # ---- matrix 1-6: the Editor tree -----------------------------------------------------------------------------------
+# eval_file under the Editor lock: the body's return value.
+function Invoke-Eval([string]$File) {
+    [void](Enter-HarnessLock)
+    try { $r = Invoke-UnityCommand -Name 'eval_file' -Params @{ file = $File } -TimeoutSec 30 } finally { Exit-HarnessLock }
+    if (-not $r.success -or -not $r.result.success) { throw "eval_file $File failed: $($r.error) $($r.result | ConvertTo-Json -Compress -Depth 6)" }
+    $r.result.result
+}
+
+function Get-DisabledDevices($State) { (@($State.disabled) | Sort-Object) -join ',' }
 function Invoke-Item1 {
     Start-Item 1 'loop x3: green, deterministic, compile-check'
     $runs = @()
@@ -360,6 +431,44 @@ function Invoke-Item1 {
     $shots = @($r.shotStats | ForEach-Object { "$($_.name):$($_.preset)$(if ($_.blank) { ':BLANK' })$(if ($_.error) { ":$($_.error)" })" })
     Test-Check 'pose shot + named camera shot' (($shots -join ',') -eq 'top:pose,cam:camera') ($shots -join ',')
     $state.item['scenarioTools'] = [ordered]@{ waits = $w; clicks = @($c | ForEach-Object { "$($_.target) $($_.via)" }); shots = $shots }
+
+    # Real input (G3-6): Space pressed on the real keyboard during a loop does not reach the game; the real devices are
+    # disabled only while a scenario plays, also when the play fails or is stopped.
+    $files = @{}
+    foreach ($kv in @{ arm = @('realinput-arm.cs', $RealInputArmText); state = @('realinput-state.cs', $RealInputStateText); fail = @('realinput-fail.json', $RealInputFailText); long = @('realinput-long.json', $RealInputLongText) }.GetEnumerator()) {
+        $files[$kv.Key] = (Join-Path $outAbs $kv.Value[0]).Replace('\', '/')
+        Write-TextFile $files[$kv.Key] $kv.Value[1]
+    }
+    $before = Invoke-Eval $files.state
+    [void](Invoke-Eval $files.arm)
+    $r = Invoke-Loop '1-real-input'
+    $s = Invoke-Eval $files.state
+    $injected = $s.injected
+    $presses = [int](@($r.play.isolatedDevices | ForEach-Object { [int]$_.presses }) | Measure-Object -Sum).Sum
+    $isolated = @($r.play.isolatedDevices | ForEach-Object { "$($_.name)=$($_.presses)" }) -join ','
+    Test-Check 'real input: loop green' ([bool]$r.ok) (Get-Summary $r)
+    Test-Check 'real input: Space queued on the real keyboard during the play' ([int]$s.injected -gt 0) "injected=$($s.injected) native=$(@($s.native) -join ',')"
+    Test-Check 'real input: same play.events' ((Get-Events $r) -eq $evs[0]) (Get-Events $r)
+    Test-Check 'real input: its presses kept out (play.isolatedDevices)' ($presses -gt 0) $isolated
+    Test-Check 'real input: real devices enabled again' ((Get-DisabledDevices $s) -eq (Get-DisabledDevices $before)) "before [$(Get-DisabledDevices $before)] after [$(Get-DisabledDevices $s)]"
+    $r = Invoke-Tool $root 'loop.ps1' '1-real-input-fail' @('-Scenario', $files.fail)
+    $s = Invoke-Eval $files.state
+    Test-Check 'failed play: stage=play, real devices enabled again' ($r.stage -eq 'play' -and (Get-DisabledDevices $s) -eq (Get-DisabledDevices $before)) "$(Get-Summary $r) disabled [$(Get-DisabledDevices $s)]"
+    $dir = Get-OutDir '1-real-input-stop'
+    $t = Start-Tool $root 'loop.ps1' @('-Scenario', $files.long, '-Out', $dir)
+    $during = $null
+    $running = Wait-Until { $p = Invoke-UnityCommand -Name 'harness_play_status' -TimeoutSec 5; $p.success -and $p.result.state -eq 'running' } 120 $t
+    if ($running) {
+        Start-Sleep -Milliseconds 1000
+        $p = Invoke-UnityCommand -Name 'eval_file' -Params @{ file = $files.state } -TimeoutSec 30   # the loop holds the lock
+        if ($p.success -and $p.result.success) { $during = $p.result.result }
+        [void](Invoke-UnityCommand -Name 'editor_stop' -TimeoutSec 30)
+    }
+    $r = Read-ToolReport $dir (Wait-Tool $t 180)
+    $s = Invoke-Eval $files.state
+    Test-Check 'stopped play: real devices disabled while it ran' ($running -and $during -and @($during.disabled).Count -gt 0 -and @($during.disabled).Count -eq @($during.native).Count) "running=$running disabled [$(if ($during) { Get-DisabledDevices $during })]"
+    Test-Check 'stopped play: stage=play, real devices enabled again' ($r.stage -eq 'play' -and (Get-DisabledDevices $s) -eq (Get-DisabledDevices $before)) "$(Get-Summary $r) $($r.play.error) disabled [$(Get-DisabledDevices $s)]"
+    $state.item['realInput'] = [ordered]@{ injected = $injected; isolated = $isolated; native = @($s.native) }
 
     $cc = Invoke-HarnessProcess $ps @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'tools/compile-check.ps1'), '-IncludeHarness') -Environment $childEnv -TimeoutSec 300
     $j = $null; try { $j = $cc.out | ConvertFrom-Json } catch { }

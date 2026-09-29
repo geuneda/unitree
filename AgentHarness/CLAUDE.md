@@ -68,6 +68,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
   "play": {"success","probeReady","frames","gameSec","modules","failedModules","inputEventsApplied",
            "events":[{"name":"SpinnerLap","count":2}],     // EventBus 발행 횟수 → 게임플레이를 기계적으로 검증
            "inputBackends":["inputSystem"|"hook"], "inputHooks":["HarnessInput.OnScenarioInput"],   // 입력이 들어간 곳
+           "isolatedDevices":[{"name":"Keyboard","presses":0}],   // 시나리오 동안 끈 실제 장치와 막은 키·버튼 누름 수
            "activeScene", "scenes":[{"name","mode","t","wallSec"}],      // 로드된 씬(Start = 처음부터 있던 씬, t = 시나리오 시계)
            "waits":[{"type","target","t","waitedSec","frames"}], "clicks":[{"target","t","x","y","via"}]},
   "render": {"batches","setPassCalls","drawCalls","triangles","vertices"},
@@ -240,6 +241,12 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
   생기면 게임패드 안내로 바뀌는 게임이 있다). InputAction·`Keyboard.current` 그대로 동작.
   **구 Input Manager(`UnityEngine.Input`)는 코드로 누를 수 없다**(에디터에서 OS 입력을 직접 읽는다, 아래 "함정") → 게임이 `[AgentHarnessInput]`
   정적 메서드로 받는다: `Tools~/templates/HarnessInput.cs`(install `-InputShim`)는 같은 멤버 이름의 드롭인 `Input`이다(`Input.` → `HarnessInput.`).
+- **시나리오 동안 게임은 시나리오 입력만 받는다**(G3-6). 러너가 시작하면(첫 프레임) 실제 Input System 장치(백엔드가 보고한 키보드·마우스·게임패드)를
+  끄고(`RealInputIsolation`: `DisableDevice(keepSendingEvents)` + 이벤트를 handled로 표시, 켤 때 하드 리셋 → 눌린 키 없음·포인터 0,0), 훅에는
+  `"begin"`을 보낸다(`HarnessInput`은 그때부터 `UnityEngine.Input`을 읽지 않고, 마우스는 시나리오가 옮기기 전까지 화면 중앙). 끝나면(실패·중단 포함)
+  켜고 `"end"`. 다른 창에서 누른 키가 `<Keyboard>/space` 같은 바인딩으로 들어와 `play.events`가 달라지던 문제다. 막은 실제 키·버튼 누름은
+  `play.isolatedDevices[].presses`(마우스 이동, 플레이 진입·포커스 때 장치가 보내는 상태(sync)는 막되 세지 않는다). 원래 꺼져 있던 장치(TouchSimulation이
+  끈 마우스 등)는 건드리지 않는다. 구 Input Manager를 `Input.`으로 직접 읽는 코드는 막을 수 없다 — `HarnessInput`을 거쳐야 한다.
 - 캡처는 그 프레임의 모든 `LateUpdate` 뒤에 찍는다(LateUpdate에서 카메라를 움직이거나 `Graphics.DrawMesh*`로 그리는 게임도 그대로 찍힌다).
 - 캡처 `preset`: 샷 이름(씬의 ShotPreset 또는 설정 `shots`) · `"auto"`(이름순 다음 샷, 없으면 메인 카메라) · `"main"`(메인 카메라 그대로) ·
   `"screen"`(Game 뷰 그대로 = **UI 오버레이 포함**, 해상도는 Game 뷰 크기, Game 뷰 탭이 보여야 함).
@@ -356,6 +363,7 @@ powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -E
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
 - 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark 없음) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
+  실제 입력 격리(플레이 동안 실제 키보드 장치에 스페이스를 넣어도 events 그대로·`isolatedDevices` 누름 > 0, 실패·중단한 플레이 뒤에도 실제 장치가 다시 켜짐) +
   `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 ·
   4 HLSL 에러(재임포트 없는 다음 루프에서도) · 5 리셋 없는 static(lint) · 6 루프 2개 동시 · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
   다른 worktree의 새 모듈·계약은 락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부) ·
@@ -381,7 +389,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   |---|---|---|---|---|
   | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `d9a6d092…` | 61 / 68 / 87 | 1–9 녹색, 샷은 6.3과 같은 밝기 |
   | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `977545a7…` | 61 / 68 / 87 | 1–9 녹색 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `0ba32228…` | 61 / 68 / 87 | 2–8 녹색, **1 빨강**: 첫 플레이 뒤 조명이 검다(`dark`, ROADMAP P-4) |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `0ba32228…` | 61 / 68 / 87 | 2–8 녹색, **1은 대개 빨강**: 첫 플레이 뒤 조명이 검다(`dark`, ROADMAP P-4; 비결정적이라 녹색일 때도 있음) |
 
   fingerprint는 버전마다 다르다(URP가 만드는 머티리얼·에셋 직렬화가 다르다). 같은 버전 안에서만 매번 같아야 한다.
 - 다른 버전으로 열면 Unity가 다시 쓰는 파일(커밋하지 않는다): `Packages/packages-lock.json`, `Assets/Settings/*RPAsset.asset`·
@@ -434,6 +442,8 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - 프로젝트가 하네스 의존성(`package.json`, 지금은 `com.unity.pipeline` 0.8.0-exp.1)을 더 낮은 버전으로 직접 고정하고 있으면 올리고 `installReplaced`에 남긴다
   (UPM에서는 manifest의 직접 의존이 이겨서 하네스가 옛 버전으로 돈다). 버전이 아닌 값(git URL 등)은 비교하지 않고 경고만.
 - `-InputShim`: 구 Input Manager 게임용 `Assets/AgentHarness/HarnessInput.cs`(게임 코드가 되는 파일: uninstall은 템플릿 그대로이고 아무도 안 쓸 때만 지운다).
+  이미 붙인 프로젝트는 install을 `-InputShim`으로 다시 돌리면 **고치지 않은 옛 템플릿**(SHA-256이 `templates/HarnessInput.previous.txt`에 있음)을 새 템플릿으로
+  바꾼다(`modified`). 고친 사본은 그대로 두고 경고한다. 템플릿을 바꿀 때는 바꾸기 전 버전의 해시를 그 파일에 더한다(uninstall도 그 목록을 "그대로"로 본다).
   `-KnownErrors '<정규식>'`: 설정 `knownErrors`.
 - Active Input Handling이 New/Both인데 Input System 패키지가 없으면 `com.unity.inputsystem`도 더한다(`installAdded`): `com.unity.pipeline`
   0.8.0-exp.1이 `ENABLE_INPUT_SYSTEM`만 보고 입력 코드를 컴파일해서 그 조합에서 컴파일이 깨진다(아래 "함정").
@@ -487,6 +497,10 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - **구 Input Manager(`Input.GetKey`, `Input.mousePosition`)는 에디터에서 OS 입력을 직접 읽는다.** `Input.mousePosition`이 Game 뷰 밖의 실제 커서를 따라가고,
   Game 뷰에 보낸 이벤트(`EditorWindow.SendEvent`, 내부 `EditorGUIUtility.QueueGameViewInputEvent`)는 Game 뷰의 OnGUI까지는 가지만 `Input`에도 게임의
   `OnGUI`에도 닿지 않았다(Active Input Handling Old/Both 둘 다, 포커스 있음). → 게임 쪽 훅(`[AgentHarnessInput]`, `HarnessInput.cs`).
+- **`<Keyboard>/space` 같은 바인딩은 가상 키보드만이 아니라 실제 키보드도 받는다.** 시나리오가 입력을 에디터 포커스와 무관하게 받게 하므로
+  다른 창에서 누른 키가 게임 이벤트가 됐다(루프 ~25회에 1회 `play.events`가 달랐다, G3-6) → 시나리오 동안 실제 장치를 끈다. Input System의
+  `LeavePlayMode`는 백그라운드 때문에 꺼진 장치만 켜고 `DisableDevice`로 끈 장치는 그대로 두므로, 끈 쪽이 반드시 다시 켜야 한다(러너 `Finish`,
+  에디터의 `EnteredEditMode`). 실제 장치는 플레이 진입·에디터 포커스 때 상태 이벤트(sync)를 보내므로 "막은 입력"은 이벤트 수가 아니라 누름으로 센다.
 - Input System 패키지가 있는 프로젝트의 Active Input Handling을 Old로 바꾸면 Input System이 "백엔드를 켤까요?" 모달을 띄워 에디터 메인 스레드가 멈춘다.
 - **클론·worktree도 원본 프로젝트와 PlayerPrefs를 공유한다**(에디터에서는 company/product별 레지스트리). 사내 프로젝트 클론의 시나리오가 개발용 로그인
   대화상자를 건너뛰자 원본에 저장된 선택(라이브 서버)으로 로그인했다. 서버 선택 같은 버튼은 시나리오에서 명시적으로 누르고, 바꾼 PlayerPrefs는 되돌린다.

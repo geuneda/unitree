@@ -11,7 +11,8 @@ using Debug = UnityEngine.Debug;
 namespace Harness
 {
     /// <summary>
-    /// Executes a <see cref="Scenario"/> in play mode: waits for <see cref="HarnessProbe.Ready"/>,
+    /// Executes a <see cref="Scenario"/> in play mode: keeps real input out (<see cref="RealInputIsolation"/>, "begin"/"end"
+    /// to the game's input hooks), waits for <see cref="HarnessProbe.Ready"/>,
     /// replays input through <see cref="ScriptedInput"/> (Input System) and/or the game's [AgentHarnessInput] methods
     /// (<see cref="InputHookReplay"/>, for the legacy Input Manager), waits for scenes (waitScene), captures shots, records
     /// frame/render stats, scene loads and runtime errors, writes result.json and invokes <see cref="onFinished"/>.
@@ -32,6 +33,9 @@ namespace Harness
         PlayResult m_Result;
         Action<string, string, Vector2> m_InputHook;
         readonly List<IScenarioInput> m_Inputs = new List<IScenarioInput>();
+#if AGENTHARNESS_INPUT_SYSTEM && ENABLE_INPUT_SYSTEM
+        RealInputIsolation m_Isolation;
+#endif
         bool m_RunInBackground;
 
         readonly Stopwatch m_Wall = new Stopwatch();
@@ -136,6 +140,7 @@ namespace Harness
             // is not changed; an attached project may ship with Run In Background off).
             m_RunInBackground = Application.runInBackground;
             Application.runInBackground = true;
+            BeginIsolation();
 
             m_Batches = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Batches Count");
             m_SetPass = ProfilerRecorder.StartNew(ProfilerCategory.Render, "SetPass Calls Count");
@@ -292,6 +297,44 @@ namespace Harness
         }
 
         // ---- Input ------------------------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// From the first frame on, the game gets the scenario's input only (G3-6): real Input System devices are disabled
+        /// (<see cref="RealInputIsolation"/>) and the game's [AgentHarnessInput] methods get "begin" (HarnessInput.cs then
+        /// stops reading UnityEngine.Input). <see cref="EndIsolation"/> undoes both.
+        /// </summary>
+        void BeginIsolation()
+        {
+#if AGENTHARNESS_INPUT_SYSTEM && ENABLE_INPUT_SYSTEM
+            try { m_Isolation = RealInputIsolation.Begin(); }
+            catch (Exception e) { Debug.LogException(e); }
+#endif
+            NotifyHooks("begin");
+        }
+
+        void EndIsolation()
+        {
+#if AGENTHARNESS_INPUT_SYSTEM && ENABLE_INPUT_SYSTEM
+            if (m_Isolation != null)
+            {
+                m_Result.isolatedDevices = m_Isolation.Report();
+                try { m_Isolation.Dispose(); } catch (Exception e) { Debug.LogException(e); }
+                m_Isolation = null;
+            }
+#endif
+            NotifyHooks("end");
+        }
+
+        /// <summary>"begin"/"end" to every input hook; one that throws (an input layer that knows input events only) gets a warning.</summary>
+        void NotifyHooks(string type)
+        {
+            if (m_InputHook == null) return;
+            foreach (var d in m_InputHook.GetInvocationList())
+            {
+                try { ((Action<string, string, Vector2>)d)(type, null, default); }
+                catch (Exception e) { Debug.LogWarning($"[Harness] input hook {d.Method.DeclaringType?.FullName}.{d.Method.Name} failed on \"{type}\": {e.Message}"); }
+            }
+        }
 
         /// <summary>
         /// Input backends for the kinds of input the timeline uses (none without input events): Input System virtual
@@ -625,6 +668,16 @@ namespace Harness
         {
             if (m_Finished) return;
             m_Finished = true;
+            // Time and input first, whatever fails below.
+            Time.captureDeltaTime = 0f;
+            Application.runInBackground = m_RunInBackground;
+            foreach (var input in m_Inputs)
+            {
+                try { input.Dispose(); } catch (Exception e) { Debug.LogException(e); }
+            }
+            m_Inputs.Clear();
+            EndIsolation();
+
             m_Result.success = error == null;
             m_Result.error = error;
             m_Result.wallSec = (float)m_Wall.Elapsed.TotalSeconds;
@@ -655,14 +708,6 @@ namespace Harness
                 m_Result.success = false;
                 m_Result.error = "module Init failed: " + string.Join(", ", m_Result.failedModules);
             }
-
-            Time.captureDeltaTime = 0f;
-            Application.runInBackground = m_RunInBackground;
-            foreach (var input in m_Inputs)
-            {
-                try { input.Dispose(); } catch (Exception e) { Debug.LogException(e); }
-            }
-            m_Inputs.Clear();
 
             try
             {

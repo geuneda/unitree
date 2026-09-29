@@ -18,7 +18,8 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   실패는 아니지만 읽어 본다.
 - **매 루프 후 `shots`의 PNG를 Read 툴로 직접 연다.** `shotStats[].blank`(평평한 화면)는 실패, `dark`(98% 검정)는 의심. `hint`가 있으면 이유다
   (예: 화면이 오버레이 UI뿐이라 카메라 렌더가 비었다 → 캡처를 `"screen"`으로).
-- `play`: `probeReady`, `frames`, `events`(하네스 모듈의 EventBus 발행 수), `scenes`(로드된 씬과 시각), `waits`, `clicks`, `inputBackends`.
+- `play`: `probeReady`, `frames`, `events`(하네스 모듈의 EventBus 발행 수), `scenes`(로드된 씬과 시각), `waits`, `clicks`, `inputBackends`,
+  `isolatedDevices`(시나리오 동안 끈 실제 장치와 막은 키·버튼 누름 수 — 사람이 그 사이 키보드를 만져도 결과가 같다).
   `fps`는 에디터 플레이 모드 값이라 변경 전후 비교용.
 - `timings.playEnterSec`: 플레이 진입 시간. 이 프로젝트가 Domain Reload를 켜 두었으면 여기에 리로드 시간이 들어간다.
 - 옵션: `-Scenario tools/scenarios/x.json`, `-NoPlay`(편집 모드 캡처만), `-Out HarnessOut/x`.
@@ -52,11 +53,15 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
 - 입력: `keyDown/keyUp/keyTap`(키 이름: `Space`, `Digit1`/`Alpha1`, `Enter`/`Return`, `LeftCtrl`/`LeftControl` 등 두 이름 모두) ·
   `mouseMove/mousePos/mouseDown/mouseUp/scroll` · `click`(`target` 또는 `x`,`y`) · `stick`/`padDown`/`padUp` · `releaseAll`.
   좌표는 Game 뷰 픽셀(원점 왼쪽 아래)이다. Game 뷰 크기는 사람의 레이아웃에 따라 다르므로 `"mouseSpace": "normalized"`(0..1)나 `target`을 쓴다.
-- **Input System을 쓰는 게임**: 입력은 가상 장치로 그대로 들어간다(InputAction, `Keyboard.current`, UI 입력 모듈).
+- **Input System을 쓰는 게임**: 입력은 가상 장치로 그대로 들어간다(InputAction, `Keyboard.current`, UI 입력 모듈). 시나리오 동안 실제 키보드·
+  마우스·게임패드는 꺼진다(끝나면, 실패·중단해도 다시 켜진다).
 - **구 Input Manager(`Input.GetKey` 등)를 쓰는 게임**: 이것은 코드로 누를 수 없다(에디터에서 OS 입력을 직접 읽는다). 입력을 `HarnessInput`으로 읽게 한다:
   설치할 때 `-InputShim`이면 `Assets/AgentHarness/HarnessInput.cs`가 생긴다 — `UnityEngine.Input`과 멤버 이름이 같아서 `Input.` → `HarnessInput.`이면
-  되고, 실제 입력은 그대로, 시나리오 입력이 더해진다(빌드에서는 그냥 `Input`). 자체 입력 계층이 있으면 그 정적 메서드
+  된다. 평소엔 실제 입력 그대로, 시나리오 동안엔 시나리오 입력만(마우스는 시나리오가 옮기기 전까지 화면 중앙; 빌드에서는 그냥 `Input`).
+  `Input.`으로 직접 읽는 코드에는 실제 입력이 섞인다. 자체 입력 계층이 있으면 그 정적 메서드
   `void M(string type, string key, Vector2 value)`에 `[AgentHarnessInput]`을 붙이면 하네스가 시나리오 입력을 넘긴다(`play.inputHooks`).
+  `type`이 `"begin"`이면 그때부터 실제 입력을 무시하고, `"end"`면 되돌린다. 하네스를 올린 뒤 install을 `-InputShim`으로 다시 돌리면 고치지 않은
+  옛 `HarnessInput.cs`가 새 버전으로 바뀐다(고친 사본은 경고만).
 - 캡처 `preset`: `"auto"`(샷이 없으면 메인 카메라) · `"main"` · `"screen"`(Game 뷰 그대로, Game 뷰 탭이 보여야 함) · 샷 이름(설정 `shots`) ·
   `"camera": "<카메라 이름>"` · `"pos"` + `"lookAt"`/`"rot"` + `"fov"`(그 자리에서, 메인 카메라 설정으로).
 

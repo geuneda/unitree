@@ -20,7 +20,7 @@
 
 | 순서 | 워크플로우 | 항목 | 크기 | 선행 | 상태 |
 |---|---|---|---|---|---|
-| W1 | 시나리오 입력 격리 | G3-6 | S | — | 대기 |
+| W1 | 시나리오 입력 격리 | G3-6 | S | — | 완료 (2026-09-29) |
 | W2 | 캡처가 화면 전체를 본다 | G3-1, G3-5 | M | W1 | 대기 |
 | W3 | 시각 회귀와 움직임 | G3-4, G3-3 | M | W1, W2 | 대기 |
 | W4 | 렌더 설정을 코드로 | G1-1, P-4, G4-3, G4-2 | L | W3 | 대기 |
@@ -32,7 +32,7 @@
 | 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, P-4 신고 | S | 새 버전이 나올 때 | — |
 | 마지막 | macOS | P-3 | L | 실제 Mac | 대기 |
 
-### W1 시나리오 입력 격리 (G3-6)
+### W1 시나리오 입력 격리 (G3-6) — 완료 (2026-09-29, 아래 "해결됨")
 - 왜 먼저: `play.events`가 매번 같아야 매트릭스 1과 W3의 기준 이미지가 의미 있다. 지금은 루프 ~25회에 1회 어긋난다.
 - 고치는 곳: `Runtime/ScriptedInput.cs`(시나리오 동안 가상 장치 밖의 장치를 `InputSystem.DisableDevice`, 끝나면 복구),
   `Runtime/ScenarioRunner.cs`(걸러 낸 실제 입력 수를 `play`에 보고).
@@ -187,13 +187,7 @@
   - 현상: `blank`는 밝기 표준편차·색 버킷 수로만 판정. 셰이더 실패로 인한 마젠타(핑크) 머티리얼은 따로 잡지 못한다(컴파일 에러는 `harness_shaders`가 잡음).
   - 방향: 마젠타 픽셀 비율 통계 추가.
 
-- [ ] **G3-6 실제 키보드·게임패드 입력이 시나리오 재생에 섞인다** (2026-09-29 발견)
-  - 현상: 검증 매트릭스 중 루프 1회(약 25회 중)에서 `play.events`가 `SpinDirectionChanged=2`(정상 1). 같은 루프의 `inputEventsApplied`(2)·frames(163)·gameSec은
-    정상 루프와 같았다 → 시나리오 밖에서 들어온 입력.
-  - 원인(추정): `ScriptedInput`은 에디터가 백그라운드여도 재생되도록 `backgroundBehavior=IgnoreFocus`, `AllDeviceInputAlwaysGoesToGameView`를 켠다.
-    그런데 게임의 `<Keyboard>/space` 바인딩은 가상 키보드만이 아니라 **실제 키보드도** 받는다. 플레이 3초 사이 다른 창에서 누른 스페이스가 게임 이벤트가 된다.
-  - 방향: 시나리오 동안 `ScriptedInput`이 만든 장치 말고는 `InputSystem.DisableDevice`로 끄고 끝나면 되돌린다. 걸러 낸 실제 입력 수를 `play`에 보고.
-  - 완료 기준: 루프가 도는 동안 실제 키보드로 스페이스를 연타해도 `play.events`가 매번 같다.
+- **G3-6 실제 키보드·게임패드 입력이 시나리오 재생에 섞인다** → 2026-09-29 해결(W1, 아래 "해결됨").
 
 ## 성질 4 — 에셋 없이도 완성도
 
@@ -254,6 +248,9 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
     빌드 캐시·GPU Resident Drawer·Game 뷰 크기·URP 에셋 재직렬화·파이프라인 재생성·`ScriptableRendererData.SetDirty`와는 무관.
     머티리얼 값·라이트·앰비언트 프로브는 6.3과 같다. 하네스 없는 빈 씬(기본 카메라·방향광 + 평면·큐브)에서도 6.6만 소프트 그림자가 더 어둡다
     (Soft 114.7 / Hard 138.0 / None 138.1; 6.3은 137.8 / 138.0 / 138.1) → URP 17.6 쪽 문제로 보인다.
+  - 2026-09-29(W1 매트릭스, 다른 에디터 없이): 새 클론 루프는 그대로(첫 루프 130.2/56.8/48.3, 2·3번 25.0/15.6/0.5)였는데, 같은 에디터 세션에서
+    이어진 selftest 1번 루프 3회는 **6.3에 가까운 밝기**(61.2/56.8/48.3; 6.3은 65.1/60.5/50.3)로 녹색이었다(이전 실행은 여기서 검어 빨강).
+    한 세션 안에서 검정 → 정상으로 돌아오기도 한다 = 비결정적. 해결로 치지 않는다(W4에서 원인부터).
   - 방향: 프레임 디버거/RenderDoc으로 주광 그림자 패스(캐스케이드 아틀라스, `_MainLightShadowParams`)를 6.3과 비교한다. Unity 쪽 버그면
     최소 재현 프로젝트로 신고하고, 그 전까지 6.6에서는 소프트 그림자 캐스케이드를 쓰지 않는 설정을 샘플에 둘지 정한다.
     6000.6.x 새 패치가 나오면 `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`로 다시 본다.
@@ -313,7 +310,9 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
 
 1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark 샷 없음 + `compile-check -IncludeHarness`
-   + 시나리오 도구 루프 한 번: `waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처)
+   + 시나리오 도구 루프 한 번: `waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처
+   + 실제 입력 격리(G3-6): 플레이 동안 실제 키보드 장치에 스페이스를 넣어도 `play.events` 그대로·`isolatedDevices` 누름 > 0, 실패한 플레이·중간에
+   멈춘 플레이 뒤에도 실제 장치가 다시 켜짐)
 2. C# 컴파일 에러 주입 → `stage=compile`, file/line/module 정확 → 원복 후 녹색
 3. 런타임 예외 주입 → `stage=runtime`, 정확한 줄 → 원복 후 녹색
 4. HLSL 에러 주입 → `stage=shader`, 재임포트 없는 다음 루프에서도 검출 → 원복 후 녹색
@@ -341,6 +340,40 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G3-6 실제 키보드·게임패드 입력이 시나리오 재생에 섞인다** (2026-09-29, W1)
+  - 재현: 에디터 안에서 실제(native) 키보드 장치에 스페이스 누름·뗌을 입력 업데이트 6번마다 넣는 eval(플레이 동안만; OS 키 입력이 Input System에 들어온
+    뒤의 경로와 같다). 고치기 전: 60개(누름 30) → `SpinDirectionChanged=30`(정상 1)인데 루프는 녹색. 원인은 추정대로 `<Keyboard>/space` 바인딩이 가상·실제
+    키보드를 둘 다 받고, 시나리오가 입력을 에디터 포커스와 무관하게 받게(`IgnoreFocus`, `AllDeviceInputAlwaysGoesToGameView`) 하기 때문.
+  - 방법:
+    - `RealInputIsolation`(`Runtime/ScriptedInput.cs`): 러너가 시작한 첫 프레임부터 끝날 때까지 실제 Input System 장치(`device.native`)를 끈다.
+      `DisableDevice(keepSendingEvents: true)`(TouchSimulation 방식) + `InputSystem.onEvent`에서 그 장치의 이벤트를 handled로 표시 → 상태가 바뀌지 않는다
+      (`InputUser`/PlayerInput 자동 전환도 꺼진 장치의 이벤트는 무시). 끌 때 하드 리셋(눌린 키 없음, 포인터 0,0 — 실제 커서 위치가 UI hover에 남지 않고,
+      가상 마우스와의 값 비교에서도 진다). 원래 꺼져 있던 장치(게임·TouchSimulation이 끈 것, 에디터가 백그라운드라 꺼진 것)는 건드리지 않고, 도중에 켜지는
+      장치(포커스 복귀, 새 게임패드)는 그때 끈다. 끝나면 자기가 끈 것만 켠다. Input System의 `LeavePlayMode`는 `DisableDevice`로 끈 장치를 켜지 않으므로
+      러너 `Finish`가 시간·입력 복구를 맨 먼저 하고(뒤에서 예외가 나도), 에디터가 `EnteredEditMode`에 남은 것을 한 번 더 켠다(`RestoreAll`, 켰으면 경고).
+    - 보고: `play.isolatedDevices[{name, presses}]` = 끈 장치와 막은 키·버튼 누름 수. 처음엔 이벤트 수를 셌는데 입력이 없어도 장치마다 1이 나왔다 —
+      Input System이 플레이 진입(`SyncAllDevicesAfterEnteringPlayMode`)과 에디터 포커스 때 모든 장치에 sync를 요청해 오는 상태 이벤트다. 그래서
+      누름(`HasButtonPress`)만 센다(마우스 이동·sync도 막지만 세지 않음).
+    - 구 Input Manager: 러너가 모든 `[AgentHarnessInput]` 훅에 `"begin"`/`"end"`를 보낸다(입력 이벤트가 없는 시나리오에도, 던지는 훅은 경고).
+      `HarnessInput.cs`는 그 사이 `UnityEngine.Input`을 읽지 않고 시나리오 입력만 준다(마우스는 시나리오가 옮기기 전까지 화면 중앙; 문자열 키·`inputString`·
+      터치는 없음). `"begin"`을 보내지 않는 옛 하네스에서도 첫 입력 이벤트부터 같게 동작한다. `Input.`으로 직접 읽는 코드는 여전히 막을 수 없다.
+    - 이미 붙인 프로젝트의 shim: 게임 소유 파일이라 자동으로 바뀌지 않는다 → install을 `-InputShim`으로 다시 돌리면 고치지 않은 옛 템플릿
+      (SHA-256 목록 `Tools~/templates/HarnessInput.previous.txt`)을 새 것으로 바꾸고(`modified`), 고친 사본은 두고 경고한다. uninstall도 그 목록을 "그대로"로 본다.
+  - 검증:
+    - 샘플(6000.3.11f1): 같은 주입 60개(누름 30) → `SpinDirectionChanged=1`, `isolatedDevices` Keyboard 30 · Mouse 0. 조용한 루프는 0 · 0. 플레이 중 eval로
+      Keyboard·Mouse 비활성 확인. waitTarget 시간 초과로 실패한 플레이와 중간에 `editor_stop`한 플레이 뒤에도 둘 다 다시 켜짐. selftest 1번에 이 넷을 넣었다
+      (1번 29.5 s).
+    - 구 Input Manager(Fluid-Sim, 6000.0.84f1, Both): install `-InputShim` → P-5와 같은 19곳 `Input.` → `HarnessInput.` → 루프 3회 모두 P-5와 같은 결과
+      (일시정지 뒤 두 샷 19.9/59.2, 드래그 뒤 12.0, `inputBackends` inputSystem+hook, `isolatedDevices` Keyboard·Mouse, 루프 2·3번 1.76–1.78 s). 플레이 중 eval:
+      시나리오가 마우스를 옮기기 전 `HarnessInput.mousePosition` = 화면 중앙(183, 207.5), `Input.mousePosition` = 실제 커서(-1326, 465); 끝난 뒤엔 둘 다 실제 커서.
+      install 갱신: 옛 템플릿(CRLF) → `modified`, 고친 사본 → `kept` + 경고. uninstall은 옛·현재 템플릿이면 제거, 고친 사본은 유지. 되돌린 뒤 `git status` 비어 있음.
+    - 한계: OS 수준 키 입력(SendInput)으로는 시험하지 않았다(사용자 화면의 앞 창에 키가 간다). 주입은 Input System 장치 이벤트라 백엔드 뒤 경로만 같다.
+    - 매트릭스(에디터를 하나씩만 띄우고 순서대로): 샘플 selftest 1–8 녹색 205.5 s(fingerprint `977545a7…`, 줄 61/68/87, 샷 65.1/60.5/50.3 그대로).
+      9: 새 클론 6000.3.11f1 녹색 299.9 s(`977545a7…` = 메인 트리), 6000.0.84f1 녹색 292.0 s(`d9a6d092…`), 6000.6.3f1 녹색 299.4 s(`0ba32228…`; 이번엔 1번도
+      녹색이었지만 클론 루프 2·3은 그대로 검었다 → P-4 미해결, P-4에 관찰 기록) — 세 버전 모두 줄 61/68/87, 실제 입력 검사 `Keyboard=30`.
+      10: BagelGame 녹색 57.6 s(`619be553…`, `Managed/` 132개·`Harness.*` 0개), Fluid-Sim 녹색 31.2 s(`54880f05…`, 103개·0개), 사내 프로젝트 A 녹색 98.3 s
+      (`6664b723…`, 로그인 서버 선택 PlayerPrefs 그대로) — 루프마다 `isolatedDevices` Keyboard·Mouse(누름 0), 제거 뒤 `git status` 비어 있음.
 
 - [x] **P-5 기존 프로젝트에 붙였을 때 아직 안 되는 것** (2026-09-29)
   - **구 Input Manager 입력** → 게임 쪽 훅. 먼저 코드 수정 없는 길을 확인했다: Game 뷰는 OnGUI에서 OS 이벤트를 `EditorGUIUtility.QueueGameViewInputEvent`로
@@ -504,7 +537,7 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
     테스트 커밋을 걷어내 에디터 트리 브랜치를 시작 커밋으로 되돌린다(detached HEAD면 임시 브랜치를 썼다가 되돌림). 마지막 루프(`final`)로 녹색과
     `git status` 원상을 확인. 첫 빨간 항목에서 멈추고 `-KeepGoing`이면 계속(`fresh-clone-test.ps1 -SelfTest`가 씀). 결과 `HarnessOut/selftest/report.json`.
   - 첫 실행에서 드러난 것: 위 P-1의 console 버그(3번), 6.6 렌더링(1번의 `dark` 검사) — 사람이 매트릭스를 돌릴 때는 둘 다 놓쳤다.
-  - 한계: PNG 눈 확인은 여전히 사람·에이전트 몫(`shots`를 Read). G3-6(실제 키보드 입력 섞임)이 겹치면 1번 events 비교가 드물게 빨갈 수 있다.
+  - 한계: PNG 눈 확인은 여전히 사람·에이전트 몫(`shots`를 Read). (1번 events 비교를 드물게 빨갛게 하던 실제 키보드 입력은 G3-6에서 막았다.)
 
 - [x] **O-8 새 클론 검증을 자동화한다** (2026-09-29)
   - 방법: `tools/fresh-clone-test.ps1`. 이 저장소(기본 HEAD; `-Source`/`-Ref`로 원격도)를 짧은 경로(`<저장소 상위>/ah-fresh`, 프로젝트 경로 60자·`%TEMP%` 밖 검사)에

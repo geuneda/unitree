@@ -152,9 +152,22 @@ namespace Harness.Editor
             return n;
         }
 
+        /// <summary>Real input devices a scenario left disabled (none when it ended normally) are enabled again: manual play keeps its keyboard.</summary>
+        static void RestoreRealInput()
+        {
+#if AGENTHARNESS_INPUT_SYSTEM && ENABLE_INPUT_SYSTEM
+            var n = RealInputIsolation.RestoreAll();
+            if (n > 0) Debug.LogWarning($"[Harness] enabled {n} input device(s) a scenario left disabled");
+#endif
+        }
+
         static void OnPlayModeChanged(PlayModeStateChange change)
         {
-            if (change == PlayModeStateChange.EnteredEditMode) DestroyLeakedRuntimeObjects();
+            if (change == PlayModeStateChange.EnteredEditMode)
+            {
+                DestroyLeakedRuntimeObjects();
+                RestoreRealInput();
+            }
             var st = PlayState.Load();
             if (st == null) return;
             try
