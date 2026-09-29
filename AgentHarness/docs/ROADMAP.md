@@ -295,6 +295,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1에서 매트릭스 전부, 6000
       Domain Reload를 잠시 켠 상태: 루프 3회 녹색, playEnterSec 2.1–2.3 s(끈 상태 0.13 s), 루프 4.0–4.3 s(1.7 s), `harness_setup`이 `domainReload` 권장, lint는 static 검사 생략.
     - **git URL 배포 경로**: `-Source git+file:///…/unitree?path=/AgentHarness/Packages/com.geuneda.agentharness#master`(커밋된 패키지)로 Fluid-Sim
       attach-test 녹색 38.4 s — 패키지가 아직 없을 때 `open.ps1` 진입점의 배치 임포트(부트스트랩) 포함 open 22.7 s.
+      푸시한 뒤 기본값 `-Source git`(`https://github.com/geuneda/unitree.git?path=/AgentHarness/Packages/com.geuneda.agentharness#master`)으로도
+      Fluid-Sim attach-test 녹색 41.9 s(open 26.0 s, 출시 빌드 `Managed/` 103개·`Harness.*` 0개, uninstall 뒤 `git status` 비어 있음).
     - 샘플: 매트릭스 1–8 녹색 199 s(fingerprint `977545a7…` — 스크립트·테마 경로가 `Packages/…`로 바뀐 것만 다름, 샷 통계 65.1/60.5/50.3 동일, 줄 61/68/87).
       9(`fresh-clone-test -SelfTest -UnityVersion`, 새 클론 = 임베드 패키지): 6000.3.11f1 녹색 306 s(`977545a7…` = 메인 트리, 종료 뒤 `git status` 깨끗),
       6000.0.84f1 녹색 299 s(`d9a6d092…`; `git status`는 P-1과 같은 버전 전환 파일만), 6000.6.3f1 2–8 녹색·1 빨강 311 s(`0ba32228…`, P-4의 `dark` 샷
