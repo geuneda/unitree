@@ -3,7 +3,7 @@
   Attach AgentHarness to an existing Unity project (P-2). Adds only new things; changes no existing file except the one
   line of the package dependency in Packages/manifest.json (and Unity then updates Packages/packages-lock.json).
     - the package: a dependency on com.geuneda.agentharness (git URL by default), or a copy in Packages/ (-Source embed)
-    - tools/<name>.ps1 entry points (open, loop, quit, uc, submit, land, compile-check, uninstall) that run the package's
+    - tools/<name>.ps1 entry points (open, loop, quit, uc, submit, land, compile-check, player, uninstall) that run the package's
       Tools~ scripts, tools/scenarios/default.json, tools/AgentHarness.md (how to use it, for agents)
     - ProjectSettings/AgentHarness.json (which scene the loop plays, module folders, "setup": "attach")
     - CLAUDE.md pointing at tools/AgentHarness.md, only when the project has neither CLAUDE.md nor AGENTS.md
@@ -49,7 +49,7 @@ $pkgDir = Split-Path -Parent $PSScriptRoot
 $templates = Join-Path $PSScriptRoot 'templates'
 $repoUrl = 'https://github.com/geuneda/unitree.git'
 $repoPath = '/AgentHarness/Packages/com.geuneda.agentharness'
-$entryNames = @('open.ps1', 'quit.ps1', 'loop.ps1', 'uc.ps1', 'submit.ps1', 'land.ps1', 'compile-check.ps1', 'uninstall.ps1')
+$entryNames = @('open.ps1', 'quit.ps1', 'loop.ps1', 'uc.ps1', 'submit.ps1', 'land.ps1', 'compile-check.ps1', 'player.ps1', 'uninstall.ps1')
 $utf8 = New-Object Text.UTF8Encoding($false)
 $result = [ordered]@{ ok = $false; whatIf = [bool]$WhatIf; project = $null; unityVersion = $null; source = $Source; dependency = $null
     created = @(); modified = @(); kept = @(); warnings = @(); next = @() }

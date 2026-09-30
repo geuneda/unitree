@@ -20,8 +20,9 @@ namespace Harness
     /// <summary>Maps log stack traces / compiler paths to project files and modules.</summary>
     public static class HarnessLogParse
     {
-        // "(at Assets/X.cs:12)", "(at ./Packages/com.x/Y.cs:3)", "(at ./Library/PackageCache/com.x@1a2b/Y.cs:3)"
-        static readonly Regex s_AtFrame = new Regex(@"\(at (?<file>(?:\./)?(?:Assets|Packages|Library/PackageCache)/[^:\)]+):(?<line>\d+)\)", RegexOptions.Compiled);
+        // "(at Assets/X.cs:12)", "(at ./Packages/com.x/Y.cs:3)", "(at ./Library/PackageCache/com.x@1a2b/Y.cs:3)", and in a Player
+        // the project's absolute paths "(at C:/Proj/Assets/X.cs:12)" (made project-relative by ToProjectPath)
+        static readonly Regex s_AtFrame = new Regex(@"\(at (?<file>(?:[A-Za-z]:)?(?:[^:\)\n]*[\\/])?(?:Assets|Packages|Library[\\/]PackageCache)[\\/][^:\)\n]+):(?<line>\d+)\)", RegexOptions.Compiled);
         static readonly Regex s_ExceptionFrame = new Regex(@"in (?<file>[A-Za-z]:[\\/][^:]+|/[^:]+):(?<line>\d+)", RegexOptions.Compiled);
 
         /// <summary>Module of a file (see <see cref="HarnessConfig.ModuleOf(string)"/>); absolute paths are made project-relative first.</summary>

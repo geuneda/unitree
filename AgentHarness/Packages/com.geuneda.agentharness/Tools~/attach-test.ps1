@@ -6,6 +6,7 @@
   - after install and the loops, git status lists only what install.ps1 reported (created/modified) plus
     Packages/packages-lock.json (Unity resolves the new dependency);
   - every loop is green on the project's own scene, with the same build fingerprint and play events;
+  - with -Player, tools/player.ps1 (W8) plays the loops' scenario in a development build of the project: green;
   - the release (non-development) Player build has no Harness.* assembly (and reports what else of the harness's
     dependencies it holds; the build's own rewrites of project settings are reported as buildRewrote and put back);
   - after uninstall.ps1, git status is empty again.
@@ -29,6 +30,7 @@ param(
     [string[]]$KnownErrors = @(),   # install.ps1 -KnownErrors (errors the project logs anyway, e.g. an SDK library it does not commit)
     [switch]$InputShim,             # install.ps1 -InputShim
     [switch]$NoBuild,
+    [switch]$Player,                # also tools/player.ps1 (development Player build + run, W8) after the loops
     [string]$BuildDir,              # default: <project>-harness-build next to the project
     [string]$Out = 'HarnessOut/attach-test'
 )
@@ -150,6 +152,26 @@ $report.installed = @(Get-Status)
 $report.unexpected = @(Get-Unexpected)
 if ($report.unexpected.Count -gt 0) { $report.stage = 'status'; Fail "files changed that install.ps1 did not report: $($report.unexpected -join ', ')" }
 
+# ---- Player run (W8): the loops' scenario in a development build of the project -----------------------------------
+if ($Player) {
+    $pl = Step 'player' { Invoke-Tool 'player.ps1' $loopArgs 3600 }
+    $j = $pl.json
+    if ($j) { [IO.File]::WriteAllText((Join-Path $outAbs 'player.json'), $pl.out, (New-Object Text.UTF8Encoding($false))) }
+    $report['player'] = [ordered]@{ ok = [bool]($j -and $j.ok); stage = $(if ($j) { $j.stage } else { 'none' }) }
+    if ($j) {
+        $report.player['fps'] = $j.fps.avg; $report.player['p95ms'] = $j.fps.p95ms; $report.player['editorFps'] = $j.editor.fps.avg; $report.player['fpsVsEditor'] = $j.fpsVsEditor
+        $report.player['buildSec'] = $j.player.build.sec; $report.player['startupSec'] = $j.player.startupSec; $report.player['screen'] = (@($j.player.screen) -join 'x')
+        $report.player['graphicsDevice'] = $j.player.graphicsDevice; $report.player['eventsMatch'] = $j.eventsMatch; $report.player['compare'] = $j.compare
+        if ($j.player.buildRewrote) { $report.player['buildRewrote'] = @($j.player.buildRewrote) }
+        $pe = @($j.runtimeErrors | Where-Object { $_ })
+        if ($pe.Count) { $report.player['runtimeErrors'] = @($pe | ForEach-Object { "$($_.msg) @ $($_.file):$($_.line)" }) }
+        if ($j.error) { $report.player['error'] = "$($j.error)" }
+        $pshots = Join-Path $outAbs 'shots-player'; [void](New-Item -ItemType Directory -Force $pshots)
+        foreach ($s in @($j.shots) + @($j.shotStats | ForEach-Object { if ($_.screen) { $_.screen.path } })) { if ($s -and (Test-Path -LiteralPath $s)) { Copy-Item -LiteralPath $s -Destination $pshots } }
+    }
+    if (-not $report.player.ok) { Fail "player.ps1 is red (stage=$($report.player.stage)): see player.json $(if ($j) { $j.error })" }
+}
+
 # ---- release build -------------------------------------------------------------------------------------------------
 if (-not $NoBuild) {
     $exe = Join-Path $BuildDir "$name.exe"
@@ -178,7 +200,7 @@ if (-not $q.json -or -not $q.json.ok) { Fail "quit.ps1 failed: $($q.out)" }
 # the Input System's preloaded assets), and saves them again when it exits. The tree was checked clean of anything but
 # the install just before the build, so what else changed now is the build's: report it and put it back (Editor closed).
 $rewrote = @(Get-Unexpected)
-if ($rewrote.Count -gt 0 -and $NoBuild) { $report.unexpected = $rewrote; $report.stage = 'status'; Fail "files changed that install.ps1 did not report: $($rewrote -join ', ')" }
+if ($rewrote.Count -gt 0 -and $NoBuild -and -not $Player) { $report.unexpected = $rewrote; $report.stage = 'status'; Fail "files changed that install.ps1 did not report: $($rewrote -join ', ')" }
 $report.buildRewrote = $rewrote
 foreach ($p in $rewrote) {
     if ((Invoke-HarnessGit $proj @('ls-files', '--error-unmatch', '--', $p)).code -eq 0) { [void](Invoke-HarnessGit $proj @('checkout', '--', $p) -Check) }

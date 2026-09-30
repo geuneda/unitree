@@ -46,6 +46,12 @@ namespace Harness
         // Golden comparison (G3-4), from the scenario capture: compare with the golden image, leaving these regions out.
         public bool golden = true;
         public ShotRect[] ignore = Array.Empty<ShotRect>();
+        // A Player run (tools/player.ps1, G3-8): what the screen showed in the same frame (a capture from the game's own camera
+        // only - a shot pose is not where the game's camera is). PNG at the window's size, next to the shot.
+        public string screen;
+        public int screenWidth;
+        public int screenHeight;
+        public string screenError;
         [NonSerialized] internal List<Camera> drawn;   // the real cameras whose drawing the shot includes
     }
 
@@ -125,7 +131,7 @@ namespace Harness
             pixels = null;
             var sw = Stopwatch.StartNew();
             GameObject go = null;
-            RenderTexture rt = null;
+            RenderTexture rt = null, readback = null;
             Texture2D tex = null;
             CaptureUi screenUi = null;
             CaptureCameras cameras = null;
@@ -139,10 +145,16 @@ namespace Harness
                 cam.fieldOfView = fov;
                 CopyPipelineSettings(template, cam);
 
-                var desc = new RenderTextureDescriptor(width, height, GraphicsFormat.R8G8B8A8_SRGB, GraphicsFormat.D32_SFloat_S8_UInt)
+                // URP renders a camera with a target texture in that texture's format (its intermediate color buffer is the
+                // target's: "External texture replaces internal color buffer", UniversalRenderPipelineCore) and with that texture's
+                // MSAA: an 8-bit single-sample target clipped HDR emission and bloom before tone mapping and left MSAA edges
+                // aliased. The pipeline's own color format and sample count, then resolved to 8-bit (W8, G3-8).
+                var color = CameraColorFormat(template);
+                var msaa = CameraMsaa(template);
+                var desc = new RenderTextureDescriptor(width, height, color, GraphicsFormat.D32_SFloat_S8_UInt)
                 {
-                    msaaSamples = 1,
-                    sRGB = true,
+                    msaaSamples = msaa,
+                    sRGB = color == GraphicsFormat.R8G8B8A8_SRGB,
                 };
                 rt = RenderTexture.GetTemporary(desc);
 
@@ -179,8 +191,18 @@ namespace Harness
                 result.shadersCompiling = UnityEditor.ShaderUtil.anythingCompiling;
 #endif
 
+                var source = rt;
+                if (color != GraphicsFormat.R8G8B8A8_SRGB || msaa > 1)
+                {
+                    // Tone-mapped linear values (a target texture gets no sRGB conversion from URP): an sRGB target encodes them
+                    // on write like the back buffer; a gamma-space project's values are written as they are.
+                    readback = RenderTexture.GetTemporary(new RenderTextureDescriptor(width, height, GraphicsFormat.R8G8B8A8_UNorm, GraphicsFormat.None)
+                        { sRGB = QualitySettings.activeColorSpace == ColorSpace.Linear, msaaSamples = 1 });
+                    Graphics.Blit(rt, readback);
+                    source = readback;
+                }
                 var prev = RenderTexture.active;
-                RenderTexture.active = rt;
+                RenderTexture.active = source;
                 // RGB: a camera cleared to a transparent color would otherwise give a see-through PNG (not what the game shows).
                 tex = new Texture2D(width, height, TextureFormat.RGB24, false, false);
                 tex.ReadPixels(new Rect(0, 0, width, height), 0, 0, false);
@@ -208,11 +230,53 @@ namespace Harness
                 try { screenUi?.Dispose(); }
                 catch (Exception e) { UnityEngine.Debug.LogException(e); }
                 if (rt != null) RenderTexture.ReleaseTemporary(rt);
+                if (readback != null) RenderTexture.ReleaseTemporary(readback);
                 DestroySafe(tex);
                 DestroySafe(go);
                 result.renderMs = (float)sw.Elapsed.TotalMilliseconds;
             }
             return result;
+        }
+
+        /// <summary>
+        /// The color format URP renders <paramref name="template"/> in on screen (UniversalRenderPipeline.MakeRenderTextureGraphicsFormat):
+        /// HDR when the camera and the pipeline asset allow it - B10G11R11 for 32-bit precision without framebuffer alpha, else
+        /// RGBA half - otherwise 8-bit sRGB (also Built-in, which resolves HDR itself).
+        /// </summary>
+        static GraphicsFormat CameraColorFormat(Camera template)
+        {
+#if AGENTHARNESS_URP
+            if (template != null && template.allowHDR && GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset asset && asset.supportsHDR)
+            {
+                if (!Graphics.preserveFramebufferAlpha && asset.hdrColorBufferPrecision != HDRColorBufferPrecision._64Bits &&
+                    SystemInfo.IsFormatSupported(GraphicsFormat.B10G11R11_UFloatPack32, GraphicsFormatUsage.Blend))
+                    return GraphicsFormat.B10G11R11_UFloatPack32;
+                if (SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, GraphicsFormatUsage.Blend))
+                    return GraphicsFormat.R16G16B16A16_SFloat;
+            }
+#endif
+            return GraphicsFormat.R8G8B8A8_SRGB;
+        }
+
+        /// <summary>
+        /// The MSAA sample count the template renders with on screen: URP's asset count when the camera allows MSAA and its renderer
+        /// supports it (UniversalRenderPipeline.InitializeStackedCameraData - for a camera with a target texture it takes that texture's
+        /// count instead), Built-in's quality level antiAliasing; 1 otherwise.
+        /// </summary>
+        static int CameraMsaa(Camera template)
+        {
+            if (template == null || !template.allowMSAA) return 1;
+            int samples;
+#if AGENTHARNESS_URP
+            if (GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset asset)
+            {
+                var renderer = template.TryGetComponent<UniversalAdditionalCameraData>(out var data) ? data.scriptableRenderer : asset.scriptableRenderer;
+                samples = renderer != null && renderer.supportedRenderingFeatures.msaa ? asset.msaaSampleCount : 1;
+            }
+            else
+#endif
+            samples = GraphicsSettings.currentRenderPipeline == null ? QualitySettings.antiAliasing : 1;
+            return samples == 2 || samples == 4 || samples == 8 ? samples : 1;
         }
 
         /// <summary>The template's render pipeline camera settings on the capture camera (URP: renderer, post-processing, volumes...).</summary>

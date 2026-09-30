@@ -32,7 +32,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   `isolatedDevices`(시나리오 동안 끈 실제 장치와 막은 키·버튼 누름 수 — 사람이 그 사이 키보드를 만져도 결과가 같다),
   `uiClock`(`mode: "frames"` = 시나리오 동안 UI Toolkit 패널의 USS transition·`schedule` 타이머가 실시간 대신 프레임 × `fixedDeltaTime`을 따랐다 →
   UI 애니메이션 도중의 캡처도 매번 같다; `panels` = 따른 패널 수).
-  `fps`는 에디터 플레이 모드 값이라 변경 전후 비교용.
+  `fps`는 에디터 플레이 모드 값이라 변경 전후 비교용(실제 성능은 아래 `tools/player.ps1`).
 - `timings.playEnterSec`: 플레이 진입 시간. 이 프로젝트가 Domain Reload를 켜 두었으면 여기에 리로드 시간이 들어간다.
 - 옵션: `-Scenario tools/scenarios/x.json`, `-NoPlay`(편집 모드 캡처만), `-Out HarnessOut/x`, `-UpdateGolden`(녹색일 때 샷을 기준 이미지로),
   `-Hot`(아래).
@@ -46,6 +46,23 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
 - 커맨드 하나: `& ./tools/uc.ps1 <command> '<JSON>'` (예: `harness_capture '{"preset":"main"}'`, `harness_console`, `harness_ping`).
   목록은 `unity command --detail compact`. 임시 C#(`eval_file`)은 `HarnessOut/scripts/`에 둔다(HarnessOut은 git이 무시한다).
 - 에디터 없이 컴파일 검사: `tools/compile-check.ps1 [-Module <이름>]` (asmdef 폴더든 `Assembly-CSharp` 폴더든 모듈 코드를 컴파일하는 어셈블리를 검사).
+
+## 플레이어에서 돌리기 (실제 성능·실제 화면)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/player.ps1 [-Scenario tools/scenarios/x.json] [-NoBuild] [-Debugging]
+```
+- 에디터 루프를 한 번 돈 뒤 **개발 빌드 플레이어**(`HarnessOut/player-build/`, 증분)를 만들어 캡처 크기의 창으로 띄운다. 플레이어가 혼자 같은 시나리오를
+  돌고 종료한다 → `HarnessOut/player/report.json`: 플레이어의 `fps`·`render`(vSync 끔, 에디터 없는 프레임 시간)와 `fpsVsEditor`, `eventsMatch`(에디터와 같은
+  이벤트 수), `runtimeErrors`, 플레이어 샷과 에디터 샷의 비교(`shotStats[].vsEditor`), 게임 카메라 캡처의 **실제 화면**(`shotStats[].screen`: 같은 프레임의
+  캡처와 `vsShot`, 에디터 샷과 `vsEditor`, diff PNG). 에디터 캡처가 UI를 캡처 크기로 다시 배치하거나 `Screen.width`를 읽는 UI가 달라지는 게임은 여기서 드러난다.
+- 차이는 보고이지 실패가 아니다(종료코드 0 = 플레이어가 빌드되고 시나리오를 에러 없이 돌았다). 첫 씬의 파티클은 플레이어에서 한 스텝 앞서 조금 다르다.
+- 데스크톱(Standalone) 활성 빌드 타깃에서만(다른 타깃이면 전환하지 않고 알린다). 첫 빌드는 오래 걸린다(셰이더). 빌드가 다시 쓴 프로젝트 설정은
+  `player.buildRewrote`로 알린다(Unity가 빌드마다 하는 일 — 되돌리거나 커밋한다). 런타임 에러의 줄은 최적화 코드라 조금 어긋날 수 있다(`-Debugging`이면 정확).
+- 플레이어는 에디터와 다른 PlayerPrefs(`HKCU\Software\<회사>\<제품>`)를 쓰고, 몇 초 동안 창이 포커스를 가져간다. 개발 빌드는 프로파일러 연결을
+  네트워크에서 기다려서 처음 한 번 Windows 방화벽이 허용을 묻는다(허용·취소 모두 실행과 무관).
+- 플레이어가 끝나지 않으면(`stage=player`) `HarnessOut/player/Player.log`의 `[Harness] …` 줄로 어디까지 왔는지 본다. 에디터에서만 도는 코드(`OnValidate`,
+  `#if UNITY_EDITOR`)에 기대는 게임은 여기서 다르게 그린다 — `vsEditor` diff를 연다.
 
 ## 어떤 씬을 도는가
 

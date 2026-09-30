@@ -167,6 +167,26 @@ namespace Harness
         public string error;           // why not (no fixed time step: none; this Unity version lacks the internal API: the reason)
     }
 
+    /// <summary>
+    /// Where a Player run played (tools/player.ps1, W8): the window, the frame pacing and the device. Left empty
+    /// (platform "") by the Editor's play mode.
+    /// </summary>
+    [Serializable]
+    public sealed class PlayerInfo
+    {
+        public string platform;          // Application.platform ("WindowsPlayer")
+        public bool development;         // a development build (Debug.isDebugBuild)
+        public string scriptingBackend;  // mono | il2cpp
+        public int screenWidth;          // the window's client size when the scenario ended: the capture size unless the OS refused it
+        public int screenHeight;
+        public string fullScreenMode;    // Windowed
+        public int vSyncCount;           // 0: frames are not paced by the display (the frame times are the work)
+        public int targetFrameRate;      // -1: no cap
+        public string graphicsDevice;    // "Direct3D11 NVIDIA GeForce ..."
+        public float startupSec;         // process start -> scenario runner (Time.realtimeSinceStartup), splash screen included
+        public float splashSec;          // how long the runner waited for the splash screen to finish
+    }
+
     [Serializable]
     public sealed class PlayResult
     {
@@ -198,5 +218,6 @@ namespace Harness
         public string activeScene;
         public NamedCount[] events = Array.Empty<NamedCount>();
         public UiClock uiClock = new UiClock();
+        public PlayerInfo player = new PlayerInfo();
     }
 }

@@ -402,7 +402,7 @@ $script:LastRecovery = $null
 $script:LastLandRecovery = $null
 $script:ReadOnlyCommands = @('harness_ping', 'harness_console', 'harness_play_status', 'harness_stats', 'harness_lint', 'harness_shaders',
     'recompile_status', 'editor_status', 'console', 'console_status', 'get_scene_hierarchy', 'find_gameobjects',
-    'list_open_scenes', 'get_component_properties', 'package_list', 'test_status', 'build_status')
+    'list_open_scenes', 'get_component_properties', 'package_list', 'test_status', 'build_status', 'harness_player_plan')
 
 function Test-HarnessReadOnly([string]$Command) { $script:ReadOnlyCommands -contains $Command }
 
@@ -1172,7 +1172,8 @@ function Invoke-HarnessLoop {
             $report['render'] = $null
         } else {
             $r = $stats.result.render
-            $report['render'] = [ordered]@{ batches = [math]::Round($r.batches, 1); setPassCalls = [math]::Round($r.setPassCalls, 1); drawCalls = [math]::Round($r.drawCalls, 1); triangles = [math]::Round($r.triangles); vertices = [math]::Round($r.vertices) }
+            # batches -1: this Unity has no Render "Batches Count" (6.6)
+            $report['render'] = [ordered]@{ batches = $(if ([double]$r.batches -lt 0) { $null } else { [math]::Round($r.batches, 1) }); setPassCalls = [math]::Round($r.setPassCalls, 1); drawCalls = [math]::Round($r.drawCalls, 1); triangles = [math]::Round($r.triangles); vertices = [math]::Round($r.vertices) }
         }
     }
     if ($playResult) {

@@ -29,7 +29,7 @@
 | W5 | 루프 속도 | G2-3, G2-1 | L | — | 완료 (2026-09-30) |
 | W6 | 콘텐츠 헬퍼(a/b/c로 나눠 진행) | G1-3, G1-4, G4-1, G4-4 (+G3-10, G3-11) | L | W3, W4 (W6b는 W2) | 완료 (2026-09-30; 남은 하늘·반사는 G4-5) |
 | W7 | 에디터 밖·여러 에디터 | G2-2, G2-4, G1-2, G5-1 | L | — | 완료 (2026-09-30; G2-4는 Unity 쪽 리로드만 남음) |
-| W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 | L | W1 | 대기 |
+| W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 (+G3-12, G3-13) | L | W1 | 완료 (2026-09-30; G3-8은 사내 프로젝트 A 확인만 남음 — Android 타깃) |
 | W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 대기 |
 | W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 대기 |
 | W11 | 백그라운드 에디터의 실제 입력 격리 | G3-9 | S | — | 대기 |
@@ -113,14 +113,13 @@
   리로드 뒤 ~0.9 s가 사라지고 리로드도 2.7 → 2.1 s). 하다가 창 없는 에디터가 세션에서 처음 그리는 메시를 쓰레기 값으로 그리는 것을 찾아 캡처가 한 번 버리고 그린다.
 - 매트릭스 6이 "대기"와 "나란히(대기 0)"를 둘 다 본다(worktree 전용 에디터, 시작 컴파일 에러 보고, 첫 샷 기준 이미지 포함).
 
-### W8 플레이어에서 돌리기 (G3-2, G3-8)
-- 개발 빌드 플레이어 + 런타임 Pipeline 서버로 같은 시나리오를 돌리는 `harness_perf`(fps, 프레임 p95, batches).
-- G3-8: 같은 플레이어를 캡처 크기의 창(`-screen-width`/`-screen-height`, 창 모드)으로 띄우면 화면을 그대로 찍을 수 있다 — UI 재배치가 없고
-  `Screen.width`가 캡처 크기이며 카메라 스택도 그대로다. 에디터 캡처(W2 합성)와 나란히 찍어 차이를 보고한다.
-- 고치는 곳: `Editor/HarnessReleaseBuild.cs`(개발 빌드 + `AGENTHARNESS_RUNTIME`), `Runtime/ScenarioRunner.cs`(플레이어에서 `"screen"` 캡처),
-  `Tools~/`에 새 진입점.
-- 추가 검증: 에디터 플레이 FPS와 플레이어 FPS를 나란히 기록. 출시 빌드에는 여전히 `Harness.*`가 없음(매트릭스 10).
-  G3-8: 사내 프로젝트 A 로비를 플레이어 720x1280 창으로 찍은 것과 에디터 `"auto"`가 같은 배치(다르면 원인 기록).
+### W8 플레이어에서 돌리기 (G3-2, G3-8) — 완료 (2026-09-30, 아래 "해결됨")
+- 결과: `tools/player.ps1` = 에디터 루프 → 개발 빌드 플레이어(Pipeline `build`, 증분) → 캡처 크기의 창에서 플레이어가 **혼자** 같은 시나리오를 돌고 종료 →
+  플레이어 샷·실제 화면을 에디터 샷과 비교. Pipeline 런타임 서버는 쓰지 않았다(명령줄 인자 + result.json: 설정 파일·HTTP 서버를 플레이어에 넣지 않고 프레임 시간에도
+  섞이지 않는다). 샘플 플레이어 ~430 fps(p95 ~4 ms) vs 창 에디터 ~114 fps, 같은 `play.events`.
+- 하다가 찾은 것: **캡처가 HDR을 잘랐다**(G3-12 — URP는 대상 텍스처 형식으로 카메라를 렌더한다; 실제 화면과 같은 프레임 비교로 드러남, 고쳐서 기준 이미지 갱신).
+  에디터 플레이 모드와 플레이어의 첫 프레임 차이(맞춤), 플레이어 첫 씬의 파티클 한 스텝(엔진 동작, 보고만).
+- 매트릭스 1이 플레이어 실행을 본다(selftest 1번 끝), 10은 `attach-test.ps1 -Player`로 기존 프로젝트에서.
 
 ### W9 병렬 작업의 공유 지점 (G5-4 → G5-3)
 - G5-4: 이벤트 파일을 발행 모듈별로 나누는 lint(`Editor/HarnessLint.cs`)와 이름 충돌 검사. 계약 파일도 owners.json처럼 추가한 worktree를 기록해
@@ -151,6 +150,8 @@
   교체 본문이 던진 예외를 줄 없이 로그하고 원래 본문으로 이어 돌림), Unity에 P-4의 원인
   (`Camera.RenderToCubemap(Cubemap)`: 6.6은 CPU 픽셀을 안 채우고 6.3은 sRGB로 인코딩 — 빈 씬 + 스카이박스 + half 큐브맵 한 개로 재현), O-6 Unity Search 예외,
   O-11(batchmode의 첫 메시 그리기 — 빈 프로젝트 재현부터). O-10: Unity 6.7이 나오면 `EditorDialogEvents`로 자동으로 닫힌 대화상자를 report에 싣는다.
+  W8: Unity에 증분 플레이어 빌드가 앞선 빌드의 `ScriptingAssemblies.json`을 쓰는 것(출시 빌드 → 다른 폴더로 개발 빌드, define 제약으로 어셈블리 집합이
+  달라짐; 6.0 Fluid-Sim에서 재현 — 고쳐지면 `player.ps1`의 `CleanBuildCache` 재빌드를 걷어낸다), 플레이어 첫 씬 파티클의 로드 시점 한 스텝(의도인지 문의).
 - 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
   install의 Input System 추가, `HarnessReleaseBuild`)를 걷어낼 수 있는지 본다. O-9: 새 버전에서 selftest 1번의 HUD 검사(`uiError` 없음)를 보고,
   UI Toolkit에 패널을 지금 그리는 공개 API가 생기면 리플렉션을 걷어낸다.
@@ -161,23 +162,26 @@
 
 ## 기준선 (비교용)
 
-1차 버전(2026-09-28), W5·W6a·W6c·W7 뒤(2026-09-30, 새로 연 에디터에서 각 3회, 이 머신). 워크플로우가 루프 시간을 바꾸면 열을 더한다(W6a: 파티클·링 애니메이션,
-W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 / 창 없는 에디터 `-Headless`; 잰 것만).
+1차 버전(2026-09-28), W5·W6a·W6c·W7·W8 뒤(2026-09-30, 새로 연 에디터에서 각 3회, 이 머신; W8 측정 때는 다른 앱의 백그라운드 부하가 있었다). 워크플로우가 루프 시간을 바꾸면 열을 더한다(W6a: 파티클·링 애니메이션,
+W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 / 창 없는 에디터 `-Headless`, W8: 캡처가 카메라의 HDR 형식으로 렌더 + 플레이어 실행; 잰 것만).
 
-| 항목 | 1차 버전 | W5 | W6a | W6c | W7 창(`-automated`) / 창 없음(`-Headless`) |
-|---|---|---|---|---|---|
-| 루프: 코드 변경 없음 | 3.5–3.8s (build 0.7s 캐시 적중, play 2.6s) | 3.47–3.68s (build 0.47s, play 2.4–2.6s, 첫 캡처 1.75s) | 3.52–3.64s (build 0.51–0.53s, play 2.39–2.51s) | 3.73–3.91s (build 0.61–0.64s, play 2.49–2.66s) | 3.82–3.90s (build 0.59–0.61s, play 2.51–2.62s) / **2.36–2.50s** (build 0.52–0.54s, play 1.18–1.30s) |
-| 루프: 셰이더만 수정 | ~4s (도메인 리로드 없음) | 3.79–3.83s | — | 4.06–4.50s | 3.94–4.27s / **2.47–2.68s** |
-| 루프: 모듈 C# 1줄 수정 | ~9.2s (compile+reload 4.1s, build 1.9s, play 2.8s) | 8.84–9.08s (compile 4.7–4.9s = Tundra 0.35s + 리로드 ~2.5s + 리로드 뒤 에디터 ~0.9s, build 0.93–1.0s, play 2.55s) | 8.88–9.39s (compile 4.64–5.09s, build 0.97–1.03s, play 2.57–2.63s) | 9.53–9.69s (compile 4.73–4.92s, build 1.14–1.23s, play 2.86–2.97s) | 9.27–9.67s (compile 4.61–4.99s, 리로드 2.73–2.77s, build 1.14–1.23s, play 2.73–2.87s) / **6.75–7.10s** (compile 3.23–3.42s, 리로드 2.07–2.10s, 리로드 뒤 에디터 작업 없음, build 1.33–1.35s, play 1.59–1.69s) |
-| 루프: `-Hot`(Tick 본문 1줄) | — | 3.00–3.06s (판정+교체 0.14s, 첫 캡처 1.27s); 도메인 리로드 뒤 첫 번째 3.81–3.89s (교체 0.9s) | 3.21–3.29s (교체 0.15s, play 2.42–2.50s); 리로드 뒤 첫 번째 3.97s (교체 0.94s) | 3.35–3.45s (교체 0.15s, play 2.51–2.62s); 리로드 뒤 첫 번째 4.11s | 3.14–3.42s; 리로드 뒤 첫 번째 4.34s / **1.96–2.18s**; 리로드 뒤 첫 번째 3.01s |
-| 루프: C# 컴파일 에러 보고 | ~1s | 0.94–1.14s | — | — | — |
-| 빌드 단계(lint + `harness_build` + 셰이더; 웜 / 리로드 직후) | ~0.9s / 1.9s | 0.47s / 0.93–1.0s (리로드 뒤 에디터 ~0.9s는 이제 compile 쪽에서 기다림) | 0.51–0.53s / 0.97–1.03s (FX 스텝 7.5–8 ms) | 0.61–0.64s / 1.14–1.23s (소품 스텝 ~60 ms, 큰 메시 fingerprint ~60 ms) | 0.59–0.65s / 1.14–1.23s — 창 없음 0.52–0.60s / 1.33–1.35s |
-| compile-check csc / msbuild | 어셈블리당 ~0.1s / 웜 0.5–2s, 콜드 10–75s | 어셈블리당 0.13–0.16s / 웜 0.45–0.63s, 콜드 4–13s | — | — | — |
-| 스모크 씬 렌더 | batches ~46, SetPass ~43, tris ~60만 | 같음 (45.8 / 42.8 / 59만) | 50.9 / 47.8 / 61만 (링 2개 + 파티클) | 67.1 / 51.9 / 124만 (선돌·바위·아치·데칼, 그림자 캐스케이드 포함) | 같음 / 없음(Game 뷰가 그리지 않음, `render` null) |
-| 에디터 열기(재시작, `open.ps1`이 준비될 때까지) | ~30s (첫 응답 뒤 Debug 재컴파일 + 리로드 ~10s 포함) | — | — | — | 14.3s (`-debugCodeOptimization`: 재컴파일 없음) / 12.1s |
-| 창 없는 에디터 유휴 CPU | — | — | — | — | 쉬지 않는 루프 1코어의 120% → `HarnessHeadless` 1코어의 ~8%, ping 17–22 → ~8 ms |
-| 루프 2개 동시 | 두 번째가 3.55s 대기 | — | — | — | 같은 에디터: 두 번째가 4.59s 대기 / worktree 전용 에디터(`-Own`): 둘 다 대기 0 (창 4.4–4.9s, 창 없음 2.7–2.9s) |
-| worktree 전용 에디터 준비(`open.ps1 -Own`) | — | — | — | — | 28.7–29.3s (`Library/` 사본 1.9 GB·2.7만 파일 11.4s + 스크립트 전체 재컴파일 ~17s), 첫 루프 9.8s (빌드 캐시 없음) |
+| 항목 | 1차 버전 | W5 | W6a | W6c | W7 창(`-automated`) / 창 없음(`-Headless`) | W8 (창) |
+|---|---|---|---|---|---|---|
+| 루프: 코드 변경 없음 | 3.5–3.8s (build 0.7s 캐시 적중, play 2.6s) | 3.47–3.68s (build 0.47s, play 2.4–2.6s, 첫 캡처 1.75s) | 3.52–3.64s (build 0.51–0.53s, play 2.39–2.51s) | 3.73–3.91s (build 0.61–0.64s, play 2.49–2.66s) | 3.82–3.90s (build 0.59–0.61s, play 2.51–2.62s) / **2.36–2.50s** (build 0.52–0.54s, play 1.18–1.30s) | 4.08–4.37s (build 0.64–0.71s, play 2.71–2.95s; 샷 한 장 ~95 ms, 대부분 PNG 인코딩) |
+| 루프: 셰이더만 수정 | ~4s (도메인 리로드 없음) | 3.79–3.83s | — | 4.06–4.50s | 3.94–4.27s / **2.47–2.68s** | — |
+| 루프: 모듈 C# 1줄 수정 | ~9.2s (compile+reload 4.1s, build 1.9s, play 2.8s) | 8.84–9.08s (compile 4.7–4.9s = Tundra 0.35s + 리로드 ~2.5s + 리로드 뒤 에디터 ~0.9s, build 0.93–1.0s, play 2.55s) | 8.88–9.39s (compile 4.64–5.09s, build 0.97–1.03s, play 2.57–2.63s) | 9.53–9.69s (compile 4.73–4.92s, build 1.14–1.23s, play 2.86–2.97s) | 9.27–9.67s (compile 4.61–4.99s, 리로드 2.73–2.77s, build 1.14–1.23s, play 2.73–2.87s) / **6.75–7.10s** (compile 3.23–3.42s, 리로드 2.07–2.10s, 리로드 뒤 에디터 작업 없음, build 1.33–1.35s, play 1.59–1.69s) | — |
+| 루프: `-Hot`(Tick 본문 1줄) | — | 3.00–3.06s (판정+교체 0.14s, 첫 캡처 1.27s); 도메인 리로드 뒤 첫 번째 3.81–3.89s (교체 0.9s) | 3.21–3.29s (교체 0.15s, play 2.42–2.50s); 리로드 뒤 첫 번째 3.97s (교체 0.94s) | 3.35–3.45s (교체 0.15s, play 2.51–2.62s); 리로드 뒤 첫 번째 4.11s | 3.14–3.42s; 리로드 뒤 첫 번째 4.34s / **1.96–2.18s**; 리로드 뒤 첫 번째 3.01s | — |
+| 루프: C# 컴파일 에러 보고 | ~1s | 0.94–1.14s | — | — | — | — |
+| 빌드 단계(lint + `harness_build` + 셰이더; 웜 / 리로드 직후) | ~0.9s / 1.9s | 0.47s / 0.93–1.0s (리로드 뒤 에디터 ~0.9s는 이제 compile 쪽에서 기다림) | 0.51–0.53s / 0.97–1.03s (FX 스텝 7.5–8 ms) | 0.61–0.64s / 1.14–1.23s (소품 스텝 ~60 ms, 큰 메시 fingerprint ~60 ms) | 0.59–0.65s / 1.14–1.23s — 창 없음 0.52–0.60s / 1.33–1.35s | — |
+| compile-check csc / msbuild | 어셈블리당 ~0.1s / 웜 0.5–2s, 콜드 10–75s | 어셈블리당 0.13–0.16s / 웜 0.45–0.63s, 콜드 4–13s | — | — | — | — |
+| 스모크 씬 렌더 | batches ~46, SetPass ~43, tris ~60만 | 같음 (45.8 / 42.8 / 59만) | 50.9 / 47.8 / 61만 (링 2개 + 파티클) | 67.1 / 51.9 / 124만 (선돌·바위·아치·데칼, 그림자 캐스케이드 포함) | 같음 / 없음(Game 뷰가 그리지 않음, `render` null) | 같음(에디터 65 / 50 / 122만); 개발 빌드 플레이어 69 / 54 / 126만(D3D12) |
+| 에디터 열기(재시작, `open.ps1`이 준비될 때까지) | ~30s (첫 응답 뒤 Debug 재컴파일 + 리로드 ~10s 포함) | — | — | — | 14.3s (`-debugCodeOptimization`: 재컴파일 없음) / 12.1s | 17.3s |
+| 창 없는 에디터 유휴 CPU | — | — | — | — | 쉬지 않는 루프 1코어의 120% → `HarnessHeadless` 1코어의 ~8%, ping 17–22 → ~8 ms | — |
+| 루프 2개 동시 | 두 번째가 3.55s 대기 | — | — | — | 같은 에디터: 두 번째가 4.59s 대기 / worktree 전용 에디터(`-Own`): 둘 다 대기 0 (창 4.4–4.9s, 창 없음 2.7–2.9s) | — |
+| worktree 전용 에디터 준비(`open.ps1 -Own`) | — | — | — | — | 28.7–29.3s (`Library/` 사본 1.9 GB·2.7만 파일 11.4s + 스크립트 전체 재컴파일 ~17s), 첫 루프 9.8s (빌드 캐시 없음) | — |
+| 플레이어(개발 빌드, 1280x720 창, vSync 끔) 시나리오 fps / p95 | — | — | — | — | — | **452–516 / 2.8–3.6 ms** (같은 때 창 에디터 105–120 / ~11 ms, ×3.8–4.9) |
+| `player.ps1` 한 바퀴 (에디터 루프 + 증분 빌드 + 플레이어 + 비교) | — | — | — | — | — | 15.4–17.4s (4.1–4.5 + 4.9–6.8 + 5.4–6.0 + 0.4s), `-NoBuild` 11.4s |
+| 플레이어 개발 빌드 처음 / 증분 | — | — | — | — | — | 116s(셰이더 81s) / 3–12s, 189 MB |
 
 ---
 
@@ -232,9 +236,8 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 
 - **G3-1 오프스크린 캡처에 스크린 공간 UI가 안 찍힌다** → 2026-09-29 해결(W2, 아래 "해결됨").
 
-- [ ] **G3-2 에디터 플레이 모드 FPS는 실제 성능을 대표하지 못한다**
-  - 현상: 에디터 오버헤드, autotick, Debug 코드 최적화가 섞인다. 지금은 변경 전후 비교에만 쓸 수 있다.
-  - 방향: 개발 빌드 플레이어 + 런타임 Pipeline 서버로 같은 시나리오를 돌리는 `harness_perf`.
+- **G3-2 에디터 플레이 모드 FPS는 실제 성능을 대표하지 못한다** → 2026-09-30 해결(W8, 아래 "해결됨"): `tools/player.ps1`이 같은 시나리오를 개발 빌드
+  플레이어에서 돌려 에디터와 나란히 보고한다(샘플 ~430 fps vs 에디터 ~114 fps). 출시(비개발) 빌드의 성능은 재지 않는다.
 
 - **G3-3 정지 이미지만 나온다** → 2026-09-30 해결(W3, 아래 "해결됨"). 연속 캡처는 한 장의 시트(GIF는 만들지 않음).
 
@@ -248,7 +251,12 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 - **G3-7 캡처는 카메라 하나 + 스크린 공간 UI다** → 2026-09-30 해결(W3, 아래 "해결됨"). 스택 Overlay 카메라의 캔버스는 렌더 요청이 그리지 않아
   합성한다(아래 G3-8의 플레이어 캡처와 비교할 것).
 
-- [ ] **G3-8 에디터 캡처의 UI가 게임의 화면 크기 코드와 어긋날 수 있다** (2026-09-29, W2에서 남은 것)
+- [~] **G3-8 에디터 캡처의 UI가 게임의 화면 크기 코드와 어긋날 수 있다** (2026-09-29, W2에서 남은 것)
+  - 2026-09-30 W8(아래 "해결됨"): 플레이어 창(캡처 크기)의 실제 화면을 같은 프레임의 캡처·에디터 샷과 비교하는 경로(`player.ps1`, `shotStats[].screen`).
+    샘플(가로·세로 720x1280)과 BagelGame에서 실제 화면 = 캡처, 그 비교로 캡처의 HDR·MSAA 문제(G3-12)를 고쳤다.
+  - 남은 것: 완료 기준의 사내 프로젝트 A — 그 클론의 활성 빌드 타깃이 Android라 `player.ps1`이 빌드 전에 거부했다(전환은 프로젝트 전체 재임포트라 하지 않음).
+    Standalone 타깃으로 바꾼 사본(사람의 결정)에서 `brd-attach-player.json`(부트 대화상자, 아무것도 누르지 않음)이나 로비 시나리오로 확인한다(로비는 PlayerPrefs를 바꾼다).
+  - 아래는 W8 전의 기록이다.
   - 현상: 에디터에서는 게임이 Game 뷰 크기로 돈다. 캡처는 UI만 캡처 크기로 잠깐 다시 배치하므로 (1) 크기 변화 콜백(`OnRectTransformDimensionsChange`,
     `GeometryChangedEvent`)이 캡처마다 두 번 더 불리고, (2) `Screen.width/height`를 직접 읽어 배치한 UI·카메라(safe area 스크립트, 비율 맞춤 카메라)는
     Game 뷰 기준 그대로 찍힌다. 지금 우회는 그 캡처에 `"ui": false` 또는 `"screen"`.
@@ -268,6 +276,12 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
   - 완료 기준: 에디터가 백그라운드인 채로도, 도중에 포커스가 돌아와도 실제 누름이 게임에 닿지 않고 `isolatedDevices`에 보고된다(selftest에서 포커스를 조작해 확인).
 
 - **G3-10 UI Toolkit의 transition·타이머가 실시간이라 UI가 움직이는 동안의 캡처가 매번 다르다** (2026-09-30, W6b에서 발견) → 같은 날 해결(W6b, 아래 "해결됨").
+
+- **G3-13 Unity 6.6에서 `render.batches`·`drawCalls`가 0이었다** (2026-09-30, W8의 6.6 새 클론에서 발견) → 같은 날 해결(W8, 아래 "해결됨" 8번).
+  6.6은 Render 분류의 `Batches Count`·`Draw Calls Count`를 없애고 종류별로 나눴다. 6.6 batches는 이제 null(대응 카운터 없음).
+
+- **G3-12 캡처가 HDR 이미션·블룸을 잘랐다** (2026-09-30, W8에서 발견) → 같은 날 해결(W8, 아래 "해결됨"). URP는 대상 텍스처가 있는 카메라를 그 텍스처의
+  형식으로 렌더해서 8비트 캡처 RT가 톤 매핑 전에 HDR을 1로 잘랐다. 에디터 캡처끼리는 매번 같아 기준 이미지로는 안 보였고 플레이어의 실제 화면과 비교해 드러났다.
 
 ## 성질 4 — 에셋 없이도 완성도
 
@@ -420,6 +434,9 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    + UI 킷(G1-4)·UI 시계(G3-10): 루프 3회의 `play.uiClock`이 `frames`(패널 ≥ 1); 편집 모드에서 빌드된 HUD의 `Gauge`·`ToastStack`·킷 버튼, 테마 변수(`--ah-bg`,
    `--ah-accent`) 해석, 토스트 클래스; 플레이 중 LAPS·SPIN 라벨과 게이지가 HUD의 `dataSource`(`SmokeHudData`) 값과 같음(바인딩), REVERSE 버튼을 이름으로
    클릭(`uitk`) → 방향 전환, 토스트가 페이드 인·아웃하는 중의 캡처 2장이 두 번 돌려도 픽셀까지 같음
+   + 플레이어 실행(W8: G3-2·G3-8): `player.ps1`이 기본 시나리오 + 게임 카메라 캡처를 개발 빌드 플레이어에서 — 녹색, 1280x720 창·vSync 0·종료코드 0, 에디터와 같은
+   `play.events`, 플레이어의 fps·batches·UI 시계 `frames`, 샷이 에디터 것과 파티클 차이 안(바뀐 픽셀 ≤ 1%, 평균 ≤ 2), 그 프레임의 화면 = 캡처(`screen.vsShot` same,
+   워터마크 제외), 빌드 뒤 작업 트리 그대로
    + GPU 베이크(G4-1): 임시 베이크 셰이더로 PNG 첫 줄 = uv.y 0, HLSL `Noise_Fbm`·`Noise_Ridged` = C# `Noise`(8비트 반올림 안), 같은 입력이면 건너뛰고 속성을 바꾸면
    다시 구움, 임포터의 fingerprint 키 + 절차적 라이브러리(G4-4): SDF 구가 닫히고(열린 모서리 0) 정점이 반지름 1.000 위, 부드러운 합집합도 닫힘, 바위·아이코스피어·
    닫힌/열린 튜브의 면 방향 100%, 스플라인 끝점·호 길이 간격 3% 안, 포아송 최소 거리·같은 시드 같은 점; 빌드된 선돌·바위·아치, 룬 데칼과 `DecalRendererFeature`,
@@ -449,9 +466,10 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    지원 버전(CLAUDE.md "Unity 버전")마다 `-UnityVersion <v>`로도 돌린다(fingerprint는 그 버전의 값)
 10. 기존 프로젝트(P-2): 하네스 패키지·설치/제거 스크립트·런타임을 바꿨으면, 기준선 커밋이 있는 테스트 클론마다
    `tools/attach-test.ps1 -Project <클론> [-Scene ...] [-Module ...]` 녹색 — install → 설치분만 바뀜 → 기존 씬으로 루프 3회 녹색(fingerprint·events 동일)
-   → 출시 빌드에 `Harness.*` 없음 → uninstall 뒤 `git status` 비어 있음. `shots/`를 Read로 확인. 지금 쓰는 클론(`../ah-p2`, 기준선 커밋 포함):
+   → (`-Player`: `player.ps1`이 그 시나리오를 개발 빌드 플레이어에서 녹색, W8) → 출시 빌드에 `Harness.*` 없음 → uninstall 뒤 `git status` 비어 있음.
+   `shots/`(`-Player`면 `shots-player/`)를 Read로 확인. 지금 쓰는 클론(`../ah-p2`, 기준선 커밋 포함):
    BagelGame(`-Module Game=Assets/Game,UI=Assets/UI`), Fluid-Sim(`-Scene "Assets/Scenes/Fluid Particles.unity"`), 사내 프로젝트 A(비공개 클론, 이 머신에만;
-   `-Scenario ../ah-p2/brd-attach.json`(부트 대화상자까지) 또는 `brd-lobby-auto.json`(테스트 서버로 로비까지, `"auto"`·`"screen"` 나란히; `brd-lobby-w3.json`은
+   `-Scenario ../../ah-p2/brd-attach.json`(부트 대화상자까지; 경로는 `AgentHarness/` 기준) 또는 `brd-lobby-auto.json`(테스트 서버로 로비까지, `"auto"`·`"screen"` 나란히; `brd-lobby-w3.json`은
    여기에 로비 연속 캡처를 더한 것 — 끝나면 에디터
    PlayerPrefs `dev.force_login.server_environment`를 0으로), `-KnownErrors '^\[Firebase\] Dependency'`, `-NoBuild`). 배포 경로를 바꿨으면
    `-Source git+file:///<저장소>?path=/AgentHarness/Packages/com.geuneda.agentharness#<브랜치>`(커밋된 것, 부트스트랩 포함)로도.
@@ -461,6 +479,73 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G3-2 에디터 플레이 모드 FPS는 실제 성능을 대표하지 못한다** · **G3-8 에디터 캡처의 UI가 게임의 화면 크기 코드와 어긋날 수 있다**(경로; 사내 프로젝트 A 확인은 [~])
+  (+ **G3-12 캡처가 HDR 이미션·블룸을 잘랐다**, **G3-13 6.6의 render 카운터**, 2026-09-30, W8)
+  - 현상(전): 성능은 에디터 플레이 모드 fps(에디터 오버헤드·autotick·Game 뷰)뿐이라 변경 전후 비교에만 쓸 수 있었다. 캡처는 UI를 캡처 크기로 다시 배치해
+    합성하므로 `Screen.width`를 읽는 UI·크기 콜백·Overlay 카메라 캔버스가 게임과 다를 수 있는데, 게임이 실제로 그린 화면과 비교할 길이 없었다.
+  - 결과: `tools/player.ps1` = 에디터 루프(`<Out>/editor`) → 개발 빌드 플레이어(Pipeline `build` + `build_status`, `HarnessOut/player-build/<타깃>/`, 증분) →
+    캡처 크기의 창(`-screen-fullscreen 0 -screen-width/-height`)으로 띄운 플레이어가 **혼자** 시나리오를 돌고 종료 → `harness_compare`로 비교 → report.
+    - 플레이어(`Runtime/PlayerRun.cs`): 명령줄 `-harness-scenario/-out/-config/-size/-screen/-id/-paced` → BeforeSceneLoad에 설정 파일(`HarnessConfig.UseFile`)·
+      시나리오·vSync 0·프레임 상한 없음·개발자 콘솔 끔·창 크기 → 첫 프레임 끝에 에디터와 같은 `ScenarioRunner` → 끝나면 `Application.Quit(0/1)`.
+      `[AgentHarnessInput]` 훅은 리플렉션(`InputHooks.FindMarked`, 에디터는 TypeCache로 같은 `InputHooks.Combine`). **Pipeline 런타임 서버는 쓰지 않았다** —
+      `enableInBuilds`를 `ProjectSettings/Packages/com.unity.pipeline/`에 써야 하고(기존 프로젝트 설정 변경), 플레이어에 HTTP 서버가 돌며 프레임 시간에 섞인다.
+    - 러너: splash가 끝날 때까지 시계를 세우고(`player.splashSec`), 고정 간격을 Start가 아니라 첫 Update에서 켜고(에디터에선 같은 프레임), 게임 카메라 캡처의 화면 쌍
+      (`ScreenTwins` → `<샷>.screen.png`), 결과에 `player`(플랫폼·개발 빌드·창·vSync·그래픽 장치·시작 시간).
+    - 에디터: `harness_player_plan`(씬 = 플레이 씬 + Build Settings, 타깃·출력·캡처 크기·설정 파일; 데스크톱이 아닌 활성 타깃은 전환하지 않고 거부),
+      `harness_player_built`(빌드 뒤 `SaveAssets`), `harness_compare`(쌍 비교, `same_mean`). 스택의 절대 경로도 모듈로(`HarnessLogParse`).
+    - report: `fps`·`render`(플레이어), `fpsVsEditor`, `eventsMatch`, `runtimeErrors`/`knownErrors`, `shotStats[].vsEditor`, `shotStats[].screen.vsShot/vsEditor`,
+      `compare`(same/changed, 가장 큰 차이, 워터마크 영역, 파티클 안내), `player.build`/`buildRewrote`. 스위치 `-NoEditor`·`-NoBuild`·`-Paced`·`-Debugging`·`-PlayerArgs`.
+    - selftest 1번 끝에 플레이어 실행, `attach-test.ps1 -Player`, install/uninstall 진입점에 `player.ps1`.
+  - 조사하며 찾은 것:
+    1. **첫 프레임이 달랐다**: 에디터는 게임을 한 프레임(dt 0.02) 돌린 뒤 러너를 띄우고 둘째 프레임도 0.02 s, `time` 0.02에서 시계가 시작한다. 플레이어에서 러너를
+       AfterSceneLoad에 띄우자 한 프레임 어긋나 매듭·링이 프레임당 회전만큼 달랐다(closeup 바뀐 픽셀 14%) → 첫 프레임 끝에 러너 + 둘째 프레임 0.02 s → 매듭·링 같음.
+    2. **플레이어는 첫 씬의 파티클을 한 스텝 앞서 시작한다**: AfterSceneLoad에 이미 `time=0.02`(에디터 0). 로드 시점 `Time.deltaTime`이라 BeforeSplashScreen부터
+       `timeScale=0`도, `Simulate(0, restart)`(프리웜을 다시 돌려 더 달라짐)도 안 됐다 → 비교에 안내만(`compare.note`). 샘플은 파티클 둘레만 다르다.
+    3. **G3-12**: 같은 프레임의 실제 화면과 하네스 캡처가 매듭 테두리(화면 흰·청록, 캡처 분홍)와 불씨 밝기에서 달랐다(바뀐 픽셀 0.99%, 평균 1.33).
+       URP `CreateRenderTextureDescriptor`: 대상 텍스처가 있으면 그 형식이 중간 색 버퍼를 대신한다 → 8비트 sRGB 캡처 RT가 톤 매핑·블룸 전에 HDR을 잘랐다.
+       캡처 RT = 그 카메라의 URP 색 형식(B10G11R11/RGBA half, `MakeRenderTextureGraphicsFormat`과 같은 규칙) → 8비트 sRGB로 `Blit`해 읽기 → 0.06%(워터마크뿐),
+       워터마크를 빼면 `same`(평균 0.49). 샘플 기준 이미지 3장 갱신(closeup 밝기 67.7 → 72.6). `_Time`은 원인이 아니었다(LateUpdate의 전역 값은 이전 프레임이지만
+       URP 요청이 카메라마다 현재 시간을 넣음, 바꿔도 결과 같음).
+    4. 플레이어 기본 D3D12(에디터 D3D11): `-force-d3d11`로도 에디터 비교 수치가 같았다(API 차이 아님). 플레이어끼리 몇 픽셀(최대 97, 비율 ≤ 1e-5) — `same`.
+    5. 개발 빌드는 화면 오른쪽 아래에 "Development Build"를 그린다(back buffer에 들어감) → 화면 비교에서 170x28 px 제외. 두 렌더(다른 카메라·프로세스)는 URP 디더링이
+       달라 평균 차이 ~0.5 → 이 비교들은 평균 1까지 `same`.
+    6. 개발 빌드 플레이어는 최적화 코드라 런타임 에러 줄이 어긋났다(주입 71행 → 78행, 파일·모듈·메서드는 맞음) → `-Debugging`(Script Debugging 빌드)이면 71행
+       (fps ~350 vs ~430). 스택이 절대 경로(`(at C:/.../Assets/X.cs:78)`)라 파서를 넓혔다.
+    7. 빌드가 설정 파일을 다시 쓴다(하네스 없이도): URP 전역 설정의 런타임 목록, 기본 Volume 프로필(새 필드, 스크립트 없는 컴포넌트 제거), PlayerSettings의 Standalone
+       배칭 — 한 번 쓰면 안정 → 샘플은 빌드 뒤 상태로 커밋. Input System은 설정 에셋을 Preloaded Assets에 넣었다 메모리에서만 빼서 디스크는 에디터가 저장할 때까지
+       바뀐 채 → 빌드 뒤 `SaveAssets`(`SaveAssetIfDirty(PlayerSettings)`·`SaveToSerializedFileAndForget`은 파일을 쓰지 않았다). Unity는 `Library/` 안으로 빌드를 거부한다.
+    8. **G3-13**: 6.6 새 클론의 플레이어·에디터 모두 `render.batches`·`drawCalls`가 0이었다 — 6.6에는 Render 분류의 `Batches Count`·`Draw Calls Count`가 없고
+       (종류별 `… Draw Calls Count`로 나뉨) 그 이름의 `StartNew(ProfilerCategory.Render, …)`가 UI Toolkit의 같은 이름 카운터에 붙었다(W7까지 6.6 루프도 0) →
+       Render 분류에서 이름으로 찾고 없으면 draw call = 종류별 합, batches = null.
+    9. 6.0 새 클론(6.3 샘플을 6.0으로)은 URP가 플레이어 빌드를 거부했다("UniversalRenderPipelineGlobalSettings ... is not at last version": 커밋된 전역 설정 에셋 버전 10,
+       URP 17.0의 마지막 8 — 내려 쓰지 않음). 실패한 빌드가 `Assets/Resources/PerformanceTestRun*.json`을 남겨서 → `harness_player_plan`이 URP의 같은 검사
+       (`IsAtLastVersion`, 리플렉션)를 빌드 전에 하고 `urpStale`로 알린다. selftest는 에디터가 프로젝트의 커밋된 버전보다 오래되고 이 이유일 때만 건너뛴다(6.0 프로젝트
+       자체는 Fluid-Sim으로 확인).
+    10. **증분 빌드가 앞선 출시 빌드의 플레이어 데이터를 썼다**(Fluid-Sim, 6.0): 개발 빌드가 "player data was not rebuilt"로 `ScriptingAssemblies.json`을 출시 빌드
+        것 그대로 두어 `Harness.Runtime.dll`이 로드되지 않았다 → 플레이어가 시나리오 없이 게임만 돌다 시간 초과. 빌드 뒤 그 목록을 확인하고 없으면 `CleanBuildCache`로
+        다시(`player.build.cleanRebuild`). 그 시간 초과 보고에서 `Get-Content` 줄의 PS 속성을 `ConvertTo-Json -Depth 20`이 펼치느라 `player.ps1`이 몇 분씩 멈췄다
+        → `Read-HarnessLogTail`. 플레이어 로그에 하네스 진행 줄, stderr에 단계.
+    11. G3-12의 짝: URP는 대상 텍스처가 있는 카메라의 MSAA도 그 텍스처의 샘플 수로 정한다 → 1샘플 캡처 RT가 MSAA 게임(BagelGame 2x)의 가장자리를 계단으로 찍었다
+        (같은 프레임 화면 비교에서 가장자리만 0.42%) → 캡처 RT = 카메라의 MSAA, 읽기 전에 해제.
+    12. 개발 빌드는 PlayerConnection이 네트워크에서 기다려 새 exe 경로마다 Windows 방화벽이 허용을 묻는다(실행에는 상관없음, 프로젝트당 한 번).
+    13. **찾아 준 게임 버그**: Fluid-Sim은 입자 색 그라디언트를 에디터 전용 `OnValidate`에서만 만들어 플레이어의 입자가 회색이다 — 에디터 루프는 녹색, `player.ps1`은
+        `vsEditor` 14%·2색 `blank`(`stage=shots`), 플레이어 fps 204 vs 에디터 213(GPU 계산 셰이더라 비슷).
+  - 검증: 매트릭스 1–8 녹색(에디터 트리, 최종 코드 7.0분; 1번의 플레이어 단계: 녹색, 같은 events, 플레이어 468.2 fps vs 에디터 129.7, 샷 vsEditor 가장 큰 차이
+    0.65%/평균 1.42, 화면 vsShot `same` 평균 0.49, 작업 트리 그대로). 9: 새 클론 6.3 녹색(루프 3회 `345ba0d7`·기준 이미지 same=3 — 새 Library에서도 새 기준 이미지와 픽셀까지, selftest 1–8,
+    클론의 첫 플레이어 빌드 104.7 s·415 fps), 6.0 녹색(`c8561a2d`; 플레이어 단계는 URP 다운그레이드로 빌드 전에 거부돼 건너뜀 — 9번), 6.6 녹색(`7cda8899`; 플레이어 414.3 fps vs 에디터 98.7, 에디터 비교 수치가 6.3과 같음, 빌드가 쓴
+    6.6 직렬화(`GraphicsSettings`·`ProjectSettings`)는 보고만 — selftest `final.versionRewrites`).
+    10: BagelGame `-Player` 녹색(플레이어 727.9 fps vs 에디터 134.5 ×5.4, 같은 프레임 화면 = 캡처 3/3, 출시 빌드에 `Harness.*` 없음, 제거 뒤 깨끗), Fluid-Sim 녹색
+    (기존 절차; `-Player`는 13번의 게임 버그로 `stage=shots`가 맞다), 사내 프로젝트 A 녹색(`brd-attach.json`, `6664b723`; `-Player`는 활성 타깃 Android로 거부).
+    샘플 수동: 세로 720x1280 창(2560x1440 모니터)도 창 = 캡처 크기, HUD·토스트·버튼 배치가 에디터 합성과 같음(차이는 파티클뿐). 주입한 런타임 예외가 플레이어에서
+    `stage=runtime`, `Assets/Game/Smoke/SmokeModule.cs`, 모듈 Smoke(최적화 78행 / `-Debugging` 71행).
+  - 측정값(이 머신, RTX 4060 Ti, 1280x720 창): 첫 개발 빌드 116 s(에셋 쓰기 = 셰이더 81 s), 증분 3–12 s(스크립트만 바뀌면 ~7–12 s), 189 MB. 플레이어 시작 ~2.3–3.2 s
+    (splash 포함, 시계는 splash 뒤), 시나리오 3 s → 플레이어 5.6–6.3 s. `player.ps1` 한 바퀴(새로 연 에디터, 3회) 15.4–17.4 s = 에디터 루프 4.1–4.5 s + 증분 빌드 4.9–6.8 s + 플레이어 5.4–6.0 s
+    + 비교 0.4 s, `-NoBuild` 11.4 s. 그때 플레이어 452–516 fps(p95 2.8–3.6 ms) vs 창 에디터 105–120(p95 ~11 ms) → ×3.8–4.9(개발 중 여러 번 398–468 fps),
+    batches 69 / SetPass 54(D3D12) vs 65 / 50. 루프(코드 변경 없음)는 4.08–4.37 s(W7 3.82–3.90 s; 샷 한 장 ~95 ms 중 HDR 변환은 수 ms, 나머지는 이날의 편차).
+  - 남은 것: 출시(비개발) 빌드 성능(개발 빌드의 프로파일러 마커가 켜져 있음; `AGENTHARNESS_RUNTIME` 출시 빌드로 도는 옵션은 없다), 첫 씬 파티클 한 스텝(엔진),
+    데스크톱 타깃·Windows만(P-3), IL2CPP 플레이어는 재지 않음, TAA처럼 앞 프레임을 쓰는 효과는 캡처 카메라에 이력이 없다. 사내 프로젝트 A(활성 타깃
+    Android)는 `player.ps1`이 빌드 전에 거부해 G3-8의 완료 기준은 확인하지 못했다(위 G3-8 `[~]`).
 
 - [x] **G2-2 GUI 에디터가 떠 있어야 하고, 모달 다이얼로그가 뜨면 멈춘다** · **G1-2 빌더가 에디터 안에서만 실행된다** · **G5-1 에디터 1개 → 루프가 직렬화된다**
   (+ **G2-4** 측정, 2026-09-30, W7)

@@ -119,4 +119,65 @@ namespace Harness
 
         public void Dispose() { }   // "end" comes from the runner
     }
+
+    /// <summary>
+    /// The game's [AgentHarnessInput] methods as one delegate for <see cref="InputHookReplay"/>: static
+    /// <c>void M(string type, string key, Vector2 value)</c> methods marked with an attribute class named
+    /// AgentHarnessInputAttribute. The game defines that attribute itself (Tools~/templates/HarnessInput.cs), so it needs no
+    /// reference to the harness and keeps compiling after uninstall. The Editor lists the marked methods with TypeCache
+    /// (Harness.Editor.HarnessInputHooks), a Player run by reflection over the game's assemblies (<see cref="FindMarked"/>).
+    /// </summary>
+    public static class InputHooks
+    {
+        public const string AttributeName = "AgentHarnessInputAttribute";
+
+        /// <summary>The methods as one delegate (null if none); <paramref name="names"/> lists them, <paramref name="errors"/> the ones with a wrong signature.</summary>
+        public static Action<string, string, Vector2> Combine(IEnumerable<System.Reflection.MethodInfo> methods, List<string> names, List<string> errors)
+        {
+            Action<string, string, Vector2> all = null;
+            foreach (var m in methods)
+            {
+                var name = m.DeclaringType?.FullName + "." + m.Name;
+                var ps = m.GetParameters();
+                if (!m.IsStatic || m.ReturnType != typeof(void) || m.ContainsGenericParameters || ps.Length != 3 ||
+                    ps[0].ParameterType != typeof(string) || ps[1].ParameterType != typeof(string) || ps[2].ParameterType != typeof(Vector2))
+                {
+                    errors?.Add($"{name}: [AgentHarnessInput] needs static void {m.Name}(string type, string key, Vector2 value)");
+                    continue;
+                }
+                all += (Action<string, string, Vector2>)Delegate.CreateDelegate(typeof(Action<string, string, Vector2>), m);
+                names?.Add(name);
+            }
+            return all;
+        }
+
+        /// <summary>
+        /// Methods marked [AgentHarnessInput] in the loaded assemblies that are not Unity's, .NET's or the harness's own
+        /// (a Player has no TypeCache). Attributes are matched by name without creating them.
+        /// </summary>
+        public static List<System.Reflection.MethodInfo> FindMarked()
+        {
+            const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.DeclaredOnly;
+            var found = new List<System.Reflection.MethodInfo>();
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var n = asm.GetName().Name;
+                if (n.StartsWith("Unity", StringComparison.Ordinal) || n.StartsWith("System", StringComparison.Ordinal) ||
+                    n.StartsWith("Mono.", StringComparison.Ordinal) || n.StartsWith("Harness.", StringComparison.Ordinal) ||
+                    n == "mscorlib" || n == "netstandard" || n == "Newtonsoft.Json") continue;
+                Type[] types;
+                try { types = asm.GetTypes(); }
+                catch (System.Reflection.ReflectionTypeLoadException e) { types = e.Types; }
+                foreach (var t in types)
+                {
+                    if (t == null) continue;
+                    foreach (var m in t.GetMethods(flags))
+                        foreach (var a in m.CustomAttributes)
+                            if (a.AttributeType.Name == AttributeName) { found.Add(m); break; }
+                }
+            }
+            return found;
+        }
+    }
 }

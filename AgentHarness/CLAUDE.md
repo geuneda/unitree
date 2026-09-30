@@ -14,7 +14,7 @@ Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **
 |---|---|---|---|
 | 1 | 모든 게 텍스트(JS 코드) | 씬/프리팹이 GUID로 얽힌 YAML, GUI 중심 도구 | 씬은 `IBuildStep` 코드가 생성, 렌더 파이프라인 설정은 `ISettingsStep` 코드, HLSL·UXML/USS·코드로 만든 머티리얼/Volume/라이팅/파티클/애니메이션 클립 |
 | 2 | 수정→새로고침이 초 단위 | 컴파일 + 도메인 리로드, GUI 에디터와 모달 대화상자 | Domain Reload 끔, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 본문만 바꾸면 컴파일 없이 적용하는 핫 루프(`loop.ps1 -Hot`), 대화상자에 멈추지 않는 `-automated` 에디터·창 없는 에디터(`open.ps1 -Headless`) |
-| 3 | 스크린샷·콘솔·FPS를 눈/기계로 확인 | 에이전트가 화면을 못 봄 | `harness_capture/play`가 PNG + 이미지 통계, `harness_console/stats`가 JSON |
+| 3 | 스크린샷·콘솔·FPS를 눈/기계로 확인 | 에이전트가 화면을 못 봄 | `harness_capture/play`가 PNG + 이미지 통계, `harness_console/stats`가 JSON, 같은 시나리오를 개발 빌드 플레이어에서(`player.ps1`: 에디터 없는 프레임 시간, 게임이 그린 실제 화면과 캡처·에디터 샷의 비교) |
 | 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/SDF/스플라인/스캐터), GPU 텍스처 베이크(`ctx.BakeTexture`, C#과 같은 HLSL 노이즈), URP Volume·데칼을 코드로, 파티클·키프레임 애니메이션을 코드로(`ctx.Particles`, `ctx.AnimationClip` + Playables `ClipPlayer`) |
 | 5 | 레지스트리 구조라 병렬 작업이 쉬움 | 에디터 하나를 공유 | `GameRoot.Register` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 git worktree + `submit.ps1`/`land.ps1` 트랜잭션, worktree마다 따로 도는 에디터(`open.ps1 -Own`) |
 
@@ -56,6 +56,8 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 → `harness_console` + `harness_stats` → `HarnessOut/latest/report.json` (stdout에도 같은 JSON). 종료코드 0 = 전부 녹색.
 **모듈의 `[CodeReload] Tick` 본문만 고쳤으면 `tools/loop.ps1 -Hot`**: 컴파일·도메인 리로드·빌드 없이 그 본문을 바꿔 넣고 같은 시나리오를 돈다
 (~3.4 s, 전체 루프 ~9.5 s). 그 밖의 변경이면 알아서 전체 루프를 돌고 이유를 `hot.fallback`에 남긴다(아래 "핫 루프").
+**실제 성능과 게임이 그린 실제 화면은 `tools/player.ps1`**: 같은 시나리오를 개발 빌드 플레이어(캡처 크기의 창)에서 돌려 에디터 루프와 나란히
+프레임 시간·이벤트·샷을 비교한다(아래 "플레이어에서 돌리기"). 에디터 플레이 모드의 `fps`는 변경 전후 비교용이다.
 
 **매 루프 후 반드시**: `report.json`의 `ok/stage`를 보고, `shots`의 PNG를 **Read 툴로 직접 열어** 눈으로 확인한다. `build.warnings`(머티리얼 설정 실수 등)도 읽는다.
 `shotStats[].blank=true`(평평/검은 화면)면 렌더가 깨진 것이다. `dark=true`(픽셀 98% 이상이 거의 검정)는 실패로 치지 않지만
@@ -100,7 +102,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
            "activeScene", "scenes":[{"name","mode","t","wallSec"}],      // 로드된 씬(Start = 처음부터 있던 씬, t = 시나리오 시계)
            "waits":[{"type","target","t","waitedSec","frames"}], "clicks":[{"target","t","x","y","via"}],
            "uiClock":{"mode":"frames"|"real","panels","scope","error"}},   // UI Toolkit 패널이 프레임 시계로 돌았는지(아래 "시나리오")
-  "render": {"batches","setPassCalls","drawCalls","triangles","vertices"},   // headless면 null(Game 뷰가 그리지 않음)
+  "render": {"batches","setPassCalls","drawCalls","triangles","vertices"},   // headless면 null(Game 뷰가 그리지 않음). 6.6은 batches null(카운터 없음), drawCalls = 종류별 합
   "shotStats": [{"name","preset","t","width","height","meanLuma","stdLuma","blank","dark","magenta","magentaRatio",
                  "cameras":["Stage/Main Camera","Stage/Main Camera/Weapon (overlay)","Minimap"],   // 그린 카메라(아래부터)
                  "ui":["ugui:<캔버스 경로>","uitk:<PanelSettings>"],   // 샷의 UI(아래부터), 합성 실패는 "uiError"
@@ -158,11 +160,11 @@ Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json:
   Runtime/                     런타임 계약: GameRoot, IGameModule, EventBus, HarnessProbe, HarnessConfig, ShotPreset(+ShotPose), ScriptedInput,
                                ScenarioInput(KeyNames, InputHookReplay), ScenarioRunner, HarnessCapture(+CaptureCameras: 화면의 카메라들,
                                CaptureUi: 스크린 공간 UI 합성, ContactSheet: 연속 캡처 시트), ClipPlayer(Playables 클립 재생, ClipEvent),
-                               PanelClock(시나리오 동안 UI Toolkit 시간 = 프레임), UI/(Gauge, ToastStack: UI 킷 컨트롤)
+                               PanelClock(시나리오 동안 UI Toolkit 시간 = 프레임), PlayerRun(플레이어에서 명령줄 시나리오, W8), UI/(Gauge, ToastStack: UI 킷 컨트롤)
                                (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
   Runtime/Procedural/          MeshBuilder(+Sdf: FromSdf, +Spline: Tube, +Scatter: Rock·Icosphere), Noise(Perlin/fBm/Ridged/Worley/Rng), Sdf, Spline,
                                Scatter(Poisson), TextureBaker, PMath, AmbientProbe(큐브맵 → 앰비언트 SH)
-  Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교, HarnessHot: 핫 루프, HarnessHeadless: 에디터 모드·창 없는
+  Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교, HarnessHot: 핫 루프, HarnessPlayer: 플레이어 빌드 계획, HarnessHeadless: 에디터 모드·창 없는
                                에디터의 유휴 CPU 억제) 와 BuildContext(+.Materials: LitMaterial,
                                +.Particles: Particles·ParticleMaterial, +.Animation: AnimationClip·Animate, +.Bake: BakeTexture·FloatTexture,
                                +.Decals: Decal·DecalMaterial)/IBuildStep,
@@ -180,11 +182,12 @@ tools/loop.ps1                 원커맨드 루프          tools/uc.ps1        
 tools/submit.ps1               worktree의 모듈 → 에디터 트리, 트랜잭션 루프(실패 시 되돌림)
 tools/land.ps1                 worktree 브랜치 → 에디터 트리 브랜치로 병합, 트랜잭션 루프(실패 시 되돌림)
 tools/compile-check.ps1        에디터 없는 컴파일 검사  tools/Harness.psm1    HTTP 클라이언트·락·루프·submit/land 저널·git
+tools/player.ps1               같은 시나리오를 개발 빌드 플레이어에서(에디터 루프와 나란히: 프레임 시간·이벤트·샷·실제 화면)
 tools/open.ps1 / quit.ps1      에디터 열기(프로젝트별 로그, -automated, 준비 대기; -Headless 창 없음, -Own worktree 전용) / 정상 종료(락)
 tools/fresh-clone-test.ps1     새 클론 검증: 짧은 경로에 클론 → open → harness_setup → 루프 N회 → quit → 삭제
 tools/attach-test.ps1          기존 프로젝트 붙이기 검증: install → open → 루프 N회 → 출시 빌드 → quit → uninstall → git status
 tools/selftest.ps1             검증 매트릭스 1–8 자동 실행(에러 주입·동시 루프·worktree submit/land)
-tools/scenarios/*.json         플레이 시나리오        HarnessOut/           캡처·result.json·report.json (gitignore)
+tools/scenarios/*.json         플레이 시나리오        HarnessOut/           캡처·result.json·report.json, player-build/(개발 빌드 플레이어) (gitignore)
 golden/<Unity 버전>/<시나리오>/  기준 이미지(커밋): 루프 샷과 비교 (loop.ps1 -UpdateGolden이 씀)
 AgentScripts/                  eval_file / run_script 용 임시 C# (gitignore)
 ```
@@ -446,6 +449,9 @@ public sealed class FooRenderSettings : ISettingsStep     // Builders/ 폴더, �
 | `harness_sync_csproj` | .sln/.csproj 생성(사용자 외부 에디터 설정은 복원) — compile-check msbuild 백엔드용 |
 | `harness_hot` | `{"mode":"apply"\|"check"\|"prepare"\|"commit"}` 핫 루프(위 "핫 루프"). apply: 마지막 컴파일 스냅샷과 비교해 `[CodeReload]` 본문만 바뀌었으면 앞선 교체를 지우고 인터프리터로 다시 넣음 → `{hot, applied, changes}`, 아니면 `{hot:false, reason, changes}`. check: 판정만. prepare/commit: 전체 루프가 컴파일 전후에 부른다 |
 | `harness_quit` | 응답 ~0.3s 뒤 `EditorApplication.Exit(0)`(저장 확인 없음). 직접 부르지 말고 `tools/quit.ps1`(락 + 종료 대기) |
+| `harness_player_plan` | `{"scenario":...}` 플레이어 실행 계획(읽기 전용): 빌드할 씬(플레이 씬 먼저 + Build Settings), 타깃·출력 경로, 캡처 크기(= 창), 설정 파일. 데스크톱이 아닌 활성 타깃이면 거부. `tools/player.ps1`이 부른다 |
+| `harness_player_built` | 플레이어 빌드 뒤 `AssetDatabase.SaveAssets` — 빌드가 메모리에 남긴 설정 변경을 지금 디스크로(에디터 종료 때 쓰일 것) |
+| `harness_compare` | `{"pairs":"[{name,path,against,diff,ignore}]","out":"...","same_mean":0.5}` 이미지 쌍을 기준 이미지 규칙으로 비교(status·meanDiff·changedRatio·rect·diff PNG). `player.ps1`이 플레이어 샷·화면을 비교한다 |
 
 Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_status`, `eval_file {"file":"AgentScripts/x.cs"}`(C# 본문, using 불가 → 정규화된 이름 사용),
 `run_script`, `get_scene_hierarchy`, `editor_status`(모달 다이얼로그 확인), `editor_stop`, `set_autotick`. 목록: `unity command --detail compact`.
@@ -497,6 +503,10 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
     위치로 따라온다. 다른 Base 카메라(미니맵)는 제자리. 같은 프레임에 원래 로컬 위치·회전으로 되돌린다(편집 모드에서 씬을 dirty로 만들지 않음).
   - `"camera": "<이름>"`이 메인 카메라가 아니면 그 카메라와 그 스택만 전체 화면으로 그린다. 메인 카메라가 텍스처에 그리는 게임(화면에 안 나옴)도 그 카메라만.
   - 다른 카메라는 캡처 동안 `targetTexture`를 캡처 RT로 바꿨다가 되돌린다(그 카메라의 캔버스가 캡처 크기로 배치된다). Built-in은 depth 순 `Camera.Render`.
+  - 캡처 RT는 URP가 그 카메라를 화면에 그릴 때의 색 형식이다(HDR이면 B10G11R11/RGBA half) — 다 그린 뒤 8비트 sRGB로 옮겨 읽는다. URP는 대상 텍스처가 있는
+    카메라의 중간 색 버퍼를 **대상의 형식으로** 만들어서, W8 전의 8비트 캡처는 톤 매핑 전에 HDR 이미션·블룸을 잘랐다(아래 "함정", `player.ps1`의 실제 화면 비교로 찾음).
+    MSAA도 대상 텍스처의 샘플 수를 따르므로 캡처 RT는 그 카메라의 MSAA(URP 에셋, Built-in은 품질 설정)로 만들고 읽기 전에 해제(resolve)한다(W8 전엔 MSAA 게임의
+    가장자리가 계단으로 찍혔다 — BagelGame 2x). TAA처럼 앞 프레임을 쓰는 효과는 캡처 카메라에 이력이 없어 여전히 다를 수 있다.
 - 그 위에 **스크린 공간 UI를 캡처 크기로 다시 배치해 합성**한다(G3-1, `Runtime/CaptureUi.cs`) → HUD·메뉴·팝업이 Game 뷰 크기와
   상관없이 같은 모양으로 찍힌다. 샷의 UI는 `shotStats[].ui`(아래부터 그린 순서):
   - 캡처가 그린 Base 카메라의 Screen Space - Camera 캔버스 → 그 카메라가 씬과 함께 그린다(게임처럼 후처리 포함, 메인 카메라 것은 캡처 카메라가).
@@ -506,7 +516,8 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
     합성(프로젝트 색 공간, 선형이면 선형 공간).
   - 캔버스의 렌더 모드·카메라·plane distance, PanelSettings의 타깃 텍스처, 카메라 타깃을 잠깐 바꿨다가 같은 프레임에 되돌린다(레이아웃 포함). 그 사이 UI 코드의
     `OnRectTransformDimensionsChange`·`GeometryChangedEvent`가 캡처 크기와 Game 뷰 크기로 한 번씩 더 불린다. `Screen.width`를 직접 읽어 배치한
-    UI는 Game 뷰 기준 그대로다. 게임이 그걸로 이상해지면 캡처에 `"ui": false`(`harness_capture {"ui":false}`; 다른 카메라의 캔버스 레이어도 뺀다). (ROADMAP G3-8, W8의 플레이어 캡처로)
+    UI는 Game 뷰 기준 그대로다. 게임이 그걸로 이상해지면 캡처에 `"ui": false`(`harness_capture {"ui":false}`; 다른 카메라의 캔버스 레이어도 뺀다). 게임이 실제로 그리는 화면은
+  `tools/player.ps1`: 캡처 크기의 플레이어 창을 그대로 찍어 이 캡처와 비교한다(`screen.vsShot`/`screen.vsEditor`, 위 "플레이어에서 돌리기").
   - 빠지는 것: 타깃 텍스처가 있는 패널(게임의 render-to-texture UI), 다른 디스플레이 → `"screen"`. 캡처가 비었는데(`blank`) 화면에 그리는
     카메라 중 그리지 않은 것이 있으면 `hint`가 알려 준다.
   - UI Toolkit 패널은 내부 API(`RuntimePanel.Update`, `UIElementsRuntimeUtility.RepaintPanel/RenderPanel`, 리플렉션)로 즉시 그린다. 없는 Unity 버전이면
@@ -563,6 +574,62 @@ powershell -ExecutionPolicy Bypass -File tools/uc.ps1 harness_hot '{"mode":"chec
   (위 모듈 템플릿; `Assembly-CSharp`는 자동). 샘플의 `SmokeModule.Tick`·`StageModule.Tick`이 표식돼 있다.
 - `reload_file`(Assembly.Load 백엔드)은 쓰지 않는다: 교체한 본문이 public 멤버만 쓸 수 있는데 모듈은 상태를 private 필드에 둔다.
 - submit/land는 항상 전체 루프다(핫 교체는 에디터 트리의 메모리에만 있어 트랜잭션으로 되돌릴 수 없다).
+
+## 플레이어에서 돌리기 (tools/player.ps1, W8: G3-2 · G3-8)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/player.ps1                                   # default.json을 에디터와 개발 빌드 플레이어에서
+powershell -ExecutionPolicy Bypass -File tools/player.ps1 -Scenario tools/scenarios/x.json
+powershell -ExecutionPolicy Bypass -File tools/player.ps1 -NoBuild                          # 시나리오만 바꿨을 때: 마지막 빌드를 그대로
+```
+`player.ps1` = 에디터 루프(컴파일 → 빌드 → 에디터 플레이, `<Out>/editor/report.json`) → **개발 빌드 플레이어**(`HarnessOut/player-build/<타깃>/`,
+Pipeline `build` 명령, 증분) → 플레이어를 **캡처 크기의 창**(`-screen-width/-height`, 창 모드)으로 띄우면 플레이어가 혼자 시나리오를 돌고 샷·
+result.json을 쓰고 종료 → 에디터 샷과 비교 → `HarnessOut/player/report.json`(stdout에도). 종료코드 0 = 플레이어가 빌드되고 시나리오를 에러 없이 돌았다.
+에디터와의 차이(프레임 시간·이벤트·픽셀)는 보고이지 실패가 아니다. 락을 끝까지 잡는다(플레이어가 프레임을 재는 동안 이 에디터에서 다른 루프가 돌지 않음).
+
+- **플레이어는 에디터 없이 혼자 돈다**: 런타임(`Runtime/PlayerRun.cs`)이 명령줄 `-harness-scenario <파일> -harness-out <폴더>`를 보면 에디터의
+  플레이 모드와 같은 `ScenarioRunner`를 띄우고(입력 재생·대기·캡처·이벤트·실제 입력 격리 그대로), 끝나면 `Application.Quit`. Pipeline 런타임 서버는 쓰지 않는다
+  (`enableInBuilds` 설정 파일과 HTTP 서버를 플레이어에 넣어야 하고, 프레임 시간에도 섞인다). 설정(`shots`·`captureSize`)은 `-harness-config`로 받은
+  프로젝트의 `AgentHarness.json`, `[AgentHarnessInput]` 훅은 리플렉션으로 찾는다.
+- **에디터와 같은 프레임을 돈다**: 에디터 플레이 모드는 게임을 한 번 돌린 뒤 러너를 띄우고 처음 두 프레임이 `Time.fixedDeltaTime`(0.02 s)이다 — 플레이어도
+  똑같이 맞춘다(첫 프레임 끝에 러너, 둘째 프레임 0.02 s, 러너의 첫 Update부터 시나리오의 고정 간격). 그래서 `play.events`가 같고(`eventsMatch`), 같은 `t`의 샷이
+  같은 게임 상태다. **예외: 첫 씬의 파티클은 플레이어에서 한 스텝(0.02 s) 앞선다** — Unity가 플레이어의 첫 씬을 불러오며 파티클을 한 번 진행해 둔다
+  (스크립트가 바꿀 수 없는 로드 시점 dt). 샘플은 파티클 둘레만 달라 에디터 비교가 `changed`(바뀐 픽셀 0.02–0.65%)다(`compare.note`).
+- **프레임을 묶지 않는다**: vSync 0, 프레임 상한 없음(`player.vSyncCount`, `targetFrameRate`) → `fps`·`p95ms`가 게임의 일이다. 프로젝트 설정 그대로 재려면 `-Paced`.
+  `fpsVsEditor` = 플레이어 fps / 에디터 fps. 샘플: 플레이어 ~450–515 fps(p95 ~3 ms) vs 창 에디터 ~105–120 fps(p95 ~11 ms), **×3.8–4.9**(BagelGame ×5.4). 개발 빌드라 프로파일러 마커가
+  켜져 있다(출시 빌드보다 조금 느리다). `render`(batches·SetPass·tris)도 플레이어 값.
+- **실제 화면(G3-8)**: 게임 자신의 카메라로 찍는 캡처(`"main"`, 샷 프리셋이 없어 메인 카메라로 떨어진 `"auto"` — 포즈 샷은 게임 카메라가 거기 없으니 제외)는
+  그 프레임에 화면(back buffer)도 찍는다(`shotStats[].screen.path`, `<샷>.screen.png`). 창 = 캡처 크기라 UI를 다시 배치하지 않고 `Screen.width`가 캡처 크기이며
+  카메라 스택 그대로다. `screen.vsShot` = 같은 프레임의 하네스 캡처와(캡처 경로가 실제 화면과 같은가), `screen.vsEditor` = 에디터 루프의 같은 캡처와.
+  시나리오의 `"screen"` 캡처는 플레이어에서 창 그대로다. 개발 빌드가 오른쪽 아래에 그리는 "Development Build"는 화면 비교에서 뺀다(`compare.screenIgnore`).
+- **비교**: `shotStats[].vsEditor`(플레이어 샷 vs 에디터 샷, 파일 이름이 같은 것), `screen.*` — 각각 `status`·`meanDiff`·`changedRatio`·`rect`·`diff` PNG
+  (`<Out>/compare/`). 규칙은 기준 이미지와 같고 평균만 1까지 같다고 본다(카메라·프로세스가 다르면 URP 디더링이 달라 평균 ~0.5). `compare.vsEditor/screen`에
+  `same`/`changed`와 가장 큰 `changedRatio`·`meanDiff`.
+- **report.json**: `ok`, `stage`(editor|compile|build|shader|lint = 에디터 루프가 먼저 실패 · playerBuild · player(안 끝남·크래시, `logTail`) · play · runtime · shots),
+  `editor`(ok·stage·fps·render·events·report 경로), `player`(`exe`, `target`, `build`{result, sec, sizeMB, code, cleanRebuild}, `buildRewrote`, `development`, `graphicsDevice`,
+  `screen`, `startupSec`, `exitCode`, `log`), `fps`, `render`, `fpsVsEditor`, `play`(에디터와 같은 모양), `eventsMatch`, `runtimeErrors`(`knownErrors` 따로),
+  `shots`, `shotStats`, `compare`, `timings`{lockWaitSec, editorSec, buildSec, playerSec, compareSec}, 빌드 전에 거부됐으면 `urpStale`.
+- **런타임 에러의 줄**: 개발 빌드 플레이어는 최적화 코드라 `runtimeErrors`의 줄이 몇 줄 어긋날 수 있다(파일·모듈·메서드는 맞다; 샘플 주입 71행 → 78행). 에디터
+  루프(`editor/report.json`)가 정확한 줄이고, 플레이어에서만 나는 에러면 `-Debugging`(Script Debugging 빌드: 정확한 줄, 코드가 느림 — 샘플 ~350 fps).
+- **빌드**: 첫 빌드는 셰이더를 컴파일해서 길고(샘플 ~2분), 그 뒤는 증분(스크립트만 바뀌면 ~10 s, 아무것도 안 바뀌면 ~3–5 s). 한 바퀴 ~16 s(에디터 루프 ~4.5 s +
+  증분 빌드 ~5 s + 플레이어 ~6 s), `-NoBuild` ~11 s. 출력은 `HarnessOut/player-build/`
+  (Unity는 `Library/` 안으로 빌드를 거부한다; HarnessOut은 git이 무시). 플레이할 씬이 첫 씬, 이어서 Build Settings의 나머지 활성 씬. 데스크톱(Standalone) 활성
+  타깃만 — 안드로이드 같은 타깃이면 전환(프로젝트 전체 재임포트)하지 않고 `stage=playerBuild`로 알린다. 지금은 Windows만 검증(P-3).
+  URP 에셋이 이 에디터의 URP보다 새 버전이면(더 새 Unity가 저장, URP는 내려 쓰지 않음) URP가 빌드를 거부하므로 빌드 전에 `urpStale`로 알린다 —
+  6.3 샘플을 6.0으로 연 새 클론이 그 경우다(전역 설정 에셋 버전 10, URP 17.0의 마지막 8; selftest는 그때만 플레이어 단계를 건너뛴다).
+- **빌드가 프로젝트 설정을 다시 쓴다**(하네스와 무관하게 Unity·URP·Input System이): 빌드 뒤 `AssetDatabase.SaveAssets`(`harness_player_built`)로 메모리의 상태를
+  바로 쓰고, 작업 트리에서 바뀐 파일을 `player.buildRewrote`로 알린다. 샘플은 첫 빌드가 쓰는 세 파일(`DefaultVolumeProfile`, URP 전역 설정, `ProjectSettings.asset`의
+  `m_BuildTargetBatching`)을 빌드 뒤 상태로 커밋해 두어 비어 있다. 기존 프로젝트면 되돌리거나 커밋한다.
+- 빌드 뒤 플레이어의 `<Data>/ScriptingAssemblies.json`에 `Harness.Runtime`이 없으면 `CleanBuildCache`로 한 번 다시 빌드한다(`player.build.cleanRebuild`): Unity의
+  증분 빌드가 앞선 출시 빌드(하네스 없음)의 플레이어 데이터를 그대로 써서, DLL은 있는데 로드 목록에 없어 플레이어가 시나리오를 돌지 않았다(Fluid-Sim, 6.0).
+- 플레이어 로그(`<Out>/Player.log`)에 `[Harness] player run …`, `scenario runner started`, `scenario clock started`, `scenario finished`가 남는다 — 플레이어가
+  끝나지 않으면(`stage=player`, `logTail`) 어디까지 왔는지 본다. 진행은 stderr에 `player.ps1: <단계> (s)`.
+- 개발 빌드는 프로파일러 연결(PlayerConnection)을 네트워크에서 기다려서, **새 exe 경로마다 Windows 방화벽이 한 번 허용을 묻는다**. 허용하든 취소하든 실행에는
+  상관없다(창이 떠 있어도 플레이어는 돈다). 빌드 경로가 프로젝트마다 고정이라 프로젝트당 한 번이다.
+- 플레이어 창이 몇 초 동안 포커스를 가져간다. 기존 프로젝트의 플레이어는 에디터와 다른 PlayerPrefs(`HKCU\Software\<회사>\<제품>`)를 쓴다.
+- **찾아 주는 것의 예**: Fluid-Sim은 입자 색 그라디언트 텍스처를 에디터 전용 `OnValidate`에서만 만들어서 빌드한 플레이어의 입자가 회색이었다 — 에디터 루프는
+  녹색인데 `player.ps1`은 `vsEditor` 14% 변경 + 2색이라 `blank`(`stage=shots`), 실제 화면도 캡처와 같게 회색.
+- 출시 빌드와는 별개다: 하네스 런타임은 개발 빌드(`DEVELOPMENT_BUILD`)라 들어가고, 출시 빌드에는 여전히 없다(매트릭스 10).
 
 ## 병렬 에이전트: worktree + submit + land (남의 컴파일 에러에 막히지 않기)
 
@@ -722,6 +789,9 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   다른 worktree의 새 모듈·계약은 락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부) ·
   8 land(fast-forward + 그 사이 submit 락 대기, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
   병합 직후 kill → `recoveredLand`). 에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
+  1번 끝에는 플레이어 실행(W8): `player.ps1`이 기본 시나리오 + 게임 카메라 캡처를 개발 빌드 플레이어에서 돌린다 — 녹색, 1280x720 창·vSync 0, 에디터와 같은
+  `play.events`, 플레이어의 프레임·렌더 통계, 샷이 에디터 것과 파티클 차이 안(바뀐 픽셀 ≤ 1%, 평균 ≤ 2), 그 프레임의 화면 = 캡처(`screen.vsShot` same),
+  빌드 뒤 작업 트리 그대로(첫 빌드는 셰이더 컴파일로 ~2분).
 - 주입 위치는 샘플 모듈의 표식 줄: `SmokeModule.cs`의 `m_Time += dt;`(컴파일, 64행)·`EventBus.Publish(new SpinnerLap(laps));`(런타임, 71행),
   `SmokeIridescent.shader`의 `Frag` 첫 줄(87행). 핫 루프는 `Tick`의 `Mathf.Sin(m_Time * 1.6f) * 0.3f`(흔들림 폭)와 `float m_Time;`(필드 추가).
   이 줄들을 바꾸면 `selftest.ps1`의 표식도 바꾼다.
@@ -738,13 +808,13 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-09-30 W7, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W6c에서 스모크 씬에 GPU 베이크 지형·소품이 더해져 새 값):
+- 검증한 버전(2026-09-30 W8, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W6c에서 스모크 씬에 GPU 베이크 지형·소품이 더해져 새 값):
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
-  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `c8561a2d…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크·`-automated`·창 없는 전용 에디터 포함), 샷 67.8/60.8/48.5(6.3과 같음) |
-  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `345ba0d7…` | 64 / 71 / 87 | 1–9 녹색(같음), 커밋된 기준 이미지와 같음 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `7cda8899…` | 64 / 71 / 87 | 1–9 녹색(같음), 샷 67.9/60.8/48.5(W4 전에는 첫 플레이 뒤 검었다 — ROADMAP P-4) |
+  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `c8561a2d…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크·`-automated`·창 없는 전용 에디터 포함), 샷 72.6/61.3/48.2(6.3과 같음). 플레이어 단계는 건너뜀 — 6.3이 저장한 URP 전역 설정(에셋 버전 10)을 URP 17.0(8)이 빌드에 거부 |
+  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `345ba0d7…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 실행 포함), 커밋된 기준 이미지와 같음 |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `7cda8899…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 414 fps), 샷 72.6/61.3/48.3. `render.batches`는 null(6.6엔 그 카운터가 없다, 아래 "함정") |
 
   `-automated`·`-debugCodeOptimization`·`-batchmode -ignoreCompilerErrors`와 창 없는 에디터의 렌더(O-11 우회 포함)는 세 버전에서 같게 동작했다.
 
@@ -961,6 +1031,36 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - compile-check는 에디터가 마지막으로 쓴 응답 파일(`.rsp`)의 참조를 쓴다 → asmdef에 **참조를 새로 더하면** 에디터가 한 번 컴파일할 때까지 그 참조의 타입이
   CS0103으로 나온다(루프로 컴파일하면 사라짐). msbuild 백엔드는 Unity가 만든 `.csproj`를 쓰므로 그 뒤에도 `tools/uc.ps1 harness_sync_csproj`로 다시 만들어야 한다
   (안 하면 CS0234).
+- **URP는 `targetTexture`가 있는 카메라를 그 텍스처의 형식으로 렌더한다**(`UniversalRenderPipelineCore.CreateRenderTextureDescriptor`: "External texture replaces
+  internal (intermediate) color buffer"). 캡처가 8비트 sRGB RT에 렌더 요청을 보내던 동안 HDR 파이프라인의 이미션·가산 파티클이 톤 매핑·블룸 전에 1로 잘려
+  매듭의 흰·청록 테두리가 분홍으로, 불씨가 어둡게 찍혔다(실제 화면과 같은 프레임 비교에서 바뀐 픽셀 0.99%). 에디터 캡처끼리는 매번 같아서 기준 이미지로는 안
+  보였다 → 캡처는 그 카메라의 HDR 형식 RT에 그린 뒤 8비트 sRGB로 `Blit`해 읽는다(같은 프레임 비교 0.06% → 워터마크만, 기준 이미지 갱신).
+- Unity는 `Library/` 안으로 플레이어를 빌드하지 않는다(`Invalid build path ... internal work directory`) → `HarnessOut/player-build/`.
+- **URP는 대상 텍스처가 있는 카메라의 MSAA를 그 텍스처의 `antiAliasing`으로 정한다**(`InitializeStackedCameraData`) → 1샘플 캡처 RT는 MSAA를 껐다.
+- **Unity의 증분 플레이어 빌드가 앞선 빌드의 플레이어 데이터를 다시 썼다**: 출시 빌드(하네스 없음) 뒤 같은 프로젝트의 개발 빌드에서 "player data was not rebuilt"와
+  함께 `ScriptingAssemblies.json`이 출시 빌드 목록 그대로 → `Harness.Runtime.dll`은 Managed에 있는데 로드되지 않아 `RuntimeInitializeOnLoadMethod`가 불리지 않았다
+  (`RuntimeInitializeOnLoads.json`에는 있음). `CleanBuildCache`면 맞게 나온다(Fluid-Sim 9.6 s). 개발 → 출시 순서는 괜찮았다.
+- PowerShell 5.1의 `Get-Content` 줄(문자열)에는 `PSPath`·`PSDrive`·`PSProvider` 속성이 붙어 있어 `ConvertTo-Json -Depth 20`이 그 객체 그래프를 펼치며 몇 분씩
+  CPU를 썼다(보고서의 `logTail`) → 로그 꼬리는 `Read-HarnessLogTail`(순수 문자열).
+- **에디터 플레이 모드와 플레이어는 첫 프레임들이 다르다**: 에디터는 게임을 한 프레임 돌린 뒤(`EnteredPlayMode`) 러너를 띄우고 처음 두 프레임이 0.02 s(=
+  `Time.fixedDeltaTime`)였고, 플레이어는 첫 프레임만 0.02 s다. 그대로 두면 플레이어의 캡처가 한 프레임 어긋났다(매듭이 프레임당 회전만큼) → `PlayerRun`이 첫 프레임
+  끝에 러너를 띄우고 둘째 프레임을 0.02 s로, 러너는 고정 간격을 Start가 아니라 첫 Update에서 켠다(에디터에서는 같은 프레임이라 동작이 같다). 그리고 플레이어는
+  **첫 씬을 불러오며 파티클을 한 번(0.02 s) 진행해 둔다**(AfterSceneLoad에 이미 `time=0.02`, 에디터는 0; 로드 시점의 `Time.deltaTime`이라 `timeScale`·되감기로도
+  안 됨 — `Simulate(0, restart)`는 프리웜을 다시 돌려 더 달라졌다) → 플레이어와 에디터의 샷은 파티클 둘레만 다르다.
+- LateUpdate에서 읽은 전역 `_Time`은 이전 프레임 값이지만 URP 렌더 요청은 카메라마다 현재 시간을 넣는다(캡처 전에 `_Time`을 바꿔도 결과가 같았다).
+- 개발 빌드는 화면 오른쪽 아래에 "Development Build"를 그리고(back buffer에 들어간다) 에러가 나면 개발자 콘솔을 띄운다 → 화면 비교에서 그 자리를 빼고
+  (`compare.screenIgnore`), 플레이어 실행은 `Debug.developerConsoleEnabled = false`.
+- 개발 빌드 플레이어의 스택은 `(at C:/<프로젝트>/Assets/X.cs:78)`처럼 **절대 경로**이고, 코드가 최적화돼 줄이 어긋날 수 있다(Script Debugging 빌드면 정확).
+  `HarnessLogParse`는 절대 경로 프레임도 프로젝트 경로로 바꿔 모듈을 찾는다.
+- 플레이어 빌드 동안 Input System이 설정 에셋을 Preloaded Assets에 넣었다가 빌드 뒤 메모리에서만 뺀다 → 디스크의 `ProjectSettings.asset`은 에디터가 저장할 때까지
+  바뀐 채다. `AssetDatabase.SaveAssetIfDirty(PlayerSettings)`·`SaveToSerializedFileAndForget`은 프로젝트 설정 파일을 다시 쓰지 않았고 `SaveAssets()`는 썼다.
+  URP도 첫 빌드에 전역 설정의 런타임 목록과 기본 Volume 프로필(새 필드, 스크립트가 없는 컴포넌트 제거)을, PlayerSettings에 Standalone 배칭 항목을 쓴다.
+- PowerShell의 `[math]::Min(1, 170 / 1280)`은 첫 인자의 정수 오버로드를 골라 0이다 → 실수로 `[math]::Min(1.0, ...)`.
+- **Unity 6.6에는 Render 분류의 `Batches Count`·`Draw Calls Count`가 없다**(종류별 `Standard`/`SRP Batcher`/`BRG`/… `Draw Calls Count`로 나뉨). 그 이름의
+  `ProfilerRecorder.StartNew(ProfilerCategory.Render, …)`는 분류와 상관없이 **UI Toolkit의 같은 이름 카운터**에 붙어 0을 읽었다(W7까지 6.6 루프의 `render.batches` 0) →
+  Render 분류에서 이름으로 찾고, 없으면 draw call은 종류별 합, batches는 null.
+- 더 새 Unity가 저장한 URP 에셋(전역 설정 `m_AssetVersion`, 파이프라인 `k_AssetVersion`)은 오래된 URP가 내려 쓰지 않고, 플레이어 빌드 전 검사
+  (`URPBuildDataValidator`: "is not at last version")가 빌드를 거부한다. 실패한 빌드는 전처리기가 만든 파일(`Assets/Resources/PerformanceTestRun*.json`)을 남겼다.
 
 - `Mathf.SmoothStep(from, to, t)`는 GLSL `smoothstep`이 **아니다**(값 보간). `PMath.Smoothstep(e0, e1, x)`를 써라. 지형이 전부 눈으로 나온 원인.
 - `UnityEngine.Object`에 `?.` 금지(에디터의 fake null). `TryGetComponent`를 쓴다.
@@ -975,7 +1075,8 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   `new LightingDataAsset(scene)` + `SetAmbientProbe` + `Lightmapping.SetLightingDataAssetForScene`으로 베이크 없이 넣을 수 있다 → `ctx.SkyAmbient`.
   `SphericalHarmonicsL2.Evaluate`의 기저는 정규화 상수 없는 {1, y, z, x, xy, yz, 3z²−1, xz, x²−y²}이고 균일 radiance c → 계수0 = c(Flat 앰비언트 c)다.
 - 캡처 카메라는 메인 카메라 설정(후처리 포함)을 복사해 오프스크린 렌더한다. 메인 카메라가 없으면 캡처 실패.
-- 에디터 플레이 모드 FPS는 에디터 오버헤드·autotick 영향을 받는다. 절대값이 아니라 **변경 전후 비교**용이다(`editorFocused` 확인).
+- 에디터 플레이 모드 FPS는 에디터 오버헤드·autotick 영향을 받는다. 절대값이 아니라 **변경 전후 비교**용이다(`editorFocused` 확인). 실제 성능은
+  `tools/player.ps1`(개발 빌드 플레이어, 샘플은 에디터의 ~3.8배).
 - Code Optimization은 Debug(정확한 예외 줄 번호). Release면 throw 위치가 메서드 끝 줄로 보고되고, **절차적 메시·텍스처의 float 결과가 달라져
   build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `345ba0d7…`).
   `CompilationPipeline.codeOptimization`은 에디터 세션 동안만 유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다

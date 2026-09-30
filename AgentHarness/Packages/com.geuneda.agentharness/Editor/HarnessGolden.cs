@@ -128,6 +128,52 @@ namespace Harness.Editor
             };
         }
 
+        [Serializable]
+        sealed class PairIn
+        {
+            public string name;
+            public string path;
+            public string against;
+            public string diff;      // file name of the diff image in <out>/
+            public ShotRect[] ignore = Array.Empty<ShotRect>();
+        }
+
+        [Serializable]
+        sealed class PairList
+        {
+            public PairIn[] items = Array.Empty<PairIn>();
+        }
+
+        [CliCommand("harness_compare",
+            "Compare pairs of images with the golden-image rules (G3-4): per pair status same|changed|size|error, meanDiff, changedRatio, " +
+            "ssim, maxDiff, rect and a diff image <out>/<diff> when it changed. tools/player.ps1 compares a Player run's shots with the " +
+            "Editor's and with the Player's screen (W8).",
+            MainThreadRequired = true, Tags = new[] { "harness", "capture" })]
+        public static object ComparePairs(
+            [CliArg("pairs", "JSON array of {name, path, against, diff, ignore:[{x,y,w,h}]} (paths absolute or from the project root).")] string pairs,
+            [CliArg("out", "Folder for the diff images.")] string @out = "HarnessOut/compare",
+            [CliArg("same_mean", "Largest mean difference (0..255) of a 'same' pair (default the golden rule's 0.5; two renders with URP dithering differ by ~0.5).")] float sameMean = SameMean)
+        {
+            PairIn[] items;
+            try { items = JsonUtility.FromJson<PairList>("{\"items\":" + (string.IsNullOrWhiteSpace(pairs) ? "[]" : pairs) + "}").items ?? Array.Empty<PairIn>(); }
+            catch (Exception e) { return new { ok = false, error = "pairs: invalid JSON: " + e.Message }; }
+            var outDir = HarnessPaths.Resolve(@out);
+            var results = new List<Result>();
+            foreach (var p in items)
+            {
+                var r = new Result { name = p.name, path = p.path, golden = p.against };
+                results.Add(r);
+                try
+                {
+                    var diffName = string.IsNullOrWhiteSpace(p.diff) ? Path.GetFileNameWithoutExtension(p.path ?? "shot") + ".diff.png" : p.diff;
+                    Compare(HarnessPaths.Resolve(p.path), HarnessPaths.Resolve(p.against), p.ignore ?? Array.Empty<ShotRect>(), HarnessPaths.Combine(outDir, diffName), r, sameMean);
+                }
+                catch (Exception e) { r.status = "error"; r.error = e.GetType().Name + ": " + e.Message; }
+            }
+            int Count(string status) => results.FindAll(r => r.status == status).Count;
+            return new { ok = true, same = Count("same"), changed = Count("changed") + Count("size"), errors = Count("error"), sameMean, sameRatio = SameRatio, results };
+        }
+
         static string Sanitize(string s)
         {
             foreach (var ch in Path.GetInvalidFileNameChars()) s = s.Replace(ch, '_');
@@ -189,7 +235,7 @@ namespace Harness.Editor
         }
 
         /// <summary>Fill <paramref name="r"/> with how <paramref name="shot"/> differs from <paramref name="golden"/>; writes the diff image when it changed.</summary>
-        public static void Compare(string shot, string golden, ShotRect[] ignore, string diffPath, Result r)
+        public static void Compare(string shot, string golden, ShotRect[] ignore, string diffPath, Result r, float sameMean = SameMean)
         {
             var a = Load(shot, out var w, out var h);
             var b = Load(golden, out var gw, out var gh);
@@ -236,7 +282,7 @@ namespace Harness.Editor
             r.maxDiff = max;
             r.changedRatio = compared == 0 ? 0f : (float)Math.Round((double)changed / compared, 6);
             r.ssim = (float)Math.Round(Ssim(a, b, skip, w, h), 5);
-            r.status = r.changedRatio <= SameRatio && r.meanDiff <= SameMean ? "same" : "changed";
+            r.status = r.changedRatio <= SameRatio && r.meanDiff <= sameMean ? "same" : "changed";
             if (changed > 0) r.rect = new[] { minX, minY, maxX - minX + 1, maxY - minY + 1 };
             if (r.status == "same") return;
             WriteDiff(a, diff, skip, w, h, r.rect, diffPath);

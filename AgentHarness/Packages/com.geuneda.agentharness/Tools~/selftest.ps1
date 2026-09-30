@@ -31,7 +31,11 @@
     fading in and out the same pixel for pixel in two runs (USS transitions follow the frames, G3-10); GPU bakes (G4-1):
     texel rows, the HLSL noise equal to Harness.Procedural.Noise, skipped when the inputs are the same, the fingerprint key;
     the procedural library (G4-4): SDF meshes closed and on the surface, faces outward, spline ends and arc-length steps,
-    Poisson disk distance and determinism; the built props, the rune decal and its renderer feature, terrain detail maps
+    Poisson disk distance and determinism; the built props, the rune decal and its renderer feature, terrain detail maps;
+    a Player run (W8): tools/player.ps1 builds the development Player and plays the default scenario plus a capture from the
+    game's camera in it - green, windowed at 1280x720 and unpaced, the Editor's play.events, frame and render stats, its shots
+    the Editor's but for the first scene's particles, the screen of that frame the same as the capture (G3-8), the working
+    tree as it was
   2 C# compile error in Smoke -> stage=compile at the injected file/line, module Smoke; reverted -> green
   3 runtime exception in Smoke -> stage=runtime at the injected line; reverted -> green. Hot loop (G2-1): an edit of the
     [CodeReload] Tick body -> loop.ps1 -Hot reloads it (no compile, build or domain reload), same events, golden changed;
@@ -114,7 +118,7 @@ $HotFieldAdded = 'float m_Time; float m_SelftestField;'   # outside the method b
 
 $report = [ordered]@{ ok = $false; stage = ''; project = $root.Replace('\', '/'); projectVersion = (Get-HarnessProjectVersion); unityVersion = $null
     items = @(); fingerprint = $null; events = $null; lines = [ordered]@{}; shots = @() }
-$state = @{ item = $null; itemClock = $null; saved = [ordered]@{}; tools = New-Object System.Collections.ArrayList; wt = $null; own = $null }
+$state = @{ item = $null; itemClock = $null; saved = [ordered]@{}; tools = New-Object System.Collections.ArrayList; wt = $null; own = $null; versionRewrites = @() }
 
 # ---- results ------------------------------------------------------------------------------------------------------
 function Start-Item([int]$N, [string]$Name) {
@@ -364,6 +368,24 @@ namespace Game.Smoke
 '@
 
 # Item 1's scenario-tools loop (written to HarnessOut, which git ignores).
+# Player run (W8): the default scenario plus a capture from the game's own camera, which gets a screen twin (G3-8).
+$PlayerScenarioText = @'
+{
+    "name": "selftest-player",
+    "durationSec": 3.0,
+    "fixedDeltaTime": 0.0166667,
+    "warmupSec": 0.25,
+    "readyTimeoutSec": 10,
+    "events": [ { "t": 1.0, "type": "keyTap", "key": "Space", "hold": 0.1 } ],
+    "captures": [
+        { "t": 0.5, "preset": "auto" },
+        { "t": 1.5, "preset": "auto" },
+        { "t": 2.5, "preset": "auto" },
+        { "t": 2.8, "preset": "main", "name": "game" }
+    ]
+}
+'@
+
 $ScenarioToolsText = @'
 {
     "name": "selftest-scenario-tools",
@@ -1433,6 +1455,36 @@ function Invoke-Item1 {
 
     $state.item['uiKit'] = [ordered]@{ clocks = $clocks; bound = $(if ($kd) { "laps=$($kd.lapsText) spin=$($kd.dirText) gauge=$($kd.gauge)" }); scope = $kb.play.uiClock.scope; shots = @($kb.shots) }
 
+    # Player run (W8: G3-2, G3-8): the scenario in a development build, windowed at the capture size, next to the Editor's play.
+    $playerScenario = (Join-Path $outAbs 'player.json').Replace('\', '/')
+    Write-TextFile $playerScenario $PlayerScenarioText
+    $status = Get-EditorStatus
+    $pr = Invoke-Tool $root 'player.ps1' '1-player' @('-Scenario', $playerScenario)
+    # An older Unity than the one that saved the project (fresh-clone-test -UnityVersion 6.0 on the 6.3 sample): URP will not build a
+    # Player from its assets of the newer URP (never downgraded) - player.ps1 says so before building. Not the harness: skipped.
+    $pv = [regex]::Match((Invoke-HarnessGit $root @('show', 'HEAD:./ProjectSettings/ProjectVersion.txt')).out, 'm_EditorVersion:\s*(\d+)\.(\d+)\.(\d+)')
+    $ev = [regex]::Match("$($runs[0].unityVersion)", '^(\d+)\.(\d+)\.(\d+)')
+    $older = $pv.Success -and $ev.Success -and ((([int]$ev.Groups[1].Value) * 1000 + [int]$ev.Groups[2].Value) -lt (([int]$pv.Groups[1].Value) * 1000 + [int]$pv.Groups[2].Value))
+    if ($pr.stage -eq 'playerBuild' -and @($pr.urpStale).Count -gt 0 -and $older) {
+        Test-Check "player: skipped - this Unity ($($runs[0].unityVersion)) is older than the project's ($($pv.Value -replace 'm_EditorVersion:\s*', '')): URP will not build from its newer URP assets, said before building" (-not $pr.player -and (Get-EditorStatus) -eq $status) "$($pr.error)"
+        $state.item['player'] = [ordered]@{ skipped = 'URP assets of a newer Unity (a downgrade)'; urpStale = @($pr.urpStale) }
+    } else {
+        Test-Check 'player: built, played the scenario and quit (development build, the window at the capture size, frames unpaced)' ([bool]$pr.ok -and [bool]$pr.player.development -and (@($pr.player.screen) -join 'x') -eq '1280x720' -and [int]$pr.player.vSyncCount -eq 0 -and "$($pr.player.exitCode)" -eq '0') "$(Get-Summary $pr) screen=$(@($pr.player.screen) -join 'x') vsync=$($pr.player.vSyncCount) exit=$($pr.player.exitCode) build=$($pr.player.build.result)"
+        Test-Check 'player: the same play.events as the Editor (the same frames)' ([bool]$pr.eventsMatch -and (Get-Events $pr) -eq $evs[0]) "$(Get-Events $pr) match=$($pr.eventsMatch)"
+        Test-Check 'player: frame times and render counts of the Player; UI Toolkit on the frame clock' ([int]$pr.fps.samples -gt 0 -and [double]$pr.fps.avg -gt 0 -and [double]$pr.render.setPassCalls -gt 0 -and [double]$pr.render.drawCalls -gt 0 -and $pr.play.uiClock.mode -eq 'frames') "fps=$($pr.fps.avg) samples=$($pr.fps.samples) setPass=$($pr.render.setPassCalls) draws=$($pr.render.drawCalls) batches=$($pr.render.batches) uiClock=$($pr.play.uiClock.mode)"
+        $ve = $pr.compare.vsEditor
+        Test-Check 'player: its shots are the Editor''s but for the first scene''s particles (one step ahead: changed pixels <= 1%, mean <= 2)' ([int]$ve.same + [int]$ve.changed -eq 4 -and [double]$ve.maxChangedRatio -le 0.01 -and [double]$ve.maxMeanDiff -le 2 -and -not $pr.compare.error) "same=$($ve.same) changed=$($ve.changed) maxRatio=$($ve.maxChangedRatio) maxMean=$($ve.maxMeanDiff) $($pr.compare.error)"
+        $g = @($pr.shotStats | Where-Object { $_.name -eq 'game' })[0]
+        Test-Check 'player: the screen in the frame of the "main" capture is that capture (G3-8), bar the Development Build mark' ($g -and $g.screen -and $g.screen.vsShot.status -eq 'same' -and (@($g.screen.width, $g.screen.height) -join 'x') -eq '1280x720') "$(if ($g -and $g.screen) { "$($g.screen.width)x$($g.screen.height) $($g.screen.vsShot | ConvertTo-Json -Compress)" } else { 'no screen' })"
+        # Another Unity version than the project's saves its own serialization of the project settings with the build (6.6: new
+        # fields, serializedVersion 30): reported, not the harness's. The project's version must leave the tree as it was.
+        $sameVersion = $pv.Success -and "$($runs[0].unityVersion)" -eq ($pv.Value -replace 'm_EditorVersion:\s*', '')
+        if (-not $sameVersion) { $state.versionRewrites = @($pr.player.buildRewrote | Where-Object { $_ }) }   # left out of the final git status check
+        Test-Check "player: the build left the working tree as it was$(if (-not $sameVersion) { ' (another Unity version: only reported)' })" ((-not $sameVersion) -or (-not $pr.player.buildRewrote -and (Get-EditorStatus) -eq $status)) "rewrote=[$(@($pr.player.buildRewrote) -join ',')]"
+        $state.item['player'] = [ordered]@{ fps = $pr.fps.avg; editorFps = $pr.editor.fps.avg; fpsVsEditor = $pr.fpsVsEditor; p95ms = $pr.fps.p95ms; buildSec = $pr.player.build.sec
+            playerSec = $pr.timings.playerSec; startupSec = $pr.player.startupSec; vsEditor = "$($ve.maxChangedRatio)/$($ve.maxMeanDiff)"; screen = $(if ($g -and $g.screen) { $g.screen.vsShot.meanDiff }) }
+    }
+
     $cc = Invoke-HarnessProcess $ps @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'tools/compile-check.ps1'), '-IncludeHarness') -Environment $childEnv -TimeoutSec 300
     $j = $null; try { $j = $cc.out | ConvertFrom-Json } catch { }
     Test-Check 'compile-check -IncludeHarness (csc) green' ($j -and $j.ok) $(if ($j) { @($j.compileErrors | ForEach-Object { "$($_.assembly): $($_.msg)" }) -join ' | ' } else { "$($cc.err) $($cc.out)" })
@@ -1937,6 +1989,14 @@ if ($report.stage -ne 'editor' -and @($report.items).Count -gt 0) {
     $r = Invoke-Loop 'final'
     $status = Get-EditorStatus
     $report['final'] = [ordered]@{ ok = [bool]$r.ok; stage = $r.stage; error = $r.error; gitStatus = $status }
+    # Another Unity version's Player build saved that version's serialization of these project settings (item 1): reported only.
+    $vr = @($state.versionRewrites)
+    if ($vr.Count) {
+        $report.final['versionRewrites'] = $vr
+        $drop = { param($s) (@("$s" -split '; ' | Where-Object { $_ -and $vr -notcontains $_.Substring([math]::Min(3, $_.Length)) }) -join '; ') }
+        $status = & $drop $status
+        $report.gitStatusBefore = & $drop $report.gitStatusBefore
+    }
     if ($status -ne $report.gitStatusBefore) { $report.final.ok = $false; $report.final['error'] = "git status changed: before '$($report.gitStatusBefore)', after '$status'" }
 }
 $red = @($report.items | Where-Object { -not $_.ok })

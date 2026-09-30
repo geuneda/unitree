@@ -138,6 +138,16 @@ namespace Harness
             }
         }
 
+        /// <summary>
+        /// A Player run (tools/player.ps1) has no project folder: it is handed the project's config file and reads the named
+        /// shots and the capture size from it. The Editor always reads the project's own file (this is replaced on its next change).
+        /// </summary>
+        public static void UseFile(string path)
+        {
+            var c = Load(path);
+            lock (s_Lock) { s_Current = c; s_Stamp = DateTime.MaxValue; }
+        }
+
         public static HarnessConfig Load(string path)
         {
             var c = new HarnessConfig();

@@ -26,7 +26,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $pkgName = 'com.geuneda.agentharness'
 $templates = Join-Path $PSScriptRoot 'templates'
-$entryNames = @('open.ps1', 'quit.ps1', 'loop.ps1', 'uc.ps1', 'submit.ps1', 'land.ps1', 'compile-check.ps1', 'uninstall.ps1')
+$entryNames = @('open.ps1', 'quit.ps1', 'loop.ps1', 'uc.ps1', 'submit.ps1', 'land.ps1', 'compile-check.ps1', 'player.ps1', 'uninstall.ps1')
 $utf8 = New-Object Text.UTF8Encoding($false)
 $result = [ordered]@{ ok = $false; whatIf = [bool]$WhatIf; project = $null; removed = @(); modified = @(); kept = @(); warnings = @(); removedDependencies = @() }
 
