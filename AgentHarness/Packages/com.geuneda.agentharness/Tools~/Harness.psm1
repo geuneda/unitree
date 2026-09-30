@@ -58,6 +58,7 @@ function Set-HarnessEditorRoot([string]$Root) {
     $script:SubmitDir = Join-Path $Root 'Library/Harness/submit'
     $script:JournalPath = Join-Path $script:SubmitDir 'pending.json'
     $script:OwnersPath = Join-Path $script:SubmitDir 'owners.json'
+    $script:ContractOwnersPath = Join-Path $script:SubmitDir 'contracts.json'
     $script:LandDir = Join-Path $Root 'Library/Harness/land'
     $script:LandJournalPath = Join-Path $script:LandDir 'pending.json'
     $script:RepoRoot = $null
@@ -402,7 +403,7 @@ $script:LastRecovery = $null
 $script:LastLandRecovery = $null
 $script:ReadOnlyCommands = @('harness_ping', 'harness_console', 'harness_play_status', 'harness_stats', 'harness_lint', 'harness_shaders',
     'recompile_status', 'editor_status', 'console', 'console_status', 'get_scene_hierarchy', 'find_gameobjects',
-    'list_open_scenes', 'get_component_properties', 'package_list', 'test_status', 'build_status', 'harness_player_plan')
+    'list_open_scenes', 'get_component_properties', 'package_list', 'test_status', 'build_status', 'harness_player_plan', 'harness_contracts')
 
 function Test-HarnessReadOnly([string]$Command) { $script:ReadOnlyCommands -contains $Command }
 
@@ -654,6 +655,99 @@ function Get-HarnessModuleChanges([string]$Module) {
     if (-not $folder) { return @() }
     $r = Invoke-HarnessGit $script:ProjectRoot @('status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames', '--', $folder, "$folder.meta") -Check
     @(Split-HarnessZ $r.out | ForEach-Object { $_.Substring(3) })
+}
+
+# ---- Contracts: the event types modules share (G5-4) ------------------------------------------------------------
+# Parallel agents meet in the contracts folder, so submit.ps1 and land.ps1 check it before anything is copied or merged:
+# a landed type never changes (new types are added: add-only per type, not per file), no type name is declared twice
+# (play.events counts events by type name), and a contracts file submitted from a worktree and not landed yet is that
+# worktree's until it lands (Library/Harness/submit/contracts.json, released by land.ps1). harness_lint checks that each
+# module's events live in its own <Module>Events.cs. ($script:ContractOwnersPath: Set-HarnessEditorRoot.)
+
+# project-relative path -> @{ workRoot; branch; runId; at }
+function Get-HarnessContractOwners {
+    $h = @{}
+    if (Test-Path -LiteralPath $script:ContractOwnersPath) {
+        try { $o = [IO.File]::ReadAllText($script:ContractOwnersPath) | ConvertFrom-Json; foreach ($p in $o.PSObject.Properties) { $h[$p.Name] = $p.Value } } catch { }
+    }
+    $h
+}
+
+function Save-HarnessContractOwners([hashtable]$Owners) {
+    $o = [ordered]@{}
+    foreach ($k in @($Owners.Keys | Sort-Object)) { $o[$k] = $Owners[$k] }
+    [void][IO.Directory]::CreateDirectory($script:SubmitDir)
+    $tmp = "$script:ContractOwnersPath.tmp"
+    [IO.File]::WriteAllText($tmp, ($o | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $tmp -Destination $script:ContractOwnersPath -Force
+}
+
+# Files under <RelDir> in commit <Rev> of the checkout <Dir>, relative to <Dir> -> blob id (none: an empty table).
+function Get-HarnessTreeFiles([string]$Dir, [string]$Rev, [string]$RelDir) {
+    $h = @{}
+    $r = Invoke-HarnessGit $Dir @('ls-tree', '-r', '-z', $Rev, '--', $RelDir)
+    if ($r.code -ne 0) { return $h }
+    foreach ($e in @(Split-HarnessZ $r.out)) { $t = $e.IndexOf("`t"); $h[$e.Substring($t + 1)] = $e.Substring(0, $t).Split(' ')[2] }
+    $h
+}
+
+function Get-HarnessBlobText([string]$Dir, [string]$Id) { (Invoke-HarnessGit $Dir @('cat-file', 'blob', $Id) -Check).out }
+
+# Top-level types that C# sources declare, read by the Editor with Roslyn (harness_contracts; nothing is compiled).
+# Sources: hashtables @{ id; path } (absolute, or from the Editor project) or @{ id; text }. Returns id -> @(types {name, ns, full,
+# kind, line, hash}).
+function Get-HarnessDeclaredTypes([object[]]$Sources) {
+    $h = @{}
+    if (@($Sources).Count -eq 0) { return $h }
+    $json = ConvertTo-Json -InputObject @($Sources | ForEach-Object { [ordered]@{ id = "$($_['id'])"; path = "$($_['path'])"; text = "$($_['text'])" } }) -Depth 3 -Compress
+    $r = Invoke-UnityCommand -Name 'harness_contracts' -Params @{ sources = $json } -TimeoutSec 60
+    if (-not $r.success) { throw "harness_contracts failed: $($r.error)" }
+    foreach ($s in @($r.result.sources)) {
+        if ($s.error) { throw "harness_contracts: $($s.id): $($s.error)" }
+        $h["$($s.id)"] = @($s.types | Where-Object { $_ })
+    }
+    $h
+}
+
+# Add-only and unique names for a planned state of the contracts folder, from the sources:
+#   Landed: path -> text of the landed version of each .cs the plan changes (if it has one)
+#   After:  path -> @{ path } (a file) or @{ text } of each .cs the plan writes, $null for one it deletes
+#   Rest:   path -> @{ path } or @{ text } of the other .cs files there will be
+# changed: a landed type the plan removes or changes. conflicts: a type the plan adds whose name is declared elsewhere too.
+function Test-HarnessContracts {
+    param([hashtable]$Landed = @{}, [hashtable]$After = @{}, [hashtable]$Rest = @{})
+    $src = @()
+    foreach ($p in $Landed.Keys) { $src += @{ id = "L|$p"; text = $Landed[$p] } }
+    foreach ($p in $After.Keys) { if ($null -ne $After[$p]) { $src += @{ id = "A|$p"; path = $After[$p]['path']; text = $After[$p]['text'] } } }
+    foreach ($p in $Rest.Keys) { $src += @{ id = "R|$p"; path = $Rest[$p]['path']; text = $Rest[$p]['text'] } }
+    $types = Get-HarnessDeclaredTypes $src
+    $of = { param($id) if ($types.ContainsKey($id)) { @($types[$id]) } else { @() } }
+    $changed = @(); $entries = @()
+    foreach ($p in @($After.Keys | Sort-Object)) {
+        $a = & $of "A|$p"
+        $l = & $of "L|$p"
+        foreach ($t in $l) {
+            $n = @($a | Where-Object { $_.full -ceq $t.full })
+            if ($n.Count -eq 0) { $changed += [ordered]@{ path = $p; type = $t.full; change = 'removed'; line = $t.line } }
+            elseif ($n[0].hash -ne $t.hash) { $changed += [ordered]@{ path = $p; type = $t.full; change = 'changed'; line = $n[0].line } }
+        }
+        foreach ($t in $a) { $entries += [pscustomobject]@{ path = $p; t = $t; new = @($l | Where-Object { $_.full -ceq $t.full }).Count -eq 0 } }
+    }
+    foreach ($p in @($Rest.Keys | Sort-Object)) { foreach ($t in (& $of "R|$p")) { $entries += [pscustomobject]@{ path = $p; t = $t; new = $false } } }
+    $conflicts = @()
+    foreach ($g in @($entries | Group-Object -CaseSensitive { $_.t.name } | Where-Object { $_.Count -gt 1 })) {
+        foreach ($e in @($g.Group | Where-Object { $_.new })) {
+            $o = @($g.Group | Where-Object { -not [object]::ReferenceEquals($_, $e) })[0]
+            $conflicts += [ordered]@{ type = $e.t.name; full = $e.t.full; path = $e.path; line = $e.t.line; other = $o.path; otherLine = $o.t.line; otherFull = $o.t.full }
+        }
+    }
+    [pscustomobject]@{ changed = @($changed); conflicts = @($conflicts) }
+}
+
+# One line per finding of Test-HarnessContracts, for a refusal.
+function Format-HarnessContractChanges($Changed) { (@($Changed | ForEach-Object { "$($_.type) ($($_.change), $($_.path):$($_.line))" }) -join '; ') }
+function Format-HarnessContractConflicts($Conflicts) {
+    (@($Conflicts | ForEach-Object { "$($_.full) ($($_.path):$($_.line)) - $($_.type) is declared in $($_.other):$($_.otherLine)$(if ($_['otherOwner']) { " ($($_['otherOwner']))" })" }) -join '; ')
 }
 
 # ---- Land transactions (tools/land.ps1, G5-5) -----------------------------------------------------------------
@@ -1277,4 +1371,5 @@ Export-ModuleMember -Function Get-HarnessProjectRoot, Get-HarnessWorkRoot, Test-
     Undo-HarnessSubmit, Invoke-HarnessLoop, Save-HarnessReport, Invoke-HarnessGit, Split-HarnessZ, Get-HarnessGitStatus,
     Test-HarnessSamePath, Get-HarnessRepoRoot, Write-HarnessPathspec, Get-HarnessContentIds, Get-HarnessOwners, Save-HarnessOwners,
     Get-HarnessModuleChanges, Save-HarnessLandJournal, Complete-HarnessLand, Get-HarnessLandStashRef, Find-HarnessLandStash,
-    Undo-HarnessLand
+    Undo-HarnessLand, Get-HarnessContractOwners, Save-HarnessContractOwners, Get-HarnessTreeFiles, Get-HarnessBlobText,
+    Get-HarnessDeclaredTypes, Test-HarnessContracts, Format-HarnessContractChanges, Format-HarnessContractConflicts

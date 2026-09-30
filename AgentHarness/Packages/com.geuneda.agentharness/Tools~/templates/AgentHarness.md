@@ -138,7 +138,11 @@ powershell -ExecutionPolicy Bypass -File tools/player.ps1 [-Scenario tools/scena
 3. 에디터 조작은 `tools/*.ps1`로만(프로젝트별 락). `unity command`로 직접 play/build를 부르지 않는다.
 4. 여러 에이전트가 동시에 일하면 `ProjectSettings/AgentHarness.json`의 `modules`에 모듈 폴더를 등록하고, 각자 git worktree에서
    `tools/submit.ps1 -Module <이름>` → 커밋 → `tools/land.ps1`. 에러의 `module`도 이 등록으로 채워진다. asmdef 없는 폴더도 된다
-   (submit의 사전 컴파일 검사가 그 폴더가 들어가는 `Assembly-CSharp`을 검사한다).
+   (submit의 사전 컴파일 검사가 그 폴더가 들어가는 `Assembly-CSharp`을 검사하고, 바뀐 어셈블리를 참조하는 다른 어셈블리도 함께 검사한다 —
+   다른 모듈을 깨뜨리는 변경은 에디터 트리에 들어가기 전에 거부된다).
+   `contracts` 폴더(모듈 간 공유 이벤트)를 쓰면: 모듈마다 `<모듈>Events.cs` 하나에 그 모듈이 발행하는 이벤트만, 올라간(land된) 타입은 바꾸지 않고
+   새 타입만 더한다, 이름은 한 번만. submit·land가 어기는 변경을 거부하고(`submit.contractChanged`/`contractConflicts`/`contractOwner`),
+   아직 land하지 않은 계약 파일은 올린 worktree만 고칠 수 있다.
    루프를 서로 기다리지 않으려면 worktree에서 `tools/open.ps1 -Own`: 그 worktree에 에디터 트리 `Library/`의 사본을 두고 창 없는 에디터를 따로 띄운다
    → 그 worktree의 `loop.ps1`·`uc.ps1`·`quit.ps1`은 그 에디터를 쓰고 동시에 돈다(submit·land는 여전히 에디터 트리로). 비용: 에디터 하나당 메모리
    ~2 GB, `Library/` 크기만큼 디스크, 처음 열 때 스크립트 전체 재컴파일. 끝나면 그 worktree에서 `quit.ps1` 뒤 worktree를 지운다.
@@ -153,7 +157,7 @@ powershell -ExecutionPolicy Bypass -File tools/player.ps1 [-Scenario tools/scena
   "playScene": "first",                    // "first" | "build" | "Assets/…/X.unity"
   "modules": [ { "name": "Gameplay", "path": "Assets/Scripts/Gameplay" } ],   // 폴더 하나 = 모듈 하나
   "moduleRoots": [],                       // 하위 폴더마다 모듈(Assets/Game/<Module>/ 규약, asmdef·EventBus 규칙 적용)
-  "contracts": "",                         // 모듈 간 공유 이벤트 폴더(추가만)
+  "contracts": "",                         // 모듈 간 공유 이벤트 폴더(<모듈>Events.cs, 타입 단위 추가만, 이름 한 번 — submit/land/lint가 검사)
   "shots": [ { "name": "overview", "scene": "Level1", "pos": [0, 20, -20], "lookAt": [0, 0, 0], "fov": 50 } ],   // 이름 있는 캡처 포즈
   "knownErrors": [ "^\\[Analytics\\] init failed" ],   // 이 프로젝트가 원래 내는 에러(정규식): knownErrors로 보고, 루프를 막지 않음
   "captureSize": [ 720, 1560 ],            // 크기를 주지 않은 캡처의 크기(없으면 세로 게임 720x1280, 그 외 1280x720)

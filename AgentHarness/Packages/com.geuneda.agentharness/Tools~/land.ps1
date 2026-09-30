@@ -9,15 +9,17 @@
   2. Editor lock. Refused (stage=land) before anything is touched when the Editor tree is detached, mid-merge or has
      staged changes; when the merge would conflict (git merge-tree, in the object store only); when files or folders
      the branch adds under Assets/ have no committed .meta (a fresh clone would give them new GUIDs); when a module
-     it touches has un-landed changes submitted from another live worktree (-Takeover overrides); or when it would
-     replace any other uncommitted change that differs from what lands (land.foreign; e.g. an edit made directly in
-     the Editor tree). So the only uncommitted files a land replaces are identical ones and this branch's own
-     (superseded) submits.
+     it touches has un-landed changes submitted from another live worktree (-Takeover overrides); when it changes the
+     contracts folder badly (G5-4): a contracts file another live worktree submitted and has not landed (land.contractOwner),
+     a landed type changed or removed (land.contractChanged: add-only per type), a type name the contracts already declare,
+     un-landed submits included (land.contractConflicts); or when it would replace any other uncommitted change that
+     differs from what lands (land.foreign; e.g. an edit made directly in the Editor tree). So the only uncommitted files
+     a land replaces are identical ones and this branch's own (superseded) submits.
   3. Journal (Library/Harness/land/pending.json), then 'git stash' exactly the uncommitted paths the merge touches,
      plus leftovers in the modules it touches (files submitted earlier and deleted since), moved out of the stash list
      shared by all worktrees to refs/agentharness/land/<runId>. Then 'git merge'.
   4. The normal loop on the Editor tree. Green -> keep the merge, drop the stash, release the branch's module
-     ownership. Red -> undo: 'reset --keep' to the pre-land commit (only the merged paths; other uncommitted work
+     and contracts-file ownership. Red -> undo: 'reset --keep' to the pre-land commit (only the merged paths; other uncommitted work
      stays), re-apply the stash, recompile. -KeepOnFail keeps non-compile failures. If land dies half-way, the next
      lock holder (loop/uc/submit/land) undoes it from the journal (report: recoveredLand).
 
@@ -57,6 +59,9 @@ $land = [ordered]@{ runId = $runId; branch = $Branch; branchSha = $null; into = 
     head = [ordered]@{ before = $null; after = $null }; merged = $false; fastForward = $false; kept = $false; reverted = $false
     modules = @(); files = @() }
 $script:Journal = $null
+# Contracts paths (repo-relative) whose uncommitted Editor-tree copies are this branch's submits (or taken over): replaceable.
+$script:ContractsMine = New-Object 'System.Collections.Generic.HashSet[string]'
+$script:ContractTakeovers = @()   # project-relative
 
 function New-FailReport([string]$stage, [string]$message) {
     [ordered]@{ ok = $false; stage = $stage; compileErrors = @(); runtimeErrors = @(); fps = $null; shots = @(); durationSec = 0
@@ -153,9 +158,20 @@ function Clear-BranchOwners([string[]]$TakenOver = @()) {
         $released += $m
     }
     if ($released.Count -gt 0) { Save-HarnessOwners $owners }
+    # The same for its contracts files (G5-4): released once the Editor tree's copy is the committed one.
+    $co = Get-HarnessContractOwners
+    $cReleased = @()
+    $status = $null
+    foreach ($k in @($co.Keys | Where-Object { (Test-OwnedHere $co[$_]) -or $script:ContractTakeovers -contains $_ } | Sort-Object)) {
+        if ($null -eq $status) { $status = Get-HarnessGitStatus $repo }
+        if ($status.ContainsKey("$prefix$k")) { $pending += $k; continue }
+        $co.Remove($k)
+        $cReleased += $k
+    }
+    if ($cReleased.Count -gt 0) { Save-HarnessContractOwners $co; $land['releasedContracts'] = $cReleased }
     if ($pending.Count -gt 0) {
         $land['stillPending'] = $pending
-        $land['warning'] = "the Editor tree still has uncommitted changes from this branch's submits that are not in the branch (modules: $($pending -join ', ')). Commit and land them, or submit the module again to sync it."
+        $land['warning'] = "the Editor tree still has uncommitted changes from this branch's submits that are not in the branch (modules / contracts files: $($pending -join ', ')). Commit and land them, or submit again to sync them."
     }
     $released
 }
@@ -251,6 +267,56 @@ function Invoke-Land {
     $status = Get-HarnessGitStatus $repo
     $pathSet = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($p in $paths) { [void]$pathSet.Add($p) }
+
+    # The contracts files the merge changes (G5-4): not over another live worktree's un-landed submit of one, no landed type
+    # changed (add-only per type), and no type name twice with the contracts the Editor tree will have (un-landed ones included).
+    if ($cfg.contracts) {
+        $cPaths = @($paths | Where-Object { $_.StartsWith("$prefix$($cfg.contracts)/") } | Sort-Object)
+        $cOwners = Get-HarnessContractOwners
+        foreach ($cp in $cPaths) {
+            $o = $cOwners[$cp.Substring($prefix.Length)]
+            if (-not $o -or -not $status.ContainsKey($cp)) { continue }
+            if (Test-OwnedHere $o) { [void]$script:ContractsMine.Add($cp); continue }
+            if (-not (Test-Path -LiteralPath $o.workRoot)) { continue }
+            $info = [ordered]@{ path = $cp.Substring($prefix.Length); workRoot = $o.workRoot; branch = $o.branch; at = $o.at }
+            if (-not $Takeover) {
+                $land['contractOwner'] = $info
+                return New-FailReport 'land' "$($info.path) has un-landed changes submitted from another worktree: $($o.workRoot) (branch $($o.branch), $($o.at)); landing $Branch would replace them. Land that branch first, or pass -Takeover if that work is abandoned."
+            }
+            $script:ContractTakeovers += $info.path
+            [void]$script:ContractsMine.Add($cp)
+        }
+        $csPaths = @($cPaths | Where-Object { $_.EndsWith('.cs') })
+        if ($csPaths.Count -gt 0) {
+            $L = @{}; $A = @{}; $R = @{}
+            foreach ($cp in $csPaths) {
+                $rel = $cp.Substring($prefix.Length)
+                if ($baseIds.ContainsKey($cp)) { $L[$rel] = Get-HarnessBlobText $repo $baseIds[$cp] }
+                $A[$rel] = if ($mergedIds.ContainsKey($cp)) { @{ text = (Get-HarnessBlobText $repo $mergedIds[$cp]) } } else { $null }
+            }
+            # The other .cs files there after the land: the Editor tree's as they are (submitted, un-landed ones included).
+            $cDir = Join-Path $root $cfg.contracts
+            if (Test-Path -LiteralPath $cDir) {
+                foreach ($f in @(Get-ChildItem -LiteralPath $cDir -Recurse -File -Filter '*.cs')) {
+                    $rel = $f.FullName.Substring($root.Length + 1).Replace('\', '/')
+                    if (-not $A.ContainsKey($rel)) { $R[$rel] = @{ path = $rel } }
+                }
+            }
+            $check = Test-HarnessContracts -Landed $L -After $A -Rest $R
+            if ($check.changed.Count -gt 0) {
+                $land['contractChanged'] = $check.changed
+                return New-FailReport 'land' "$Branch changes landed contracts types: $(Format-HarnessContractChanges $check.changed). The contracts are add-only: a type that landed never changes (other modules use it); add a new type instead."
+            }
+            if ($check.conflicts.Count -gt 0) {
+                foreach ($c in $check.conflicts) {
+                    $o = $cOwners[$c.other]
+                    $c['otherOwner'] = if ($status.ContainsKey("$prefix$($c.other)") -and $o) { "submitted from $($o.workRoot), not landed" } elseif ($status.ContainsKey("$prefix$($c.other)")) { 'uncommitted in the Editor tree' } else { 'landed' }
+                }
+                $land['contractConflicts'] = $check.conflicts
+                return New-FailReport 'land' "$Branch declares contracts type names that are already declared: $(Format-HarnessContractConflicts $check.conflicts). play.events counts events by type name: rename one (in the worktree: commit, submit.ps1, land again)."
+            }
+        }
+    }
     $stashPaths = @($status.Keys | Where-Object {
             $p = $_
             if ($pathSet.Contains($p)) { return $true }
@@ -263,7 +329,7 @@ function Invoke-Land {
     $foreign = @($stashPaths | Where-Object {
             $p = $_
             $landed = if ($pathSet.Contains($p)) { $mergedIds[$p] } else { $baseIds[$p] }
-            $before[$p] -ne $landed -and -not @($mine | Where-Object { Test-InModule $p $_ }).Count
+            $before[$p] -ne $landed -and -not @($mine | Where-Object { Test-InModule $p $_ }).Count -and -not $script:ContractsMine.Contains($p)
         })
     if ($foreign.Count -gt 0) {
         $land['foreign'] = $foreign
@@ -320,7 +386,7 @@ function Invoke-Land {
         # that differs now changed during the land (e.g. rewritten on import): keep the stash for a human then.
         $after = Get-HarnessContentIds $repo $stashPaths
         $differs = @($stashPaths | Where-Object { $after[$_] -ne $before[$_] })
-        $unexpected = @($differs | Where-Object { $p = $_; -not @($mine | Where-Object { Test-InModule $p $_ }).Count })
+        $unexpected = @($differs | Where-Object { $p = $_; -not @($mine | Where-Object { Test-InModule $p $_ }).Count -and -not $script:ContractsMine.Contains($p) })
         $land.stash.differs = $differs
         if ($land.stash.sha) {
             if ($unexpected.Count -eq 0) {

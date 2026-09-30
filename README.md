@@ -27,7 +27,7 @@ URP 후처리 + 회전 오브젝트 + 코드로 만든 파티클·애니메이�
 | 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 메서드 본문만 고쳤으면 컴파일 없이 바꿔 넣는 핫 루프(`loop.ps1 -Hot`), 모달 대화상자에 멈추지 않는 `-automated` 에디터와 창 없는 에디터(`open.ps1 -Headless`, 한 바퀴 ~2.4 s) |
 | 3. 눈으로 검증 | 캡처 PNG(화면의 카메라 스택·미니맵 + 스크린 공간 UI, 파이프라인의 HDR 그대로) + 이미지 통계, 연속 캡처 시트, 기준 이미지와의 diff 점수·바뀐 곳 PNG(시나리오 동안 UI Toolkit transition도 프레임 시계라 UI가 움직이는 중에도 픽셀까지 같음), 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로. 같은 시나리오를 개발 빌드 플레이어에서 돌려(`player.ps1`) 에디터 없는 프레임 시간과 게임이 그린 실제 화면을 에디터 샷과 비교 |
 | 4. 에셋 없이 완성도 | 절차적 메시(SDF → 서피스 네트, 스플라인 튜브, 바위)·포아송 스캐터·노이즈, GPU 텍스처 베이크(`ctx.BakeTexture`: HLSL이 C# 노이즈와 같은 무늬, 입력이 같으면 건너뜀), URP 데칼·디테일 맵, 코드로 만든 URP 후처리, 라이팅 베이크 없는 스카이 반사·앰비언트, 키워드를 알아서 맞추는 `LitMaterial`, 설정 한 벌로 만드는 결정적 파티클(`ctx.Particles`), 키를 코드로 쓰는 애니메이션 클립을 Playables로 재생(`ctx.AnimationClip` + `ClipPlayer`, 틀린 경로·속성은 빌드 경고) |
-| 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 worktree + 트랜잭션 submit / land, worktree마다 따로 도는 창 없는 에디터(`open.ps1 -Own`, 루프가 서로 기다리지 않음) |
+| 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 worktree + 트랜잭션 submit / land, worktree마다 따로 도는 창 없는 에디터(`open.ps1 -Own`, 루프가 서로 기다리지 않음), 기계가 지키는 공유 이벤트 폴더(모듈별 파일·같은 이름 금지·올라간 타입 불변 — 어기면 submit/land가 복사·병합 전에 거부) |
 
 ## 루프 한 방
 
@@ -184,7 +184,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1               # 끝낼 �
 들어가는데, `open.ps1`과 루프가 그 에러(file·line)를 로그에서 읽어 보고합니다(창 없는 에디터는 마지막으로 성공한 어셈블리로 떠서 루프가 에러를 보고).
 
 위 과정 전체(클론 → 열기 → 설정 → 루프 3회 → 종료 → 삭제)를 `tools/fresh-clone-test.ps1` 하나로 검증할 수 있습니다(이 머신에서 ~110 s).
-하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·동시 루프·worktree 전용 에디터·worktree submit/land)는 `tools/selftest.ps1`이 한 번에 돌리고(~7.5분),
+하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·동시 루프·worktree 전용 에디터·worktree submit/land·계약 규칙)는 `tools/selftest.ps1`이 한 번에 돌리고(~9분),
 `fresh-clone-test.ps1 -UnityVersion <버전> -SelfTest`는 그것을 다른 Unity 버전의 새 클론에서 돌립니다.
 
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)
@@ -225,8 +225,8 @@ powershell -ExecutionPolicy Bypass -File tools/land.ps1                       # 
 
 | 단계 | 어디서 | 하는 일 | 실패하면 |
 |---|---|---|---|
-| ① 사전 검사 | worktree, 락 없음 | worktree 소스를 에디터가 쓰는 컴파일러 설정(`Library/Bee/*.rsp`)과 DLL로 컴파일한다. 참조하는 `Game.Contracts`도 같이 컴파일해 연결하고, 에디터가 아직 모르는 새 모듈은 응답 파일을 합성한다 | `stage=compile`, 에디터 트리는 손대지 않음 (~1 s) |
-| ② 동기화 | 에디터 락 안 | 덮어쓰거나 지울 파일을 백업하고 저널(`Library/Harness/submit/pending.json`)을 쓴 뒤, `Assets/Game/<Module>/`를 그대로 미러링한다. `Contracts/`는 **새 파일만** 추가 | 기존 계약 파일을 바꿨으면 `stage=submit`으로 거부 |
+| ① 사전 검사 | worktree, 락 없음 | worktree 소스를 에디터가 쓰는 컴파일러 설정(`Library/Bee/*.rsp`)과 DLL로 컴파일한다. 참조하는 `Game.Contracts`도 같이 컴파일해 연결하고, 계약이 바뀌었으면 그 계약을 쓰는 다른 모듈도 컴파일한다(새 이벤트 이름이 남의 코드를 모호하게 만드는 것까지). 에디터가 아직 모르는 새 모듈은 응답 파일을 합성한다 | `stage=compile`, 에디터 트리는 손대지 않음 (~1–1.4 s) |
+| ② 동기화 | 에디터 락 안 | 계약 검사 뒤 덮어쓰거나 지울 파일을 백업하고 저널(`Library/Harness/submit/pending.json`)을 쓴 뒤, `Assets/Game/<Module>/`를 그대로 미러링하고 `Contracts/`는 이 worktree가 바꾼 파일만 넣는다 | 올라간 계약 타입을 바꿈 / 이미 있는 이벤트 이름 / 다른 worktree가 올리고 아직 병합 안 한 계약 파일 → `stage=submit`으로 거부 (~1 s) |
 | ③ 루프 | 에디터 트리 | `loop.ps1`과 같은 루프 (컴파일 → 씬 빌드 → 플레이 → 콘솔·통계) | — |
 | ④ 판정 | 에디터 락 안 | 녹색이면 유지하고, Unity가 새로 만든 `.meta`를 worktree로 되복사한다(GUID를 커밋하도록) | 백업을 복원하고 다시 컴파일 → 에디터 트리는 submit 전 상태 |
 
@@ -241,6 +241,9 @@ powershell -ExecutionPolicy Bypass -File tools/land.ps1                       # 
 - **한 모듈 = 한 에이전트**: submit은 모듈별로 마지막에 반영한 worktree를 기록합니다(`Library/Harness/submit/owners.json`).
   다른 살아 있는 worktree가 올린, 아직 병합되지 않은 변경이 에디터 트리에 있는 모듈은 `stage=submit`으로 거부합니다(`-Takeover`로 인수).
   에디터 트리 브랜치에 그 모듈을 건드린 커밋이 있는데 worktree에 없으면(미러링하면 병합된 작업을 되돌리게 되므로) `git merge master`를 먼저 하라고 거부합니다.
+- **공유 이벤트(`Contracts/`)**: 모듈마다 `<모듈>Events.cs` 하나에 그 모듈이 발행하는 이벤트만 둡니다(lint가 모듈 코드의 `EventBus.Publish` 호출과 대조).
+  이벤트 이름은 계약 전체에서 한 번(`play.events`가 이름으로 셈), 병합된 타입은 바꾸지 않고 새 타입을 덧붙입니다(주석·줄바꿈은 바뀐 것으로 치지 않음).
+  submit한 계약 파일은 병합될 때까지 그 worktree 것이라, 올린 에이전트는 다시 고칠 수 있고 다른 에이전트는 거부됩니다(`contracts.json`).
 
 ### 병합 (land)
 
@@ -250,7 +253,7 @@ submit한 파일은 에디터 트리에 미커밋 사본으로 남아 있어서,
 | 단계 | 하는 일 | 실패하면 |
 |---|---|---|
 | ① 사전 검사 (락 없음) | 브랜치를 체크아웃한 worktree에 미커밋 파일이 없는지(커밋된 것만 병합되므로) | `stage=land`, 아무것도 건드리지 않음 |
-| ② 사전 검사 (락 안) | `git merge-tree`로 객체 저장소 안에서만 병합해 충돌 확인. 브랜치가 `Assets/`에 추가하는 파일·폴더의 `.meta`가 커밋돼 있는지. 건드리는 모듈에 다른 worktree의 미병합 submit이 없는지(`-Takeover`). 병합이 덮어쓸 미커밋 변경이 이 브랜치의 submit 사본(또는 같은 내용)뿐인지 | `stage=land` + `land.conflicts` / `missingMeta` / `owner` / `foreign`, 아무것도 건드리지 않음 (~1–2 s) |
+| ② 사전 검사 (락 안) | `git merge-tree`로 객체 저장소 안에서만 병합해 충돌 확인. 브랜치가 `Assets/`에 추가하는 파일·폴더의 `.meta`가 커밋돼 있는지. 건드리는 모듈·계약 파일에 다른 worktree의 미병합 submit이 없는지(`-Takeover`). 병합 결과가 병합된 계약 타입을 바꾸거나 이미 있는(미병합 포함) 이벤트 이름을 선언하지 않는지. 병합이 덮어쓸 미커밋 변경이 이 브랜치의 submit 사본(또는 같은 내용)뿐인지 | `stage=land` + `land.conflicts` / `missingMeta` / `owner` / `contractChanged` / `contractConflicts` / `foreign`, 아무것도 건드리지 않음 (~1–2 s) |
 | ③ 병합 | 저널(`Library/Harness/land/pending.json`)을 쓰고, 병합이 건드리는 경로의 미커밋 사본만 `git stash`(모든 worktree가 공유하는 stash 목록에서 바로 빼서 전용 ref에 보관) → `git merge` | 저널로 되돌림 |
 | ④ 루프 + 판정 | 에디터 트리에서 평소 루프. 녹색이면 병합 유지, stash 버림, 모듈 소유 해제 | `git reset --keep`으로 병합 전 커밋으로(병합한 경로만; 다른 미커밋 작업은 그대로) → stash 복원 → 재컴파일 |
 
@@ -269,6 +272,11 @@ submit한 파일은 에디터 트리에 미커밋 사본으로 남아 있어서,
 | 컴파일 에러가 있는 커밋을 land | `stage=compile`(정확한 줄) → 병합 되돌림. HEAD·`git status`·다른 에이전트의 미병합 모듈 모두 그대로 |
 | 병합 직후(루프 중) land 프로세스를 kill | 다음 `loop.ps1`이 `recoveredLand`로 되돌리고 녹색, HEAD·`git status` 그대로 |
 | 충돌 / `.meta` 미커밋 / worktree에 미커밋 파일 / 남의 미병합 submit / 에디터 트리 직접 수정 | 각각 0.8–2 s 만에 `stage=land`로 거부, 아무것도 건드리지 않음 |
+| 두 worktree가 같은 이벤트 이름을 추가(B가 submit한 뒤 A가 submit, 또는 B가 병합한 뒤 A가 land) | 두 번째가 복사·병합 전에 거부(submit 2.2 s, land 1.5 s), 상대 파일·줄과 병합 여부를 보고 |
+| 병합된 이벤트 타입의 필드를 바꿈 / 남이 올린 미병합 계약 파일을 덮어씀 | submit·land 모두 `stage=submit`/`land`로 거부, 에디터 트리 무변경 |
+| 계약에 `Light`를 추가(다른 모듈이 `UnityEngine.Light`를 씀) | 사전 검사가 그 모듈(Stage)까지 컴파일해 CS0104로 거부(1.3 s). 예전에는 녹색으로 통과해 에디터 트리 루프에서 남의 모듈 에러로 되돌려졌다 |
+| 기존 프로젝트(BagelGame)에서 Game 모듈의 공개 속성 이름을 바꿈 | 사전 검사가 그 속성을 쓰는 UI 모듈까지 컴파일해 `BagelTrackerDriver.cs:22` CS1061로 거부(0.7 s; 예전 검사는 녹색) |
+| 자기 모듈 파일에 새 이벤트를 덧붙여 submit → 커밋 → land | 녹색(병합 커밋), 계약 파일 소유 해제, 에디터 트리 깨끗 |
 
 ### 루프를 나란히: worktree 전용 에디터 (`open.ps1 -Own`)
 
@@ -291,7 +299,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1         # worktree를 �
 ### 한계
 
 - worktree 전용 에디터는 worktree마다 하나라 에이전트 수만큼 메모리·디스크가 듭니다(에디터 몇 개를 나눠 쓰는 풀은 없음).
-- `Contracts/`는 여전히 "추가만" 규칙으로 버팁니다(G5-4).
+- 계약 규칙의 "발행 모듈"은 모듈 루트(`Assets/Game/<Module>`)의 asmdef 모듈만 봅니다(기존 프로젝트의 `modules[]` 폴더가 발행하는 이벤트는 파일 규칙에서 빠짐).
 - land는 git 병합이라 브랜치의 중간 커밋(깨진 커밋 포함)도 이력에 그대로 들어갑니다. 최종 결과만 루프로 검증합니다.
 
 ## 구조
@@ -304,7 +312,7 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
     Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioInput · ScenarioRunner · PlayerRun ·
                                            HarnessCapture(+CaptureCameras · CaptureUi · ContactSheet) · ClipPlayer(Playables 클립 재생) · PanelClock · UI/ ·
                                            Procedural/(MeshBuilder · Noise · Sdf · Spline · Scatter · TextureBaker)
-    Editor/                                harness_* 에디터 커맨드(핫 루프 harness_hot, 플레이어 빌드 계획·이미지 비교 포함), 에디터 모드(창 없는 에디터의 유휴 CPU 억제),
+    Editor/                                harness_* 에디터 커맨드(핫 루프 harness_hot, 플레이어 빌드 계획·이미지 비교, 계약 검사 harness_contracts 포함), lint, 에디터 모드(창 없는 에디터의 유휴 CPU 억제),
                                            BuildContext(머티리얼·파티클·애니메이션·GPU 베이크·데칼 헬퍼) / IBuildStep,
                                            SettingsContext / ISettingsStep, 출시 빌드 필터
     UI/ · Shaders/                         UI 킷 테마(HarnessKit.uss) · GPU 베이크 include(HarnessBake.hlsl, HarnessNoise.hlsl)
@@ -321,7 +329,7 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
 `AgentHarness/CLAUDE.md`에 루프 사용법, report.json 해석, 규칙(YAML 직접 수정 금지, 텍스트 우선 형태, 모듈 폴더 밖 수정 금지,
 에디터 조작은 순서대로), 모듈·빌더 템플릿(`[CodeReload] Tick` 포함 — 본문만 고치면 `loop.ps1 -Hot`), 머티리얼·파티클·애니메이션·UI 킷·GPU 베이크·절차적 메시 헬퍼, 개발 빌드 플레이어 실행(`player.ps1` — 실제 성능·실제 화면), 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
 병렬 에이전트는 위의 worktree + `submit.ps1` + `land.ps1` 흐름을 쓰고(G5-2, G5-5), 루프를 나란히 돌리려면 worktree마다 `open.ps1 -Own`(G5-1)입니다.
-남은 병렬 과제는 `Contracts` 공유 지점(G5-4)입니다.
+모듈 사이의 공유 이벤트는 모듈별 `<모듈>Events.cs`에 덧붙이기만 합니다(G5-4 — 이름·타입·소유를 submit/land가 지킴).
 
 ## 라이선스
 

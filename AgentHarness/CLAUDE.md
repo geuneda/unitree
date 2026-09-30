@@ -16,7 +16,7 @@ Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **
 | 2 | 수정→새로고침이 초 단위 | 컴파일 + 도메인 리로드, GUI 에디터와 모달 대화상자 | Domain Reload 끔, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 본문만 바꾸면 컴파일 없이 적용하는 핫 루프(`loop.ps1 -Hot`), 대화상자에 멈추지 않는 `-automated` 에디터·창 없는 에디터(`open.ps1 -Headless`) |
 | 3 | 스크린샷·콘솔·FPS를 눈/기계로 확인 | 에이전트가 화면을 못 봄 | `harness_capture/play`가 PNG + 이미지 통계, `harness_console/stats`가 JSON, 같은 시나리오를 개발 빌드 플레이어에서(`player.ps1`: 에디터 없는 프레임 시간, 게임이 그린 실제 화면과 캡처·에디터 샷의 비교) |
 | 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/SDF/스플라인/스캐터), GPU 텍스처 베이크(`ctx.BakeTexture`, C#과 같은 HLSL 노이즈), URP Volume·데칼을 코드로, 파티클·키프레임 애니메이션을 코드로(`ctx.Particles`, `ctx.AnimationClip` + Playables `ClipPlayer`) |
-| 5 | 레지스트리 구조라 병렬 작업이 쉬움 | 에디터 하나를 공유 | `GameRoot.Register` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 git worktree + `submit.ps1`/`land.ps1` 트랜잭션, worktree마다 따로 도는 에디터(`open.ps1 -Own`) |
+| 5 | 레지스트리 구조라 병렬 작업이 쉬움 | 에디터 하나를 공유 | `GameRoot.Register` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 git worktree + `submit.ps1`/`land.ps1` 트랜잭션, worktree마다 따로 도는 에디터(`open.ps1 -Own`), 기계가 지키는 계약 폴더(발행 모듈별 파일·이름 한 번·타입 단위 추가만) |
 
 모든 설계 결정의 기준: **"Three.js 환경의 어떤 성질을 복원하는가"**. URP·물리·엔진 기능을 쓰니 결과는 그 이상을 노린다.
 
@@ -114,10 +114,14 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
   "golden": {"root","key","version","from","dir","same","changed","missing","updated":[],"hint","error"},   // 기준 이미지(G3-4), 실패 아님
   "lint": [{"rule","module","file","message"}], "warningCount": 0,
   "submit": {"phase","synced","kept","reverted","written","deleted","contractsAdded","metaWrittenBack",   // submit.ps1만.
-             "errorModules","restore","check","owner","takeover"},   // timings에 checkSec/syncSec/restoreSec 추가
+             "errorModules","restore","check","owner","takeover",   // timings에 checkSec/syncSec/restoreSec 추가
+             "contractsUpdated","contractsDeleted","contractsBehind",   // 계약 폴더(아래 "계약 폴더"): 바꾼 것·지운 것·이 worktree가 안 바꿔 건너뛴 것
+             "contractChanged":[{"path","type","change","line"}],"contractConflicts":[{"type","full","path","line","other","otherLine","otherOwner"}],
+             "contractOwner","contractTakeover"},   // 계약 거부 사유(stage=submit)
   "land": {"branch","into","phase","head":{"before","after"},"merged","fastForward","kept","reverted",  // land.ps1만.
-           "modules","files","stash":{"sha","paths","dropped"},"releasedOwners","errorModules","undo","restore",
-           "conflicts","missingMeta","owner","foreign","uncommitted","note","warning"},   // 거부 사유는 해당 필드에. timings에 checkSec/mergeSec/restoreSec
+           "modules","files","stash":{"sha","paths","dropped"},"releasedOwners","releasedContracts","errorModules","undo","restore",
+           "conflicts","missingMeta","owner","foreign","uncommitted","contractOwner","contractChanged","contractConflicts",
+           "note","warning","stillPending"},   // 거부 사유는 해당 필드에. timings에 checkSec/mergeSec/restoreSec
   "recoveredSubmit": {"runId","workRoot","modules","files"},     // 도중에 죽은 submit을 이번 실행이 되돌렸을 때만
   "recoveredLand": {"runId","branch","steps"}                    // 도중에 죽은 land를 이번 실행이 되돌렸을 때만
 }
@@ -139,7 +143,8 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
    머티리얼·파티클·Volume·라이팅·PanelSettings = 빌더 코드(`BuildContext`)로 생성. 애니메이션은 `ctx.AnimationClip`(키를 코드로) + `ctx.Animate`
    (Playables — AnimatorController 에셋 없음, 아래 "파티클·애니메이션"). 그 밖의 GUI 에셋(Timeline 등)이 필요하면 코드로 생성한다.
 3. **자기 모듈 폴더 밖 수정 금지.** 작업 범위는 `Assets/Game/<Module>/` 하나. 모듈 간 공유 이벤트 타입만
-   `Assets/Game/Contracts/`에 **추가**(기존 타입 수정 금지). 하네스 패키지(`Packages/com.geuneda.agentharness/`)와 `tools/`는 하네스 작업일 때만 고친다.
+   `Assets/Game/Contracts/<Module>Events.cs`(자기 모듈이 발행하는 이벤트)에 **추가**한다 — 올라간(land된) 타입은 바꾸지 않고, 이름은 계약 전체에서 한 번
+   (아래 "계약 폴더"; lint·submit·land가 검사). 하네스 패키지(`Packages/com.geuneda.agentharness/`)와 `tools/`는 하네스 작업일 때만 고친다.
 4. **에디터 하나에 대한 조작은 한 번에 하나씩.** `tools/loop.ps1`과 `tools/uc.ps1`은 프로젝트별 시스템 뮤텍스를 잡으므로
    같은 에디터를 쓰는 에이전트는 자동으로 줄을 선다(`timings.lockWaitSec`). recompile/build/play/capture를 `unity command`로 직접 호출해
    락을 우회하지 말 것. **병렬 에이전트는 각자 git worktree에서 코드를 쓰고 `tools/submit.ps1 -Module <M>`으로 에디터에 넣고,
@@ -165,7 +170,7 @@ Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json:
   Runtime/Procedural/          MeshBuilder(+Sdf: FromSdf, +Spline: Tube, +Scatter: Rock·Icosphere), Noise(Perlin/fBm/Ridged/Worley/Rng), Sdf, Spline,
                                Scatter(Poisson), TextureBaker, PMath, AmbientProbe(큐브맵 → 앰비언트 SH)
   Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교, HarnessHot: 핫 루프, HarnessPlayer: 플레이어 빌드 계획, HarnessHeadless: 에디터 모드·창 없는
-                               에디터의 유휴 CPU 억제) 와 BuildContext(+.Materials: LitMaterial,
+                               에디터의 유휴 CPU 억제, HarnessContracts: 계약 폴더의 lint 규칙과 소스 선언 읽기) 와 BuildContext(+.Materials: LitMaterial,
                                +.Particles: Particles·ParticleMaterial, +.Animation: AnimationClip·Animate, +.Bake: BakeTexture·FloatTexture,
                                +.Decals: Decal·DecalMaterial)/IBuildStep,
                                SettingsContext/ISettingsStep(렌더 설정), HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
@@ -173,7 +178,7 @@ Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json:
   Shaders/                     HarnessBake.hlsl (GPU 베이크 셰이더의 정점·도우미) + HarnessNoise.hlsl (C# Noise와 같은 HLSL 노이즈)
   Tools~/                      도구 본체(.ps1, Harness.psm1) + templates/ (진입점, 기본 시나리오, 기존 프로젝트용 안내서, HarnessInput.cs)
 ProjectSettings/AgentHarness.json   하네스 설정: setup 모드, 모듈 루트/폴더, contracts, 생성물 경로, 빌드·플레이 씬
-Assets/Game/Contracts/         모듈 간 이벤트 타입 (Game.Contracts, 추가만)
+Assets/Game/Contracts/         모듈 간 이벤트 타입 (Game.Contracts): <Module>Events.cs, 타입 단위 추가만, 이름 한 번 ("계약 폴더")
 Assets/Game/<Module>/          런타임 코드 (Game.<Module>.asmdef) + Shaders/*.shader + UI/*.uxml|uss
 Assets/Game/<Module>/Builders/ IBuildStep·ISettingsStep 구현 (Game.<Module>.Builders.asmdef, Editor 전용)
 Assets/Generated/, Assets/Scenes/Main.unity   빌드 산출물 (gitignore, 직접 수정 금지). RP·Renderer 에셋도 여기(경로에서 만든 고정 GUID)
@@ -228,7 +233,7 @@ public sealed class FooModule : IGameModule
 }
 ```
 모든 모듈 Init이 끝나면 `HarnessProbe.Ready = true` — 시나리오 시계는 이때 0이다. 모듈끼리는 **EventBus로만** 통신한다
-(`EventBus.Publish(new X(...))`, 공유 이벤트 struct는 `Assets/Game/Contracts/`).
+(`EventBus.Publish(new X(...))`, 공유 이벤트 struct는 `Assets/Game/Contracts/<Name>Events.cs` — 아래 "계약 폴더").
 
 빌드 스텝:
 ```csharp
@@ -261,6 +266,22 @@ public sealed class FooBuildStep : IBuildStep
   설정에서 만든다 — 이미션은 GI 플래그(인스펙터의 Emission 체크)로 켜지므로 `EnableKeyword("_EMISSION")`은 검증이 되돌린다.
   다른 셰이더는 `ctx.Material(name, shader, m => …)`: 셰이더에 없는 프로퍼티(오타, 다른 파이프라인 이름), URP가 읽지 않는 옛 이름
   (`_MainTex`·`_Color`·`_Glossiness`), 검증이 덮어쓴 값, 이미션 색만 넣고 꺼진 이미션은 `build.warnings`에 나온다.
+
+### 계약 폴더 (Assets/Game/Contracts, G5-4)
+
+모듈이 병렬 에이전트끼리 만나는 유일한 곳이라 규칙을 기계가 지킨다:
+- **발행 모듈별 파일**: 모듈 M이 발행하는 이벤트는 `Contracts/MEvents.cs`에(샘플 `SmokeEvents.cs`). 한 이벤트는 한 모듈만 발행한다. `harness_lint`의
+  `contract-file`이 모듈 코드의 IL에서 `EventBus.Publish<T>`를 찾아 대조하고, 모듈 이름이 아닌 파일 이름도 잡는다. 한 모듈 = 한 에이전트라 두 에이전트가 한 파일을 고칠 일이 없다.
+- **이름은 한 번**: `play.events`가 타입 이름으로 세므로 계약 전체에서 같은 이름(네임스페이스가 달라도)은 `contract-name`. submit·land는 복사·병합 전에
+  거부한다(`contractConflicts` — 다른 worktree가 올리고 아직 land하지 않은 것 포함).
+- **타입 단위 추가만**: land된 타입은 바뀌지 않는다(주석·줄바꿈은 바뀐 것이 아님). 새 이벤트는 자기 파일에 덧붙인다. submit·land가 거부(`contractChanged`).
+- **미병합 계약은 올린 worktree 것**: submit이 쓴 계약 파일은 land될 때까지 그 worktree 소유(`Library/Harness/submit/contracts.json`) — 그 worktree는 다시 고치거나
+  지울 수 있고, 다른 worktree는 거부된다(`contractOwner`, 버려진 작업이면 `-Takeover`). land가 해제한다. 이 worktree가 바꾸지 않은 계약 파일(다른 모듈이 그새 덧붙여
+  뒤처졌을 뿐)은 건너뛴다(`contractsBehind`).
+- 계약에 다른 모듈이 쓰는 타입과 같은 이름(`Light`, `ClipEvent`)을 더하면 그 모듈이 CS0104로 깨진다 → submit의 사전 컴파일 검사가 계약을 쓰는 모듈도 컴파일해 잡는다
+  (`compile-check -Dependents`).
+- 소스가 선언하는 타입은 `tools/uc.ps1 harness_contracts '{"sources":"[{\"id\":\"a\",\"path\":\"Assets/Game/Contracts/SmokeEvents.cs\"}]"}'`(Roslyn, 컴파일 없음; `hash`가
+  같으면 같은 타입).
 
 ### 파티클·애니메이션 (G1-3)
 
@@ -442,7 +463,8 @@ public sealed class FooRenderSettings : ISettingsStep     // Builders/ 폴더, �
 | `harness_play_status` | `entering\|running\|exiting\|done\|failed` + 끝나면 `result`(result.json) |
 | `harness_console` | `{"since":<mark>,"until":<seq>}` 최신 컴파일 에러(file,line,msg,module) + mark 이후 런타임 에러/경고 수. `until` 뒤의 에러는 `teardownErrors`, 설정 `knownErrors`에 맞으면 `knownErrors`. 응답의 `mark`를 다음에 넘긴다 |
 | `harness_stats` | 플레이 중이면 live, 아니면 마지막 결과: fps avg/min/p95ms, batches, SetPass, tris |
-| `harness_lint` | static-reset / module-asmdef / module-boundary 규칙 검사 |
+| `harness_lint` | static-reset / module-asmdef / module-boundary / contract-file / contract-name 규칙 검사(`ms`, `contractsMs`) |
+| `harness_contracts` | `{"sources":"[{id, path \| text}]"}` C# 소스가 선언하는 최상위 타입(`name, ns, full, kind, line, hash`; Roslyn, 컴파일 없음). submit·land의 계약 검사가 부른다 |
 | `harness_shaders` | Assets/ 셰이더의 현재 컴파일 에러(file, line, msg, module). 셰이더 에러는 로그가 아니라 상태라 매 루프 조회 |
 | `harness_ping` | domainReloads, isCompiling, isPlaying, compileFailed, mark, unityVersion |
 | `harness_setup` | `setup: harness`면 프로젝트 설정 멱등 적용(Domain Reload off, runInBackground, 동기 셰이더 컴파일(`syncShaders`), 템플릿 샘플 삭제, ISettingsStep 실행 → `settings`). `attach`면 아무것도 안 바꾸고 `recommendations`만(`{"apply":"domainReload,syncShaders"}`로 명시 적용). Debug 코드 최적화(세션 한정)는 둘 다 |
@@ -646,9 +668,10 @@ git add -A; git commit -m "Foo: ..."                                            
 powershell -ExecutionPolicy Bypass -File tools/land.ps1                         # 이 브랜치를 에디터 트리 브랜치에 병합(트랜잭션)
 ```
 
-`submit.ps1` = ① worktree 소스로 compile-check(락 없음; 실패면 아무것도 복사하지 않고 `stage=compile`, `submit.phase=check`)
-→ ② 에디터 락 → 덮어쓰거나 지울 파일을 백업하고 저널을 남긴 뒤 `Assets/Game/<Module>/`를 에디터 트리로 미러링,
-`Assets/Game/Contracts/`는 **새 파일만** 추가 → ③ 에디터 트리에서 평소 루프 → ④ 녹색이면 유지하고 Unity가 만든 `.meta`를
+`submit.ps1` = ① worktree 소스로 compile-check(락 없음, `-Dependents`: 바뀐 계약을 쓰는 다른 모듈도; 실패면 아무것도 복사하지 않고 `stage=compile`,
+`submit.phase=check`) → ② 에디터 락 → 계약 검사(위 "계약 폴더": 올라간 타입 변경·이름 중복·남의 미병합 계약 파일이면 `stage=submit`으로 거부) → 덮어쓰거나
+지울 파일을 백업하고 저널을 남긴 뒤 `Assets/Game/<Module>/`를 에디터 트리로 미러링, `Assets/Game/Contracts/`는 이 worktree가 바꾼 파일만
+→ ③ 에디터 트리에서 평소 루프 → ④ 녹색이면 유지하고 Unity가 만든 `.meta`를
 worktree로 되복사(**커밋할 것**), 아니면 **백업으로 되돌리고 재컴파일**해 에디터 트리를 submit 전 상태로 돌려놓는다.
 결과는 loop와 같은 report.json + `submit` 필드(worktree의 `HarnessOut/submit/`). 종료코드 0 = 녹색이고 반영됨.
 
@@ -662,7 +685,7 @@ worktree로 되복사(**커밋할 것**), 아니면 **백업으로 되돌리고 
 - 시나리오는 worktree의 파일을 절대 경로로 넘기므로 worktree에서 고친 `tools/scenarios/*.json`이 그대로 쓰인다.
 - **한 모듈 = 한 에이전트**(강제): submit은 모듈별로 마지막에 반영한 worktree를 `Library/Harness/submit/owners.json`에 기록한다.
   다른 살아 있는 worktree가 올린 미병합 변경이 에디터 트리에 남아 있는 모듈은 `stage=submit`으로 거부된다(`submit.owner`).
-  그 작업이 버려졌을 때만 `-Takeover`. land가 그 브랜치의 모듈 소유를 해제한다.
+  그 작업이 버려졌을 때만 `-Takeover`. land가 그 브랜치의 모듈 소유를 해제한다. 계약 파일도 같다(`Library/Harness/submit/contracts.json`, `submit.contractOwner`).
 - 에디터 트리 브랜치에 그 모듈을 건드린 커밋이 있는데 worktree에 없으면 거부된다(미러링하면 병합된 작업을 되돌리게 된다) → `git merge master`.
 - 모듈 삭제·하네스 패키지·`tools/`는 submit 대상이 아니다(하네스 작업은 에디터 트리에서 직접). land로는 병합된다.
 - 모듈은 `ProjectSettings/AgentHarness.json`에서 온다: `moduleRoots`의 하위 폴더(`Assets/Game/<Module>`)와 `modules[]`의 폴더(기존 코드).
@@ -703,10 +726,11 @@ worktree에서 인자 없이 돌리면 그 worktree의 브랜치, 에디터 트�
 2. (락) 아무것도 건드리기 전에 거부(`stage=land`): 에디터 트리가 detached/병합·리베이스 중/staged 변경 있음 ·
    `git merge-tree`로 미리 병합해 충돌(`land.conflicts` → worktree에서 `git merge master`, 해결, 커밋, submit, 다시 land) ·
    브랜치가 `Assets/`에 추가하는 파일·폴더의 `.meta`가 커밋 안 됨(`land.missingMeta`) · 건드리는 모듈에 다른 worktree의 미병합 submit(`land.owner`, `-Takeover`) ·
-   덮어쓸 미커밋 변경이 이 브랜치의 submit 사본(또는 같은 내용)이 아님(`land.foreign`, 예: 에디터 트리를 직접 고친 것 — 사람이 커밋·stash).
+   계약: 바꾸는 계약 파일에 다른 worktree의 미병합 submit(`land.contractOwner`), 올라간 타입 변경(`land.contractChanged`), 에디터 트리의 계약(미병합 포함)과 이름 중복
+   (`land.contractConflicts`) · 덮어쓸 미커밋 변경이 이 브랜치의 submit 사본(또는 같은 내용)이 아님(`land.foreign`, 예: 에디터 트리를 직접 고친 것 — 사람이 커밋·stash).
 3. 저널(`Library/Harness/land/pending.json`) → 병합이 건드리는 경로와 그 모듈의 미커밋 사본만 `git stash`
    (stash 목록은 모든 worktree가 공유하므로 바로 `refs/agentharness/land/<runId>`로 옮긴다) → `git merge`.
-4. 에디터 트리에서 평소 루프. 녹색이면 병합 유지 + stash 버림 + 소유 해제(`land.releasedOwners`). 빨가면 `git reset --keep`으로 병합 전 커밋
+4. 에디터 트리에서 평소 루프. 녹색이면 병합 유지 + stash 버림 + 소유 해제(`land.releasedOwners`, `land.releasedContracts`). 빨가면 `git reset --keep`으로 병합 전 커밋
    (병합한 경로만; 다른 에이전트의 미커밋 submit은 그대로) → stash 복원 → 재컴파일(`land.undo`, `land.restore`). `-KeepOnFail`은 submit과 같다.
 
 - land가 도중에 죽어도 다음에 락을 잡는 loop/uc/submit/land가 저널로 되돌린다 → report에 `recoveredLand`.
@@ -734,8 +758,12 @@ powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Smoke -
   asmdef 참조를 붙여 합성해 검사한다(`synthesized: true`; 템플릿의 패키지 참조가 남아 실제보다 약간 관대).
 - `msbuild`: Unity가 생성한 `<Asm>.csproj`를 실행마다 재작성(소스 목록 갱신, ProjectReference → 체인 DLL 또는 에디터 DLL) 후 VS 2022 MSBuild.
   csproj가 없으면 `tools/uc.ps1 harness_sync_csproj`(새 어셈블리는 csc만). 이 머신엔 .NET SDK가 없어 `dotnet build`는 불가.
-- 한계: 검사 집합 밖(다른 모듈, `-IncludeHarness` 없는 Harness)은 **에디터가 마지막으로 컴파일한 DLL** 기준이다.
-  최종 판정은 항상 `loop.ps1` / `submit.ps1`.
+- `-Dependents`(`-Module`과, submit 게이트가 씀; G5-3): 이 실행이 바꾸는 것 — 모듈의 어셈블리와, 에디터 트리와 소스가 다른 참조 어셈블리(계약 추가) — 을
+  참조하는 프로젝트 어셈블리도 이 체크아웃 소스로 함께 컴파일한다(`targets[].dependentOf`, 출력 `dependentsOf`). 계약에 다른 모듈이 쓰는 이름을 더하면 그
+  모듈이 CS0104로 깨지는 것을 여기서 잡는다(샘플: 계약이 바뀌면 Game.Stage +0.13 s). 모듈끼리 참조하는 기존 프로젝트(`modules[]`)에서는 한 모듈의 공개 API
+  변경이 다른 모듈을 깨뜨리는 것도(BagelGame: Game의 속성 이름 → UI의 CS1061). 에디터가 컴파일하지 않는 어셈블리(응답 파일 없음)는 `dependentsSkipped`.
+- 검사 집합 밖(다른 모듈, `-IncludeHarness` 없는 Harness)은 **에디터가 마지막으로 컴파일한 DLL**이다 — 집합이 참조하는 쪽은 그게 맞다(submit이 넣을 에디터 트리가
+  컴파일하는 그 DLL). 최종 판정은 항상 `loop.ps1` / `submit.ps1`.
 
 ## 새 클론 검증 (tools/fresh-clone-test.ps1)
 
@@ -759,7 +787,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
 ## 하네스 자기 검증 (tools/selftest.ps1)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~7분
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~9분
 powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 345ba0d7
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
@@ -782,13 +810,17 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   핫 본문의 예외는 전체 루프가 주입한 줄로 보고) ·
   4 HLSL 에러(재임포트 없는 다음 루프에서도) + 되돌린 상태를 기준 이미지로 → 셰이더 한 줄(스펙큘러 절반) → golden `changed`(rect·diff PNG), 루프는 녹색 +
   파이프라인이 못 그리는 머티리얼(받침대를 `Standard`로 → 샷 `magenta`, `hint`에 `Smoke/Pedestal`, golden `changed`, 루프는 녹색 → 되돌리면 `same`) + 빌더 메시 변경(아치 두께 2배, G3-11 →
-  첫 루프가 벌써 새 메시: golden `changed`이고 다음 루프와 같음 → 되돌리면 `same`) · 5 리셋 없는 static(lint) · 6 루프 2개 동시(한쪽이 락 대기) +
+  첫 루프가 벌써 새 메시: golden `changed`이고 다음 루프와 같음 → 되돌리면 `same`) · 5 리셋 없는 static(lint) + 계약 lint(W9: 모듈 이름이 아닌 계약 파일,
+  다른 네임스페이스의 같은 이벤트 이름, 다른 모듈 파일에 있는 이벤트, 두 모듈이 발행하는 이벤트 → `contract-file`·`contract-name`이 맞는 파일·모듈로) · 6 루프 2개 동시(한쪽이 락 대기) +
   worktree 전용 에디터(W7: 커밋된 코드의 worktree `<저장소>-st-o`에 컴파일 에러를 넣고 `open.ps1 -Own` → 창 없는·automated 에디터가 `Library` 사본으로 그래도
   뜨고 루프가 그 줄을 보고 → 고치면 에디터 트리 루프와 동시에 녹색, 둘 다 대기 없음, fingerprint·events 같음, `render` 없음·`fps.note`, 첫 샷들이 같은 때
   에디터 트리 루프의 샷과 허용치 안에서 같음(커밋된 기준 이미지도 `changed` 0) → `quit.ps1`) · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
-  다른 worktree의 새 모듈·계약은 락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부) ·
-  8 land(fast-forward + 그 사이 submit 락 대기, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
-  병합 직후 kill → `recoveredLand`). 에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
+  다른 worktree의 새 모듈·계약은 락 대기 후 유지(계약 파일은 그 worktree 소유, 게이트가 계약을 쓰는 모듈도 컴파일), 런타임 에러 되돌림, sync 직후 kill →
+  `recoveredSubmit`; 계약(W9): 올라간 타입 변경 거부(주석·줄바꿈은 같은 해시), 남의 미병합 계약과 같은 이름 거부, 남의 미병합 계약 파일 거부, 다른 모듈이 쓰는
+  이름(`Light`)은 게이트가 Stage의 CS0104로 거부(G5-3), 자기 미병합 계약 수정은 녹색) ·
+  8 land(fast-forward + 그 사이 submit 락 대기, 모듈·계약 파일 소유 해제, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
+  병합 직후 kill → `recoveredLand`; 계약: 올라간 이름과 같은 이름·올라간 타입 변경 거부, Smoke 파일에 덧붙인 이벤트의 submit → land(병합 커밋) → 소유 해제).
+  에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
   1번 끝에는 플레이어 실행(W8): `player.ps1`이 기본 시나리오 + 게임 카메라 캡처를 개발 빌드 플레이어에서 돌린다 — 녹색, 1280x720 창·vSync 0, 에디터와 같은
   `play.events`, 플레이어의 프레임·렌더 통계, 샷이 에디터 것과 파티클 차이 안(바뀐 픽셀 ≤ 1%, 평균 ≤ 2), 그 프레임의 화면 = 캡처(`screen.vsShot` same),
   빌드 뒤 작업 트리 그대로(첫 빌드는 셰이더 컴파일로 ~2분).
@@ -808,13 +840,13 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-09-30 W8, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W6c에서 스모크 씬에 GPU 베이크 지형·소품이 더해져 새 값):
+- 검증한 버전(2026-09-30 W9, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W6c에서 스모크 씬에 GPU 베이크 지형·소품이 더해져 새 값):
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
   | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `c8561a2d…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크·`-automated`·창 없는 전용 에디터 포함), 샷 72.6/61.3/48.2(6.3과 같음). 플레이어 단계는 건너뜀 — 6.3이 저장한 URP 전역 설정(에셋 버전 10)을 URP 17.0(8)이 빌드에 거부 |
   | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `345ba0d7…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 실행 포함), 커밋된 기준 이미지와 같음 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `7cda8899…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 414 fps), 샷 72.6/61.3/48.3. `render.batches`는 null(6.6엔 그 카운터가 없다, 아래 "함정") |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `7cda8899…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 330–414 fps), 샷 72.6/61.3/48.3. `render.batches`는 null(6.6엔 그 카운터가 없다, 아래 "함정") |
 
   `-automated`·`-debugCodeOptimization`·`-batchmode -ignoreCompilerErrors`와 창 없는 에디터의 렌더(O-11 우회 포함)는 세 버전에서 같게 동작했다.
 
@@ -837,7 +869,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 { "setup": "harness",                  // harness: 하네스 전용 프로젝트 | attach(기본): 기존 프로젝트, 설정·Build Settings·남의 씬을 건드리지 않음
   "moduleRoots": ["Assets/Game"],      // 하위 폴더마다 모듈 (모듈 규칙·Builders/ 적용)
   "modules": [],                       // [{ "name": "Gameplay", "path": "Assets/Scripts" }] 폴더 하나 = 모듈 (기존 코드)
-  "contracts": "Assets/Game/Contracts",
+  "contracts": "Assets/Game/Contracts", // 공유 이벤트 폴더("계약 폴더" 규칙: lint·submit·land). "" = 없음
   "generatedRoot": "Assets/Generated", "buildScene": "Assets/Scenes/Main.unity",
   "playScene": "build" }               // build | first(Build Settings 첫 활성 씬) | 씬 경로
 ```
@@ -1104,6 +1136,10 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   방금 만든 stash를 가져갈 수 있다. land는 stash를 만들자마자 목록에서 빼 전용 ref에 둔다.
 - PowerShell 5.1에서 git 출력은 `Invoke-HarnessGit`(Process, UTF-8, stderr 캡처, 종료코드)로 받는다. `&` 호출은 콘솔 코드페이지로 경로가 깨지고
   stderr가 에러 레코드가 된다. 자식 프로세스 stdin을 리다이렉트하면 .NET이 콘솔 인코딩의 BOM을 먼저 써 넣는다(`--stdin-paths` 첫 경로가 깨짐) → 인자로 넘긴다.
+- `Harness.psm1`은 `Set-StrictMode -Version Latest`라 해시테이블의 **없는 키를 속성 문법**(`$h.text`)으로 읽으면 예외다(모듈 밖 스크립트에서는 `$null`) →
+  있을 수도 없을 수도 있는 키는 `$h['text']`. `git status --porcelain` 경로는 저장소 루트 기준, `git ls-tree`·`hash-object`·`show <rev>:./x`는 `-C` 폴더 기준이다.
+- `CompilationPipeline.GetAssemblies(AssembliesType.Editor)`를 도메인 리로드 뒤 처음 부르면 ~60 ms다(Player 목록과 따로 캐시) — lint의 계약 검사가 그것과 Builders
+  어셈블리까지 훑어 리로드 직후 83–158 ms였다 → static-reset이 이미 받은 Player 목록으로 21–30 ms.
 
 ## 문제 해결
 
@@ -1117,13 +1153,17 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - 플레이가 끝나지 않음: 시나리오 타임아웃(duration+70s) 후 자동 종료. 수동: `tools/uc.ps1 editor_stop`.
 - 빌드 fingerprint가 매번 바뀜: 빌더가 비결정적(시드 없는 랜덤, 시간, Dictionary 순회 순서 등)이거나 Code Optimization이 Release다
   (`build.warnings`에 경고). 덤프가 바뀌면 직전 덤프가 `Library/Harness/fingerprint.prev.txt`로 남으니 `fingerprint.txt`와 diff한다.
-- `stage=submit`: worktree에서 `loop.ps1`을 돌렸거나(→ `submit.ps1`), 기존 Contracts 파일을 고쳤거나(추가만 허용), `-Module` 폴더가 없거나,
-  다른 worktree가 그 모듈을 미병합 상태로 올려 두었거나(`submit.owner`), 에디터 트리 브랜치에 이 worktree에 없는 그 모듈 커밋이 있다(→ `git merge master`). `error`를 읽는다.
+- `stage=submit`: worktree에서 `loop.ps1`을 돌렸거나(→ `submit.ps1`), `-Module` 폴더가 없거나,
+  다른 worktree가 그 모듈을 미병합 상태로 올려 두었거나(`submit.owner`), 에디터 트리 브랜치에 이 worktree에 없는 그 모듈 커밋이 있거나(→ `git merge master`),
+  계약 규칙(위 "계약 폴더"): 올라간 타입을 바꿈(`submit.contractChanged` → 새 타입으로), 이미 있는 이름(`submit.contractConflicts` → 이름을 바꾼다),
+  다른 worktree의 미병합 계약 파일(`submit.contractOwner`). `error`를 읽는다.
+- `stage=compile`인데 에러가 남의 모듈(예: `Stage`)에 있고 `submit.phase=check`: 내 계약 추가가 그 모듈을 깨뜨렸다(CS0104 모호한 이름) → 내 타입 이름을 바꾼다.
 - report에 `recoveredSubmit`: 이전 submit이 도중에 죽어 이번 실행이 되돌렸다. 그 에이전트는 다시 submit하면 된다.
   되돌리기가 실패하면 `Library/Harness/submit/pending.json`과 같은 폴더의 `<runId>/` 백업을 본다.
-- `stage=land`: `error`와 사유 필드(`land.uncommitted/conflicts/missingMeta/owner/foreign`)를 읽는다. 이때 에디터 트리는 손대지 않은 상태다.
+- `stage=land`: `error`와 사유 필드(`land.uncommitted/conflicts/missingMeta/owner/foreign/contractOwner/contractChanged/contractConflicts`)를 읽는다.
+  이때 에디터 트리는 손대지 않은 상태다.
 - report에 `recoveredLand`: 이전 land가 도중에 죽어 이번 실행이 병합을 되돌렸다. 그 에이전트는 다시 land하면 된다. 되돌리기가 실패하면
   저널이 `Library/Harness/land/failed-<runId>.json`으로 옮겨지고(`recoveredLand.error`), stash는 `refs/agentharness/land/<runId>`에 남는다
   (`git stash apply <sha>`로 직접 복원).
 - 하네스 상태 파일: `Library/Harness/`(play_state.json, console.ndjson, compile.json, buildcache.json, fingerprint(.prev).txt,
-  submit/(pending.json, owners.json), land/).
+  submit/(pending.json, owners.json, contracts.json), land/).

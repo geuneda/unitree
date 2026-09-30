@@ -47,19 +47,26 @@
     shots whose hint names the renderer and whose golden changed, loop still green; reverted -> no magenta, golden same.
     A builder's mesh changed (the arch twice as thick, G3-11) -> the first loop already draws it (golden changed, the same
     pixels as the next loop); reverted -> same
-  5 mutable static without a reset -> stage=lint (static-reset); removed -> green
+  5 mutable static without a reset -> stage=lint (static-reset); contracts (G5-4): a contracts file named after no module, an
+    event name declared twice (another namespace), an event published by a module other than its file's, one published by
+    two modules -> contract-file / contract-name issues on the right files and modules; removed -> green
   6 two loops at once -> both green, one of them waited for the lock. An Editor of its own (W7): a worktree next to the
     repository (<repository>-st-o, the committed code) with a compile error opens its own Editor (open.ps1 -Own: a copy
     of the Library, headless, automated) that starts anyway; its loop reports the injected line; fixed, it loops at the
     same time as the Editor tree's: neither waits, same fingerprint and events, no render stats, its first shots the same
     as the Editor tree's shots of that loop (and no committed golden image changed); quit.ps1 there closes it
   7 worktrees + submit.ps1: the compile-check gate refuses a broken module without touching the Editor tree; a forced
-    broken submit is reverted while another worktree's new module + contract waits for the lock and is kept; a runtime
-    error submit is reverted; a submit killed after its sync is rolled back by the next loop; a changed contract is
-    refused
-  8 land.ps1: fast-forward land while another worktree's submit waits for the lock; already landed; refusals
-    (uncommitted, missing .meta, conflict, a foreign edit in the Editor tree); a compile error land is undone; a land
-    killed after its merge is undone by the next loop; the last land is kept
+    broken submit is reverted while another worktree's new module + contract waits for the lock and is kept (the contract
+    is that worktree's until it lands, the gate compiled the contracts' users); a runtime error submit is reverted; a
+    submit killed after its sync is rolled back by the next loop; contracts (G5-4): a landed type that changes is refused
+    (comments are no change), the same event name as another worktree's un-landed one is refused, so is another
+    worktree's un-landed contracts file; a contracts type that breaks another module (CS0104) is refused by the gate
+    (G5-3); a worktree changes its own un-landed contracts file
+  8 land.ps1: fast-forward land while another worktree's submit waits for the lock (module and contracts file released);
+    already landed; refusals (uncommitted, missing .meta, conflict, a foreign edit in the Editor tree); a compile error
+    land is undone; a land killed after its merge is undone by the next loop; the last land is kept. Contracts (G5-4): a
+    branch declaring an event name that landed and one changing a landed type are refused; an event appended to a module's
+    landed file is submitted, landed (a merge) and released
   Stops at the first red item (-KeepGoing: runs the rest too). Every item puts back what it changed. 6-8 need tools/, the harness package and
   Assets/Game/ committed (the worktrees run the committed code); they create temporary worktrees next to the
   repository, branches selftest/*, and commits, and reset the Editor tree's branch to where it was. A final loop
@@ -93,6 +100,7 @@ $SmokeCs = 'Assets/Game/Smoke/SmokeModule.cs'
 $SmokeShader = 'Assets/Game/Smoke/Shaders/SmokeIridescent.shader'
 $SmokeContracts = 'Assets/Game/Contracts/SmokeEvents.cs'
 $ProbeCs = 'Assets/Game/Probe/ProbeModule.cs'
+$ProbeEventsCs = 'Assets/Game/Contracts/ProbeEvents.cs'
 $SubmitJournal = Join-Path $root 'Library/Harness/submit/pending.json'
 $LandJournal = Join-Path $root 'Library/Harness/land/pending.json'
 # Injections: a marker line of the sample modules and what replaces it on that line.
@@ -267,6 +275,18 @@ function Write-TextFile([string]$Abs, [string]$Text) {
     [IO.File]::WriteAllText($Abs, $Text.Replace("`r`n", "`n"), (New-Object Text.UTF8Encoding($false)))
 }
 
+# A type added at the end of a contracts file's namespace (before its last closing brace). Keeps the BOM and line endings.
+function Add-ContractType([string]$Abs, [string]$Type) {
+    $bytes = [IO.File]::ReadAllBytes($Abs)
+    $bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    $enc = New-Object Text.UTF8Encoding($bom)
+    $text = $enc.GetString($bytes, $(if ($bom) { 3 } else { 0 }), $bytes.Length - $(if ($bom) { 3 } else { 0 }))
+    $nl = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $i = $text.LastIndexOf('}')
+    [IO.File]::WriteAllText($Abs, $text.Substring(0, $i) + "$nl    $Type$nl" + $text.Substring($i), $enc)
+    [IO.File]::SetLastWriteTimeUtc($Abs, [DateTime]::UtcNow)
+}
+
 function Get-Events($r) { (@($r.play.events | ForEach-Object { "$($_.name)=$($_.count)" }) -join ',') }
 function Get-EventCount($r, [string]$Name) { $e = @($r.play.events | Where-Object { $_.name -eq $Name }); if ($e.Count) { [int]$e[0].count } else { 0 } }
 function Get-FirstError($r, [string]$Kind = $null) {
@@ -363,6 +383,35 @@ namespace Game.Smoke
     static class SelftestLint
     {
         public static int Counter;
+    }
+}
+'@
+# Item 5, contracts (G5-4): a contracts file named after no module, with an event name Smoke already has (another namespace, so it
+# compiles) and an event Stage publishes; Stage also publishes Smoke's SpinnerLap.
+$LintContractsCs = 'Assets/Game/Contracts/SelftestEvents.cs'
+$LintContractsText = @'
+namespace Game.Contracts.Selftest
+{
+    // Written by tools/selftest.ps1 (matrix 5).
+    public readonly struct SpinnerLap { }
+    public readonly struct StrayEvent { }
+}
+'@
+$LintStrayCs = 'Assets/Game/Stage/SelftestStray.cs'
+$LintStrayText = @'
+using Game.Contracts;
+using Harness;
+
+namespace Game.Stage
+{
+    // Written by tools/selftest.ps1 (matrix 5): publishes events that are not Stage's (never called; the lint reads the IL).
+    static class SelftestStray
+    {
+        internal static void Fire()
+        {
+            EventBus.Publish(new Game.Contracts.Selftest.StrayEvent());
+            EventBus.Publish(new SpinnerLap(0));
+        }
     }
 }
 '@
@@ -1621,14 +1670,26 @@ function Invoke-Item4 {
 }
 
 function Invoke-Item5 {
-    Start-Item 5 'lint: static without reset'
+    Start-Item 5 'lint: static without reset, contracts'
     $rel = 'Assets/Game/Smoke/SelftestLint.cs'
     Protect-EditorFile $rel
     Write-TextFile (Get-Abs $root $rel) $LintText
+    # Contracts (G5-4): a file named after no module, an event name twice (another namespace: it compiles), an event another
+    # module publishes from the wrong file, and Smoke's SpinnerLap published by Stage too.
+    foreach ($f in @($LintContractsCs, $LintStrayCs)) { Protect-EditorFile $f }
+    Write-TextFile (Get-Abs $root $LintContractsCs) $LintContractsText
+    Write-TextFile (Get-Abs $root $LintStrayCs) $LintStrayText
     $r = Invoke-Loop '5-lint'
+    $all = (@($r.lint | ForEach-Object { "$($_.rule) $($_.module) $($_.file) $($_.message)" }) -join ' | ')
     $l = @($r.lint | Where-Object { $_.rule -eq 'static-reset' -and "$($_.message)$($_.file)" -like '*SelftestLint*' })
     Test-Check 'stage=lint' ($r.stage -eq 'lint') (Get-Summary $r)
-    Test-Check 'static-reset on SelftestLint, module Smoke' ($l.Count -gt 0 -and $l[0].module -eq 'Smoke') (@($r.lint | ForEach-Object { "$($_.rule) $($_.module) $($_.message)" }) -join ' | ')
+    Test-Check 'static-reset on SelftestLint, module Smoke' ($l.Count -gt 0 -and $l[0].module -eq 'Smoke') $all
+    $has = { param($rule, $module, $file, $like) @($r.lint | Where-Object { $_.rule -eq $rule -and $_.module -eq $module -and $_.file -eq $file -and "$($_.message)" -like $like }).Count -gt 0 }
+    Test-Check 'contract-file: SelftestEvents.cs is no <Module>Events.cs' (& $has 'contract-file' 'Contracts' $LintContractsCs 'SelftestEvents.cs: a contracts file is <Module>Events.cs*') $all
+    Test-Check 'contract-name: SpinnerLap in both files' ((& $has 'contract-name' 'Contracts' $LintContractsCs '*SpinnerLap*SmokeEvents.cs*') -and (& $has 'contract-name' 'Smoke' $SmokeContracts '*SpinnerLap*SelftestEvents.cs*')) $all
+    Test-Check 'contract-file: StrayEvent published by Stage, not in StageEvents.cs' (& $has 'contract-file' 'Stage' $LintContractsCs '*StrayEvent is published by module Stage*StageEvents.cs*') $all
+    Test-Check 'contract-file: SpinnerLap published by Stage and Smoke' (& $has 'contract-file' 'Stage' $SmokeContracts '*SpinnerLap is published by modules Stage and Smoke*') $all
+    Test-Check 'no other contract issue' (@($r.lint | Where-Object { $_.rule -like 'contract-*' }).Count -eq 5) $all
     Restore-EditorFiles
     [void](Test-GreenAgain '5-restored')
     Complete-Item
@@ -1789,10 +1850,14 @@ function Remove-SelftestWorktrees {
         $r = Invoke-HarnessGit $wt.top @('switch', '--quiet', '--detach', $wt.head0)
         if ($r.code -eq 0) { [void](Invoke-HarnessGit $wt.top @('branch', '-D', $wt.detached)) } else { $notes += "switch --detach $($wt.head0): $($r.err)" }
     }
-    # Ownership records of the removed worktrees (a red run can leave them).
+    # Ownership records of the removed worktrees (a red run can leave them), of modules and of contracts files.
+    $ofTest = { param($o) @($wt.dirs | Where-Object { "$($o.workRoot)".Replace('\', '/').StartsWith($_.Replace('\', '/'), [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0 }
     $owners = Get-HarnessOwners
-    $mine = @($owners.Keys | Where-Object { $o = $owners[$_]; @($wt.dirs | Where-Object { "$($o.workRoot)".Replace('\', '/').StartsWith($_.Replace('\', '/'), [StringComparison]::OrdinalIgnoreCase) }).Count })
+    $mine = @($owners.Keys | Where-Object { & $ofTest $owners[$_] })
     if ($mine.Count) { foreach ($m in $mine) { $owners.Remove($m) }; Save-HarnessOwners $owners }
+    $owners = Get-HarnessContractOwners
+    $mine = @($owners.Keys | Where-Object { & $ofTest $owners[$_] })
+    if ($mine.Count) { foreach ($m in $mine) { $owners.Remove($m) }; Save-HarnessContractOwners $owners }
     $state.wt = $null
     $notes
 }
@@ -1814,7 +1879,7 @@ function Invoke-Item7 {
     # 7b. Forced broken submit (A) is reverted; B's new module + contract waits for the lock and is kept.
     Write-TextFile (Get-Abs $B 'Assets/Game/Probe/Game.Probe.asmdef') $ProbeAsmdef
     Write-TextFile (Get-Abs $B $ProbeCs) $ProbeModuleText
-    Write-TextFile (Get-Abs $B 'Assets/Game/Contracts/ProbeEvents.cs') $ProbeEventsText
+    Write-TextFile (Get-Abs $B $ProbeEventsCs) $ProbeEventsText
     $da = Get-OutDir '7b-forced'; $db = Get-OutDir '7b-newmodule'
     $ta = Start-Tool $A 'submit.ps1' @('-Module', 'Smoke', '-SkipCheck', '-Out', $da)
     [void](Wait-Until { Test-Path -LiteralPath $SubmitJournal } 60 $ta)
@@ -1830,6 +1895,10 @@ function Invoke-Item7 {
     Test-Check 'new module: ProbeEcho = SpinnerLap' ($laps -gt 0 -and (Get-EventCount $rb 'ProbeEcho') -eq $laps) (Get-Events $rb)
     Test-Check 'new module: .meta files copied back' (@($rb.submit.metaWrittenBack).Count -ge 4) (@($rb.submit.metaWrittenBack) -join ', ')
     $state.item['newModuleCheck'] = @($rb.submit.check.targets)
+    # The new contracts file is B's until it lands (G5-4), and the gate checked the modules that use the contracts (G5-3).
+    $co = Get-HarnessContractOwners
+    Test-Check 'new module: ProbeEvents.cs added, owned by B' (@($rb.submit.contractsAdded) -contains $ProbeEventsCs -and $co[$ProbeEventsCs] -and (Test-HarnessSamePath $co[$ProbeEventsCs].workRoot $B)) "added=$(@($rb.submit.contractsAdded) -join ',') owner=$($co[$ProbeEventsCs] | ConvertTo-Json -Compress)"
+    Test-Check 'new module: the gate compiled the contracts users too' (@($rb.submit.check.targets) -contains 'Game.Stage: ok' -and @($rb.submit.check.targets) -contains 'Game.Smoke: ok') (@($rb.submit.check.targets) -join ', ')
     Invoke-Git $A @('checkout', '--', '.')
 
     # 7c. A runtime error submit is reverted.
@@ -1851,11 +1920,48 @@ function Invoke-Item7 {
     Test-Check 'kill: Smoke is back to the committed version' (-not @(Get-NewStatus | Where-Object { $_ -like '*Game/Smoke/*' }).Count) (@(Get-NewStatus) -join '; ')
     Invoke-Git $A @('checkout', '--', '.')
 
-    # 7e. Contracts are add-only.
-    [void](Edit-Line (Get-Abs $A $SmokeContracts) 'public readonly int Lap;' 'public readonly int Lap; // selftest')
+    # 7e. Contracts are add-only per type (G5-4): a landed type that changes is refused. Comments and layout are no change.
+    $t = Get-HarnessDeclaredTypes @(
+        @{ id = 'a'; text = "namespace N { public readonly struct S { public readonly int A; } }" },
+        @{ id = 'b'; text = "namespace N`n{`n    /// <summary>doc</summary>`n    public readonly struct S`n    {`n        public readonly int A; // why`n    }`n}" },
+        @{ id = 'c'; text = "namespace N { public readonly struct S { public readonly long A; } }" })
+    Test-Check 'type hash: the same with other comments and layout, not with another field type' ($t['a'][0].hash -eq $t['b'][0].hash -and $t['a'][0].hash -ne $t['c'][0].hash -and $t['b'][0].line -eq 4) "$($t['a'][0].hash) $($t['b'][0].hash) $($t['c'][0].hash) line $($t['b'][0].line)"
+    [void](Edit-Line (Get-Abs $A $SmokeContracts) 'public readonly int Lap;' 'public readonly long Lap;')
     $r = Invoke-Tool $A 'submit.ps1' '7e-contract' @('-Module', 'Smoke')
-    Test-Check 'changed contract: stage=submit (add-only)' ($r.stage -eq 'submit' -and "$($r.error)" -like '*add-only*') (Get-Summary $r)
+    $c = @($r.submit.contractChanged)
+    Test-Check 'changed landed type: stage=submit, contractChanged SpinnerLap' ($r.stage -eq 'submit' -and $c.Count -eq 1 -and $c[0].type -eq 'Game.Contracts.SpinnerLap' -and $c[0].change -eq 'changed' -and "$($r.error)" -like '*add-only*') "$(Get-Summary $r) $($c | ConvertTo-Json -Compress)"
     Invoke-Git $A @('checkout', '--', '.')
+
+    # 7f. Two worktrees add the same event name (G5-4): B's ProbeEcho is submitted, not landed; A appends one to Smoke's file.
+    Add-ContractType (Get-Abs $A $SmokeContracts) 'public readonly struct ProbeEcho { public readonly int Lap; public ProbeEcho(int lap) { Lap = lap; } }'
+    $r = Invoke-Tool $A 'submit.ps1' '7f-same-name' @('-Module', 'Smoke')
+    $c = @($r.submit.contractConflicts)
+    Test-Check 'same event name: stage=submit, contractConflicts ProbeEcho in B''s un-landed ProbeEvents.cs' ($r.stage -eq 'submit' -and $c.Count -eq 1 -and $c[0].type -eq 'ProbeEcho' -and $c[0].path -eq $SmokeContracts -and $c[0].other -eq $ProbeEventsCs -and "$($c[0].otherOwner)" -like '*not landed*') "$(Get-Summary $r) $($c | ConvertTo-Json -Compress)"
+    Test-Check 'same event name: Editor tree untouched' (-not @(Get-NewStatus | Where-Object { $_ -like '*SmokeEvents*' }).Count) (@(Get-NewStatus) -join '; ')
+    Invoke-Git $A @('checkout', '--', '.')
+
+    # 7g. B's un-landed contracts file is B's: A's own version of it is refused.
+    Write-TextFile (Get-Abs $A $ProbeEventsCs) "namespace Game.Contracts`n{`n    public readonly struct ProbeOther { }`n}`n"
+    $r = Invoke-Tool $A 'submit.ps1' '7g-contract-owner' @('-Module', 'Smoke')
+    Test-Check 'another worktree''s un-landed contracts file: stage=submit, contractOwner B' ($r.stage -eq 'submit' -and $r.submit.contractOwner -and $r.submit.contractOwner.path -eq $ProbeEventsCs -and (Test-HarnessSamePath $r.submit.contractOwner.workRoot $B)) "$(Get-Summary $r) $($r.submit.contractOwner | ConvertTo-Json -Compress)"
+    Remove-Item -LiteralPath (Get-Abs $A $ProbeEventsCs) -Force
+
+    # 7h. A contracts type named like one another module uses (UnityEngine.Light in Stage): the gate compiles Stage too (G5-3).
+    $stageCs = 'Assets/Game/Stage/StageModule.cs'
+    $lightLine = @(Select-String -LiteralPath (Get-Abs $A $stageCs) -SimpleMatch 'Light m_Beacon;')[0].LineNumber
+    Add-ContractType (Get-Abs $A $SmokeContracts) 'public readonly struct Light { }'
+    $r = Invoke-Tool $A 'submit.ps1' '7h-dependents' @('-Module', 'Smoke')
+    $e = Get-FirstError $r
+    Test-Check "contracts user broken: gate stage=compile at ${stageCs}:$lightLine, module Stage" ($r.stage -eq 'compile' -and $r.submit.phase -eq 'check' -and $e.file -eq $stageCs -and [int]$e.line -eq $lightLine -and $e.module -eq 'Stage' -and "$($e.msg)" -like '*CS0104*') "$(Get-Summary $r) $($e.file):$($e.line) $($e.module) $($e.msg)"
+    Test-Check 'contracts user broken: Editor tree untouched' (@(Get-NewStatus | Where-Object { $_ -notmatch '(^\?\? |/)Assets/Game/(Probe(/|\.meta$)|Contracts/ProbeEvents\.cs)' }).Count -eq 0) (@(Get-NewStatus) -join '; ')
+    Invoke-Git $A @('checkout', '--', '.')
+
+    # 7i. B may change its own un-landed contracts file (a new field; the constructor stays).
+    $probeEventsV2 = $ProbeEventsText.Replace('public readonly int Lap;', 'public readonly int Lap; public readonly int Twice;').Replace('{ Lap = lap; }', '{ Lap = lap; Twice = lap * 2; }')
+    Write-TextFile (Get-Abs $B $ProbeEventsCs) $probeEventsV2
+    $r = Invoke-Tool $B 'submit.ps1' '7i-own-contract' @('-Module', 'Probe')
+    Test-Check 'own un-landed contracts file: green, updated, same events' ($r.ok -and @($r.submit.contractsUpdated) -contains $ProbeEventsCs -and (Get-EventCount $r 'ProbeEcho') -eq (Get-EventCount $r 'SpinnerLap')) "$(Get-Summary $r) updated=$(@($r.submit.contractsUpdated) -join ',')"
+    Test-Check 'own un-landed contracts file: the Editor tree has the new version' ([IO.File]::ReadAllText((Get-Abs $root $ProbeEventsCs)) -eq [IO.File]::ReadAllText((Get-Abs $B $ProbeEventsCs))) ''
 
     $left = @(Get-NewStatus | Where-Object { $_ -notmatch '(^\?\? |/)Assets/Game/(Probe(/|\.meta$)|Contracts/ProbeEvents\.cs)' })
     Test-Check "Editor tree: only B's submitted module is uncommitted" ($left.Count -eq 0) ($left -join ', ')
@@ -1879,7 +1985,7 @@ function Invoke-Item8 {
     $rl = Read-ToolReport $dl (Wait-Tool $tl)
     $ra = Read-ToolReport $da (Wait-Tool $ta)
     Test-Check 'land: green, merged, kept' ($rl.ok -and $rl.land.merged -and $rl.land.kept) (Get-Summary $rl)
-    Test-Check 'land: fast-forward, Probe released' ($rl.land.fastForward -and @($rl.land.releasedOwners) -contains 'Probe') "ff=$($rl.land.fastForward) released=$(@($rl.land.releasedOwners) -join ',')"
+    Test-Check 'land: fast-forward, Probe and ProbeEvents.cs released' ($rl.land.fastForward -and @($rl.land.releasedOwners) -contains 'Probe' -and @($rl.land.releasedContracts) -contains $ProbeEventsCs -and -not (Get-HarnessContractOwners)[$ProbeEventsCs]) "ff=$($rl.land.fastForward) released=$(@($rl.land.releasedOwners) -join ',') contracts=$(@($rl.land.releasedContracts) -join ',')"
     Test-Check 'land: Editor tree clean, at the branch' (@(Get-NewStatus).Count -eq 0 -and (Get-Head $top) -eq (Get-Head $B)) (@(Get-NewStatus) -join '; ')
     Test-Check 'submit during the land: waited, green' ($ra.ok -and [double]$ra.timings.lockWaitSec -gt 0) "$(Get-Summary $ra) wait=$($ra.timings.lockWaitSec)"
 
@@ -1945,6 +2051,35 @@ function Invoke-Item8 {
     # 8i. The change lands.
     $r = Invoke-Tool $B 'land.ps1' '8i-land'
     Test-Check 'land: green, kept, Editor tree clean' ($r.ok -and $r.land.kept -and @(Get-NewStatus).Count -eq 0 -and (Get-Head $top) -eq (Get-Head $B)) "$(Get-Summary $r) new=$(@(Get-NewStatus) -join '; ')"
+
+    # 8j-8l. Contracts on land (G5-4), from A (its branch is still at the start; Probe's ProbeEvents.cs has landed).
+    $headBefore = Get-Head $top
+    $statusBefore = Get-EditorStatus
+    # 8j. An event name the landed contracts have.
+    Add-ContractType (Get-Abs $A $SmokeContracts) 'public readonly struct ProbeEcho { public readonly int Lap; public ProbeEcho(int lap) { Lap = lap; } }'
+    Invoke-Git $A ($gitId + @('commit', '--quiet', '-am', 'selftest: an event name Probe has'))
+    $r = Invoke-Tool $A 'land.ps1' '8j-same-name'
+    $c = @($r.land.contractConflicts)
+    Test-Check 'same event name: stage=land, contractConflicts ProbeEcho (landed)' ($r.stage -eq 'land' -and $c.Count -eq 1 -and $c[0].type -eq 'ProbeEcho' -and $c[0].path -eq $SmokeContracts -and $c[0].other -eq $ProbeEventsCs -and $c[0].otherOwner -eq 'landed') "$(Get-Summary $r) $($c | ConvertTo-Json -Compress)"
+    Test-Check 'same event name: nothing touched' ((Get-Head $top) -eq $headBefore -and (Get-EditorStatus) -eq $statusBefore) (Get-EditorStatus)
+    Invoke-Git $A @('reset', '--quiet', '--hard', 'HEAD~1')
+    # 8k. A landed type changed.
+    [void](Edit-Line (Get-Abs $A $SmokeContracts) 'public readonly int Lap;' 'public readonly long Lap;')
+    Invoke-Git $A ($gitId + @('commit', '--quiet', '-am', 'selftest: a landed type changed'))
+    $r = Invoke-Tool $A 'land.ps1' '8k-changed'
+    $c = @($r.land.contractChanged)
+    Test-Check 'changed landed type: stage=land, contractChanged SpinnerLap' ($r.stage -eq 'land' -and $c.Count -eq 1 -and $c[0].type -eq 'Game.Contracts.SpinnerLap' -and $c[0].change -eq 'changed') "$(Get-Summary $r) $($c | ConvertTo-Json -Compress)"
+    Test-Check 'changed landed type: nothing touched' ((Get-Head $top) -eq $headBefore -and (Get-EditorStatus) -eq $statusBefore) (Get-EditorStatus)
+    Invoke-Git $A @('reset', '--quiet', '--hard', 'HEAD~1')
+    # 8l. A new event appended to Smoke's landed file: submit (A's until it lands), commit, land (a merge: master has Probe).
+    Add-ContractType (Get-Abs $A $SmokeContracts) 'public readonly struct SelftestSpinEcho { }'
+    $r = Invoke-Tool $A 'submit.ps1' '8l-append-submit' @('-Module', 'Smoke')
+    $co = Get-HarnessContractOwners
+    Test-Check 'appended event: submit green, SmokeEvents.cs updated and A''s' ($r.ok -and @($r.submit.contractsUpdated) -contains $SmokeContracts -and $co[$SmokeContracts] -and (Test-HarnessSamePath $co[$SmokeContracts].workRoot $A)) "$(Get-Summary $r) updated=$(@($r.submit.contractsUpdated) -join ',')"
+    Invoke-Git $A ($gitId + @('commit', '--quiet', '-am', 'selftest: an event appended'))
+    $r = Invoke-Tool $A 'land.ps1' '8l-append-land'
+    $co = Get-HarnessContractOwners
+    Test-Check 'appended event: land green (a merge), SmokeEvents.cs released, Editor tree clean' ($r.ok -and $r.land.kept -and -not $r.land.fastForward -and @($r.land.releasedContracts) -contains $SmokeContracts -and -not $co[$SmokeContracts] -and @(Get-NewStatus).Count -eq 0) "$(Get-Summary $r) released=$(@($r.land.releasedContracts) -join ',') new=$(@(Get-NewStatus) -join '; ')"
     Complete-Item
 }
 

@@ -2,11 +2,15 @@
 .SYNOPSIS
   Submit module folders from an agent worktree to the shared Editor, as a transaction (G5-2).
 
-  1. compile-check (csc, no Editor, no lock) of the modules and the in-project assemblies they reference, from the
-     worktree's sources. Errors -> stage=compile, submit.phase=check, nothing is copied.
-  2. Take the Editor lock. Mirror the module's folder (+ its folder .meta) of the worktree into the Editor tree and
-     add new files of the contracts folder (add-only: a changed existing contract is refused). Every file it
-     overwrites or deletes is backed up first, under a journal (Library/Harness/submit/pending.json).
+  1. compile-check (csc, no Editor, no lock) of the modules, the in-project assemblies they reference, and the ones that
+     reference what changed (-Dependents: other modules, when a contracts addition would break them), from the worktree's
+     sources. Errors -> stage=compile, submit.phase=check, nothing is copied.
+  2. Take the Editor lock. Mirror the module's folder (+ its folder .meta) of the worktree into the Editor tree, and the
+     contracts files this worktree changed (G5-4, refused with stage=submit before anything is copied: a landed type that
+     would change - add-only per type, new types may be appended -, a type name declared elsewhere in the contracts, a
+     file another live worktree submitted and has not landed - it is that worktree's until it lands, -Takeover overrides;
+     this worktree's own un-landed contracts may change or go). Every file it overwrites or deletes is backed up first,
+     under a journal (Library/Harness/submit/pending.json).
   3. The normal loop (recompile, build, play, console) on the Editor tree.
   4. Green -> keep, and copy the .meta files Unity generated back into the worktree (commit them).
      Otherwise -> restore the backup and recompile, so the Editor tree is back where it was. -KeepOnFail keeps the
@@ -35,7 +39,7 @@ param(
     [switch]$NoPlay,
     [switch]$KeepOnFail,
     [switch]$SkipCheck,   # skip step 1 (the transaction still protects the Editor tree; only for testing that)
-    [switch]$Takeover,    # submit over another worktree's un-landed changes to the module
+    [switch]$Takeover,    # submit over another worktree's un-landed changes to the module (or to a contracts file)
     [int]$TimeoutSec = 180
 )
 $ErrorActionPreference = 'Stop'
@@ -98,6 +102,90 @@ function Get-CreatedDirs([string[]]$dirs) {
     @($dirs | Where-Object { -not [IO.Directory]::Exists([IO.Path]::Combine($root, $_)) -and [IO.Directory]::Exists([IO.Path]::Combine($root, $_.Substring(0, $_.LastIndexOf('/')))) })
 }
 
+# The contracts folder (G5-4): what this submit writes and deletes there, or why it is refused. Called under the lock. Per file:
+#  - the same in both trees, or not changed by this worktree (the same as where its branch meets the Editor tree's branch: it
+#    is only behind, e.g. on events another module appended since): left alone;
+#  - un-landed in the Editor tree (submitted, not landed) from another live worktree: refused (-Takeover takes it over), that
+#    worktree owns it until it lands. This worktree's own un-landed file may change, and goes when the worktree deleted it;
+#  - landed: its types never change (add-only per type: new types may be appended); a landed .meta never changes;
+#  - afterwards no type name is declared twice in the contracts (play.events counts events by type name).
+function Get-ContractPlan {
+    $plan = [ordered]@{ writes = @(); deletes = @(); added = @(); updated = @(); deleted = @(); restored = @(); behind = @(); takeover = @(); refusal = $null }
+    $into = if ($editorHead.code -eq 0) { (Invoke-HarnessGit $root @('symbolic-ref', '-q', '--short', 'HEAD')).out.Trim() } else { '' }
+    $landed = Get-HarnessTreeFiles $root 'HEAD' $contracts
+    $base = $null
+    if ($wtHead -and $editorHead.code -eq 0) {
+        $mb = Invoke-HarnessGit $work @('merge-base', $wtHead, $editorHead.out.Trim())
+        if ($mb.code -eq 0) { $base = Get-HarnessTreeFiles $work $mb.out.Trim() $contracts }
+    }
+    $wFiles = @(Get-RelFiles $work $contracts)
+    $eFiles = @(Get-RelFiles $root $contracts)
+    $wIds = Get-HarnessContentIds $work $wFiles
+    $eIds = Get-HarnessContentIds $root $eFiles
+    $owners = Get-HarnessContractOwners
+    $mineOwner = { param($o) $o -and (Test-HarnessSamePath $o.workRoot $work) }
+    $paths = @(@($wFiles) + @($eFiles | Where-Object { & $mineOwner $owners[$_] }) | Sort-Object -Unique)
+    foreach ($p in $paths) {
+        $w = $wIds[$p]; $e = $eIds[$p]; $l = $landed[$p]
+        if ($w -eq $e) { continue }
+        $o = $owners[$p]
+        $unlanded = $null -ne $e -and $e -ne $l
+        $mine = $unlanded -and (& $mineOwner $o)
+        if ($null -eq $w) {
+            # Deleted in this worktree: its own un-landed file goes, with the .meta Unity made for it.
+            if ($mine -and $null -eq $l) {
+                $plan.deletes += $p; $plan.deleted += $p
+                if ($eIds.ContainsKey("$p.meta") -and -not $wIds.ContainsKey("$p.meta") -and $null -eq $landed["$p.meta"]) { $plan.deletes += "$p.meta" }
+            }
+            continue
+        }
+        if (-not $mine -and $null -ne $base -and $w -eq $base[$p]) { $plan.behind += $p; continue }
+        if ($unlanded -and -not $mine -and $o -and (Test-Path -LiteralPath $o.workRoot)) {
+            $info = [ordered]@{ path = $p; workRoot = $o.workRoot; branch = $o.branch; at = $o.at }
+            if (-not $Takeover) {
+                $sub['contractOwner'] = $info
+                $plan.refusal = "$p was submitted from another worktree and has not landed: $($o.workRoot) (branch $($o.branch), $($o.at)). It is that worktree's until it lands (tools/land.ps1). Put this module's events in its own <Module>Events.cs, or pass -Takeover if that work is abandoned."
+                return $plan
+            }
+            $plan.takeover += $info
+        }
+        if ($null -ne $l -and -not $p.EndsWith('.cs')) {
+            $plan.refusal = "$p has landed and differs in this worktree: the contracts are add-only (a landed file other than a type's .cs never changes). Undo it, or 'git merge $into' if this worktree is behind."
+            return $plan
+        }
+        $plan.writes += $p
+        if ($null -eq $e) { $plan.added += $p } else { $plan.updated += $p }
+        if ($w -eq $l) { $plan.restored += $p }
+    }
+
+    # Types: what landed stays, and every name once.
+    $csW = @($plan.writes | Where-Object { $_.EndsWith('.cs') })
+    $csD = @($plan.deletes | Where-Object { $_.EndsWith('.cs') })
+    if ($csW.Count + $csD.Count -eq 0) { return $plan }
+    $L = @{}; $A = @{}; $R = @{}
+    foreach ($p in $csW) {
+        if ($null -ne $landed[$p]) { $L[$p] = Get-HarnessBlobText $root $landed[$p] }
+        $A[$p] = @{ path = [IO.Path]::Combine($work, $p).Replace('\', '/') }
+    }
+    foreach ($p in $csD) { $A[$p] = $null }
+    foreach ($p in @($eFiles | Where-Object { $_.EndsWith('.cs') -and -not $A.ContainsKey($_) })) { $R[$p] = @{ path = $p } }
+    $check = Test-HarnessContracts -Landed $L -After $A -Rest $R
+    if ($check.changed.Count -gt 0) {
+        $sub['contractChanged'] = $check.changed
+        $plan.refusal = "landed contracts types would change: $(Format-HarnessContractChanges $check.changed). The contracts are add-only: a type that landed never changes (other modules use it); add a new type instead. If this worktree is behind, 'git merge $into' first."
+        return $plan
+    }
+    if ($check.conflicts.Count -gt 0) {
+        foreach ($c in $check.conflicts) {
+            $o = $owners[$c.other]
+            $c['otherOwner'] = if ($null -eq $landed[$c.other] -and $o) { "submitted from $($o.workRoot), not landed" } elseif ($null -ne $landed[$c.other]) { 'landed' } else { 'in the Editor tree' }
+        }
+        $sub['contractConflicts'] = $check.conflicts
+        $plan.refusal = "contracts type names already declared: $(Format-HarnessContractConflicts $check.conflicts). play.events counts events by type name, so two modules' events need two names: rename yours."
+    }
+    $plan
+}
+
 # ---- 0. Arguments ------------------------------------------------------------------------------------
 if (-not (Test-HarnessWorktree)) {
     Complete-Submit (New-FailReport 'submit' "submit.ps1 runs from an agent worktree ('git worktree add'). This is the Editor tree itself ($root): edit here and run tools/loop.ps1.")
@@ -118,7 +206,7 @@ foreach ($m in $Module) {
 if (-not $SkipCheck) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
     # The same PowerShell host, with this checkout as the work root (compile-check reads the sources from it).
-    $cc = Invoke-HarnessProcess (Get-HarnessPowerShell) @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'compile-check.ps1'), '-Module', ($Module -join ','), '-Backend', 'csc') -Environment @{ AGENTHARNESS_WORK_ROOT = $work }
+    $cc = Invoke-HarnessProcess (Get-HarnessPowerShell) @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'compile-check.ps1'), '-Module', ($Module -join ','), '-Backend', 'csc', '-Dependents') -Environment @{ AGENTHARNESS_WORK_ROOT = $work }
     $ccText = $cc.out
     $timings['checkSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
     $cc = $null
@@ -204,23 +292,24 @@ try {
         foreach ($d in @(Get-CreatedDirs $srcDirs)) { [void]$created.Add($d) }
         foreach ($d in @(Get-RelDirs $root $rel)) { if (-not $srcSet.ContainsKey($d)) { [void]$staleDirs.Add($d) } }
     }
-    # Contracts are add-only: new files are copied, a changed existing file is refused.
-    $conflicts = @()
-    if ($contracts) {
-        foreach ($f in @(Get-RelFiles $work $contracts)) {
-            $src = [IO.Path]::Combine($work, $f); $dst = [IO.Path]::Combine($root, $f)
-            if (-not [IO.File]::Exists($dst)) { [void]$writes.Add(@{ rel = $f; src = $src }); $sub.contractsAdded += $f }
-            elseif (-not (Test-SameFile $src $dst)) { $conflicts += $f }
+    # The contracts folder (G5-4): its files that this worktree changed, checked before anything is copied (Get-ContractPlan).
+    $cp = $null
+    if ($contracts -and -not $refusal) {
+        $cp = Get-ContractPlan
+        if ($cp.refusal) { $refusal = $cp.refusal }
+        else {
+            foreach ($f in $cp.writes) { [void]$writes.Add(@{ rel = $f; src = [IO.Path]::Combine($work, $f) }) }
+            foreach ($f in $cp.deletes) { [void]$deletes.Add($f) }
+            foreach ($d in @(Get-CreatedDirs @(Get-RelDirs $work $contracts))) { [void]$created.Add($d) }
+            $sub.contractsAdded = @($cp.added)
+            foreach ($k in @('updated', 'deleted', 'behind')) { if (@($cp[$k]).Count) { $sub["contracts$([char]::ToUpper($k[0]))$($k.Substring(1))"] = @($cp[$k]) } }
+            if (@($cp.takeover).Count) { $sub['contractTakeover'] = @($cp.takeover) }
         }
-        foreach ($d in @(Get-CreatedDirs @(Get-RelDirs $work $contracts))) { [void]$created.Add($d) }
     }
 
     if ($refusal) {
         $sub.contractsAdded = @()
         $report = New-FailReport 'submit' $refusal
-    } elseif ($conflicts.Count -gt 0) {
-        $sub.contractsAdded = @()
-        $report = New-FailReport 'submit' "$contracts is add-only, but these files differ from the Editor tree: $($conflicts -join ', '). Add a new file instead of changing one, or update the worktree (git merge master)."
     } else {
         if ($writes.Count + $deletes.Count -gt 0) {
             $journal = Start-HarnessSubmit -RunId $runId -WorkRoot $work -Modules $Module -Writes $writes.ToArray() -Deletes @($deletes) -CreatedDirs @($created)
@@ -262,6 +351,16 @@ try {
             $owners = Get-HarnessOwners
             foreach ($m in $Module) { $owners[$m] = [ordered]@{ workRoot = $work.Replace('\', '/'); branch = $wtBranch; runId = $runId; at = (Get-Date).ToString('o') } }
             Save-HarnessOwners $owners
+            # And the contracts files it wrote (un-landed now), until they land. A file written back to its landed content is nobody's.
+            if ($cp -and @($cp.writes).Count + @($cp.deletes).Count -gt 0) {
+                $co = Get-HarnessContractOwners
+                foreach ($f in @($cp.writes)) {
+                    if ($cp.restored -contains $f) { $co.Remove($f) }
+                    else { $co[$f] = [ordered]@{ workRoot = $work.Replace('\', '/'); branch = $wtBranch; runId = $runId; at = (Get-Date).ToString('o') } }
+                }
+                foreach ($f in @($cp.deletes)) { $co.Remove($f) }
+                Save-HarnessContractOwners $co
+            }
             # Copy the .meta files Unity generated for new files/folders back, so the agent commits stable GUIDs.
             $back = @()
             $cands = @($sub.contractsAdded | ForEach-Object { "$_.meta" }) + @($created | ForEach-Object { "$_.meta" })

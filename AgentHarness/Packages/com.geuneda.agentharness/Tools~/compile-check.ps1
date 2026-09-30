@@ -11,6 +11,9 @@
     and dependency DLLs from the Editor project it drives (Harness.psm1 Resolve-HarnessEditorRoot).
   - Chained: assemblies checked in one run are compiled in dependency order, and later ones reference this run's
     output instead of the Editor's DLL. -Module also checks the in-project assemblies it references (Game.Contracts).
+  - -Dependents (with -Module; submit.ps1's gate): also the in-project assemblies that reference what this run changes - the
+    modules' assemblies, and a referenced one whose sources differ from the Editor tree's (a contracts addition) - from this
+    checkout's sources ("dependentOf"). A new contracts type named like a type another module uses breaks that module (CS0104).
   - New assemblies the Editor has never compiled (no .rsp) are checked by csc with a response file synthesized from a
     template assembly of the same kind (Editor-only or not) plus the asmdef references ("synthesized": true).
 
@@ -27,13 +30,15 @@
   -> JSON { ok, backend, compileErrors:[{file,line,msg,module,assembly}], targets:[...], durationSec }
 
 .NOTES
-  Staleness: assemblies outside the checked set (other modules; Harness unless -IncludeHarness) are the Editor's last
-  compiled DLLs. Another module's public API change is only seen after the Editor compiled it (loop.ps1 / submit.ps1).
+  Assemblies outside the checked set (other modules; Harness unless -IncludeHarness) are the Editor's last compiled DLLs:
+  what the set references is compiled against exactly what the Editor tree has (where submit.ps1 puts the code). What
+  references the set is only compiled with -Dependents.
 #>
 param(
     [string[]]$Module,
     [ValidateSet('msbuild', 'csc')][string]$Backend = 'csc',
-    [switch]$IncludeHarness
+    [switch]$IncludeHarness,
+    [switch]$Dependents   # with -Module: also the assemblies that reference what changed (submit.ps1's gate)
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Harness.psm1') -Force
@@ -170,6 +175,16 @@ foreach ($f in $found['.cs']) {
     $sourcesOf[$o].Add($f)
 }
 
+# The response file of the Editor's own compile: Library/Bee/artifacts/<hash>EDbg.dag (Debug code optimization, which
+# the harness keeps) or <hash>E.dag. A Player build writes <hash>P*.dag ones, compiled without UNITY_EDITOR: checking
+# with those silently skipped code under #if UNITY_EDITOR. The newest file is not the current one (Bee rewrites a
+# response file only when its inputs change).
+function Find-Rsp([string]$assembly) {
+    $all = @(Get-ChildItem (Join-Path $root 'Library\Bee\artifacts') -Recurse -Filter "$assembly.rsp" -ErrorAction SilentlyContinue)
+    $rank = { param($f) if ($f.Directory.Name -cmatch 'EDbg\.dag$') { 0 } elseif ($f.Directory.Name -cmatch 'E\.dag$') { 1 } else { 2 } }
+    $all | Sort-Object @{ Expression = { & $rank $_ } }, @{ Expression = { $_.LastWriteTime }; Descending = $true } | Select-Object -First 1
+}
+
 # ---- Targets: the assemblies that compile module code ---------------------------------------------------------
 # Module folders come from the config; an asmdef inside one is its assembly, a folder without one is (part of) a
 # predefined assembly, which is then checked whole (its other files included).
@@ -197,22 +212,27 @@ $predefinedRefs = @{
     'Assembly-CSharp-Editor-firstpass' = @('Assembly-CSharp-firstpass')
     'Assembly-CSharp-Editor'           = @('Assembly-CSharp', 'Assembly-CSharp-firstpass', 'Assembly-CSharp-Editor-firstpass')
 }
-$all = @()
 $notEditor = @()   # asmdefs the Editor does not compile (includePlatforms without Editor, e.g. WebGL only): nothing to check
-foreach ($asm in @($modulesOf.Keys | Sort-Object)) {
+# What checking assembly <asm> of this checkout takes, or $null (not compiled in the Editor, or not in this checkout).
+function New-CheckTarget([string]$asm, [string[]]$Modules) {
     $sources = @(if ($sourcesOf.ContainsKey($asm)) { $sourcesOf[$asm] })
     if ($asmdefByName.ContainsKey($asm)) {
         $j = $asmdefByName[$asm].json
         $inc = @($j.includePlatforms | Where-Object { $_ }); $exc = @($j.excludePlatforms | Where-Object { $_ })
-        if (($inc.Count -gt 0 -and $inc -notcontains 'Editor') -or $exc -contains 'Editor') { $notEditor += $asm; continue }
+        if (($inc.Count -gt 0 -and $inc -notcontains 'Editor') -or $exc -contains 'Editor') { return 'notEditor' }
         $refs = @(@($j.references) | Where-Object { $_ } | ForEach-Object { if ($_ -like 'GUID:*') { $guidName[$_.Substring(5)] } else { $_ } } | Where-Object { $_ })
         $editorOnly = @($j.includePlatforms) -contains 'Editor'
     } elseif ($predefinedRefs.ContainsKey($asm)) {
         $refs = @($predefinedRefs[$asm]) + $autoRef
         $editorOnly = $asm -like '*-Editor*'
-    } else { continue }   # an asmref to an assembly that is not in this checkout
-    $all += [pscustomobject]@{ assembly = $asm; module = ($modulesOf[$asm] -join ','); modules = @($modulesOf[$asm]); sources = $sources; refs = $refs
-        editorOnly = $editorOnly; predefined = -not $asmdefByName.ContainsKey($asm); dependency = $false }
+    } else { return $null }   # an asmref to an assembly that is not in this checkout
+    [pscustomobject]@{ assembly = $asm; module = ($Modules -join ','); modules = @($Modules); sources = $sources; refs = $refs
+        editorOnly = $editorOnly; predefined = -not $asmdefByName.ContainsKey($asm); dependency = $false; dependent = $null }
+}
+$all = @()
+foreach ($asm in @($modulesOf.Keys | Sort-Object)) {
+    $t = New-CheckTarget $asm @($modulesOf[$asm])
+    if ($t -eq 'notEditor') { $notEditor += $asm } elseif ($t) { $all += $t }
 }
 $byName = @{}; foreach ($t in $all) { $byName[$t.assembly] = $t }
 
@@ -232,6 +252,67 @@ if ($Module.Count -gt 0) {
     $picked = @($sel.Values)
 }
 
+# -Dependents (G5-3; submit.ps1's gate): also the in-project assemblies that reference what this run changes, from this checkout's
+# sources. Assemblies outside the checked set are the Editor's DLLs, which is right for what the set references (it is compiled
+# against exactly those in the Editor tree), but not for what references the set: a new contracts type named like a type another
+# module uses (UnityEngine.Light, Harness.ClipEvent) makes that module's code ambiguous (CS0104), and only its own compile shows it.
+# Changed = the modules' own assemblies, and an in-project dependency (Game.Contracts) whose sources differ from the Editor tree's.
+$dependentsOf = @(); $dependentsSkipped = @()
+if ($Dependents -and $Module.Count -gt 0) {
+    $changed = @{}
+    foreach ($t in $picked) {
+        if (-not $t.dependency) { $changed[$t.assembly] = $true; continue }
+        if ($work -eq $root) { $changed[$t.assembly] = $true; continue }   # the Editor tree itself: nothing to compare with
+        $mine = @{}
+        foreach ($s in $t.sources) { $mine[$s.Substring($work.Length + 1).Replace('\', '/')] = $s }
+        $diff = $false
+        foreach ($rel in $mine.Keys) {
+            $other = [IO.Path]::Combine($root, $rel)
+            if (-not [IO.File]::Exists($other) -or [IO.File]::ReadAllText($mine[$rel]) -ne [IO.File]::ReadAllText($other)) { $diff = $true; break }
+        }
+        if (-not $diff -and $asmdefByName.ContainsKey($t.assembly)) {
+            # A source the Editor tree has and this checkout does not (same asmdef folder, not a nested assembly's).
+            $dir = [IO.Path]::GetDirectoryName($asmdefByName[$t.assembly].path).Substring($work.Length + 1)
+            $rootDir = [IO.Path]::Combine($root, $dir)
+            if ([IO.Directory]::Exists($rootDir)) {
+                foreach ($f in [IO.Directory]::EnumerateFiles($rootDir, '*.cs', [IO.SearchOption]::AllDirectories)) {
+                    $rel = $f.Substring($root.Length + 1).Replace('\', '/')
+                    if ($mine.ContainsKey($rel)) { continue }
+                    $owner = Get-OwnerAssembly ([IO.Path]::Combine($work, $rel))
+                    if ($owner -eq $t.assembly) { $diff = $true; break }
+                }
+            }
+        }
+        if ($diff) { $changed[$t.assembly] = $true }
+    }
+    $dependentsOf = @($changed.Keys | Sort-Object)
+    # Every assembly of this checkout (asmdefs, and predefined ones with code), transitively referencing a changed one.
+    $candidates = @(@($asmdefByName.Keys) + @($sourcesOf.Keys | Where-Object { $predefinedRefs.ContainsKey($_) }) | Sort-Object -Unique)
+    $inSet = @{}; foreach ($t in $picked) { $inSet[$t.assembly] = $true }
+    $reach = @{}; foreach ($k in $changed.Keys) { $reach[$k] = $k }
+    $grew = $true
+    while ($grew) {
+        $grew = $false
+        foreach ($asm in $candidates) {
+            if ($reach.ContainsKey($asm)) { continue }
+            $t = New-CheckTarget $asm @()
+            if (-not $t -or $t -eq 'notEditor' -or @($t.sources).Count -eq 0) { continue }
+            $via = @($t.refs | Where-Object { $reach.ContainsKey($_) } | Select-Object -First 1)
+            if ($via.Count -eq 0) { continue }
+            $reach[$asm] = $reach[$via[0]]
+            $grew = $true
+            if ($inSet.ContainsKey($asm)) { continue }
+            # Only what the Editor compiles (it has a response file): not e.g. a test assembly without the test framework.
+            if (-not (Find-Rsp $asm)) { $dependentsSkipped += "$asm (the Editor does not compile it)"; continue }
+            $t.modules = @(@($t.sources) | ForEach-Object { ModuleOf $_ } | Where-Object { $_ } | Sort-Object -Unique)
+            $t.module = $t.modules -join ','
+            $t.dependent = $reach[$asm]
+            $picked += $t
+            $inSet[$asm] = $true
+        }
+    }
+}
+
 # Dependency order, so each assembly can reference the DLLs compiled before it in this run.
 $pickedByName = @{}; foreach ($t in $picked) { $pickedByName[$t.assembly] = $t }
 $targets = New-Object System.Collections.ArrayList
@@ -247,16 +328,6 @@ foreach ($t in @($picked | Sort-Object assembly)) { Add-InOrder $t }
 # ---- Backends: each returns @{ ok; errors; dll; note; synthesized } -------------------------------------
 $built = @{}    # assembly -> DLL compiled in this run
 $failed = @{}   # assemblies that failed or were skipped in this run
-
-# The response file of the Editor's own compile: Library/Bee/artifacts/<hash>EDbg.dag (Debug code optimization, which
-# the harness keeps) or <hash>E.dag. A Player build writes <hash>P*.dag ones, compiled without UNITY_EDITOR: checking
-# with those silently skipped code under #if UNITY_EDITOR. The newest file is not the current one (Bee rewrites a
-# response file only when its inputs change).
-function Find-Rsp([string]$assembly) {
-    $all = @(Get-ChildItem (Join-Path $root 'Library\Bee\artifacts') -Recurse -Filter "$assembly.rsp" -ErrorAction SilentlyContinue)
-    $rank = { param($f) if ($f.Directory.Name -cmatch 'EDbg\.dag$') { 0 } elseif ($f.Directory.Name -cmatch 'E\.dag$') { 1 } else { 2 } }
-    $all | Sort-Object @{ Expression = { & $rank $_ } }, @{ Expression = { $_.LastWriteTime }; Descending = $true } | Select-Object -First 1
-}
 
 function Invoke-CscCheck($t) {
     $rsp = Find-Rsp $t.assembly
@@ -348,6 +419,7 @@ foreach ($t in $targets) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $row = [ordered]@{ assembly = $t.assembly; module = $t.module }
     if ($t.dependency) { $row['dependency'] = $true }
+    if ($t.dependent) { $row['dependentOf'] = $t.dependent }
     $badDeps = @($t.refs | Where-Object { $failed.ContainsKey($_) })
     if ($badDeps.Count -gt 0) {
         $failed[$t.assembly] = $true
@@ -375,6 +447,7 @@ $report = [ordered]@{
     durationSec   = [math]::Round($total.Elapsed.TotalSeconds, 2)
 }
 if ($notEditor.Count -gt 0) { $report['notCompiledInEditor'] = @($notEditor) }
+if ($Dependents) { $report['dependentsOf'] = @($dependentsOf); if ($dependentsSkipped.Count -gt 0) { $report['dependentsSkipped'] = @($dependentsSkipped) } }
 if (Test-HarnessWorktree) { $report['sourceRoot'] = $work.Replace('\', '/'); $report['editorRoot'] = $root.Replace('\', '/') }
 $report | ConvertTo-Json -Depth 6
 exit $(if ($report.ok) { 0 } else { 1 })

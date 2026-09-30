@@ -17,7 +17,7 @@
 - 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태·워크플로우 절 갱신 → 새로 드러난 항목 추가 →
   **저장소 루트 `README.md`와 `AgentHarness/CLAUDE.md`(필요하면 `Tools~/templates/AgentHarness.md`)에 바뀐 기능·측정값 반영** → 커밋(메시지에 항목 ID).
   README·ROADMAP 갱신은 워크플로우마다 빠뜨리지 않는다(W2 커밋은 README를 건드리지 않았고, W4 뒤에도 README "요구 사항"에 6.6의 옛 상태가 남아 있었다).
-- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. 선행이 없는 W5·W7·W9는 앞당겨도 된다.
+- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. 남은 W10–W12는 선행이 모두 끝나 순서를 바꿔도 된다.
 - 크기: S = 파일 1–2개 · M = 여러 파일 또는 새 커맨드 · L = 조사가 필요하거나 새 하위 시스템.
 
 | 순서 | 워크플로우 | 항목 | 크기 | 선행 | 상태 |
@@ -30,7 +30,7 @@
 | W6 | 콘텐츠 헬퍼(a/b/c로 나눠 진행) | G1-3, G1-4, G4-1, G4-4 (+G3-10, G3-11) | L | W3, W4 (W6b는 W2) | 완료 (2026-09-30; 남은 하늘·반사는 G4-5) |
 | W7 | 에디터 밖·여러 에디터 | G2-2, G2-4, G1-2, G5-1 | L | — | 완료 (2026-09-30; G2-4는 Unity 쪽 리로드만 남음) |
 | W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 (+G3-12, G3-13) | L | W1 | 완료 (2026-09-30; G3-8은 사내 프로젝트 A 확인만 남음 — Android 타깃) |
-| W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 대기 |
+| W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 완료 (2026-09-30) |
 | W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 대기 |
 | W11 | 백그라운드 에디터의 실제 입력 격리 | G3-9 | S | — | 대기 |
 | W12 | 핫 루프 넓히기 | G2-5 | M | W5 | 대기 |
@@ -121,12 +121,16 @@
   에디터 플레이 모드와 플레이어의 첫 프레임 차이(맞춤), 플레이어 첫 씬의 파티클 한 스텝(엔진 동작, 보고만).
 - 매트릭스 1이 플레이어 실행을 본다(selftest 1번 끝), 10은 `attach-test.ps1 -Player`로 기존 프로젝트에서.
 
-### W9 병렬 작업의 공유 지점 (G5-4 → G5-3)
-- G5-4: 이벤트 파일을 발행 모듈별로 나누는 lint(`Editor/HarnessLint.cs`)와 이름 충돌 검사. 계약 파일도 owners.json처럼 추가한 worktree를 기록해
-  병합 전까지는 그 worktree만 고치게 한다(`Tools~/submit.ps1`, `Tools~/land.ps1`).
-- G5-3: 남은 부분(검사 집합 밖 모듈은 에디터 DLL 기준)이 worktree 흐름에서 실제로 문제가 되는지부터 본다. 아니면 `[~]`인 채로 닫는다.
-- 추가 검증: 매트릭스 7·8에 "두 worktree가 같은 이벤트 이름을 추가 → 두 번째 submit/land 거부"를 더한다.
-- 에이전트 여럿을 붙여 쓰기 시작하면 앞당긴다.
+### W9 병렬 작업의 공유 지점 (G5-4 → G5-3) — 완료 (2026-09-30, 아래 "해결됨")
+- 결과: 계약 폴더의 규칙을 기계가 지킨다. **파일은 발행 모듈별**(`<Module>Events.cs`에 그 모듈이 발행하는 이벤트 — lint가 모듈의 IL에서 `EventBus.Publish<T>`를
+  찾아 대조), **이름은 한 번**(play.events가 타입 이름으로 센다), **올라간 타입은 바뀌지 않는다**(add-only를 파일이 아니라 타입 단위로: Roslyn 토큰 해시, 새 타입은
+  모듈 파일에 덧붙인다). submit·land가 복사·병합 전에 거부하고(submit 2.1–2.4 s, land 1.5–1.7 s), 아직 land하지 않은 계약 파일은 올린 worktree 것이다
+  (`Library/Harness/submit/contracts.json`, land가 해제). G5-3은 실제 문제였다: 계약에 다른 모듈이 쓰는 이름(`Light`)을 더하면 그 모듈이 CS0104로 깨지는데
+  게이트는 그 모듈을 컴파일하지 않았다 → `compile-check -Dependents`(submit 게이트).
+- 하다가 찾은 것: 예전 submit의 add-only는 파일 단위라 문서("새 struct 추가")보다 엄격했고, 모듈 파일 규칙과 합치면 올라간 `<Module>Events.cs`에 이벤트를 더할 수
+  없었다. land는 계약을 아예 검사하지 않았다(같은 이름은 병합 뒤 CS0101로 전체 루프를 돌고서야 되돌렸다).
+- 매트릭스 5(lint 규칙 4종), 7(같은 이름·남의 미병합 계약·올라간 타입 변경 거부, 역의존 게이트, 자기 계약 수정), 8(land 쪽 같은 이름·타입 변경 거부, 덧붙인
+  이벤트의 submit → land → 소유 해제).
 
 ### W10 렌더 밖의 프로젝트 설정도 코드로 (G1-5)
 - W4의 `ISettingsStep`/`SettingsContext`를 넓힌다: 품질 레벨 목록과 레벨별 값, Player Settings(색 공간·방향), Physics·Time, Tags/Layers.
@@ -305,17 +309,11 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 - **G5-1 에디터 1개 → 루프가 직렬화된다** → 2026-09-30 해결(W7, 아래 "해결됨"): worktree마다 에디터(`open.ps1 -Own`), 루프 2개 동시에 대기 0.
   에디터 수 = worktree 수라 메모리(~2 GB)·디스크(`Library/`)가 그만큼 든다. 에디터 몇 개를 여러 worktree가 나눠 쓰는 풀은 만들지 않았다.
 
-- [~] **G5-3 compile-check는 다른 모듈의 최신 변경을 모른다**
-  - 2026-09-29 부분 해결(G5-2 작업 중): 한 실행에서 검사하는 어셈블리는 의존 순서로 컴파일해 방금 만든 DLL을 참조한다(체인).
-    `-Module`은 참조하는 프로젝트 어셈블리(`Game.Contracts`)를 자동으로 포함하므로 worktree에서 추가한 이벤트 타입이 보인다.
-  - 남은 것: 검사 집합 밖(다른 모듈, `-IncludeHarness` 없는 Harness)은 여전히 에디터가 마지막으로 컴파일한 DLL 기준.
-    worktree 흐름에서는 그게 곧 submit이 합쳐질 에디터 트리 상태라 문제가 적다.
+- **G5-3 compile-check는 다른 모듈의 최신 변경을 모른다** → 2026-09-30 해결(W9, 아래 "해결됨"): 검사 집합이 참조하는 쪽은 에디터 DLL이 맞았고(submit이 합쳐질
+  에디터 트리가 컴파일하는 바로 그것), 문제는 집합을 참조하는 쪽이었다 → `-Dependents`(submit 게이트).
 
-- [ ] **G5-4 `Assets/Game/Contracts`가 공유 지점이다**
-  - 현상: "추가만" 규칙으로 버티는 중. 같은 이벤트 이름을 두 에이전트가 동시에 만들면 충돌.
-    submit은 에디터 트리에 이미 있는 계약 파일의 변경을 거부하므로, 에이전트가 자기가 막 추가한(아직 병합 안 된) 계약도 submit으로는 고칠 수 없다.
-  - 방향: 이벤트 파일을 발행 모듈별로 분리하는 규칙 강제(lint), 이름 충돌 검사. owners.json처럼 계약 파일도 추가한 worktree를 기록해
-    병합 전까지는 그 worktree만 고칠 수 있게.
+- **G5-4 `Assets/Game/Contracts`가 공유 지점이다** → 2026-09-30 해결(W9, 아래 "해결됨"): 발행 모듈별 파일·이름 한 번(lint), 타입 단위 add-only·이름 충돌·미병합
+  계약 파일의 소유(submit·land).
 
 ## 이식성 — `npm install three`처럼 어디에나 붙는다
 
@@ -408,7 +406,7 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
-**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~7분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
+**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~9분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
 (새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~9분), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
 
@@ -448,18 +446,27 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    → 루프 녹색, golden `changed` + `rect` + diff PNG. 파이프라인이 못 그리는 머티리얼(받침대 → `Standard`, G3-5)
    → 샷 `magenta` + `hint`에 `Smoke/Pedestal` + golden `changed`, 루프는 녹색 → 원복 후 마젠타 없음·golden `same`. 빌더 메시 변경(아치 두께 2배, G3-11)
    → 첫 루프가 이미 새 메시(golden `changed`, 다음 루프와 같은 값) → 원복 후 `same`
-5. 리셋 없는 static 추가 → `stage=lint` → 원복
+5. 리셋 없는 static 추가 → `stage=lint` → 원복. 계약(G5-4, 같은 루프): 모듈 이름이 아닌 계약 파일(`SelftestEvents.cs`), 다른 네임스페이스의 같은 이벤트 이름
+   (`SpinnerLap`), Stage가 발행하는데 `StageEvents.cs`가 아닌 곳에 있는 이벤트, Stage도 발행하는 Smoke의 `SpinnerLap` → `contract-file`·`contract-name` 5건이
+   각각 맞는 파일·모듈로(그 밖의 계약 이슈 없음)
 6. 루프 2개 동시 실행 → 두 번째가 대기 후 성공. 그리고 worktree 전용 에디터(W7): 커밋된 코드의 detached worktree(`<저장소>-st-o`)에 컴파일 에러를 넣고
    `open.ps1 -Own` → `Library/` 사본 + 창 없는·`-automated` 에디터가 그래도 뜸(`compileFailed`) → 그 루프가 주입한 줄로 `stage=compile` → 되돌리면 에디터 트리
    루프와 동시에 둘 다 녹색·대기 0·fingerprint·events 같음·`render` 없음(`fps.note`)·첫 샷들이 그 에디터 트리 루프의 샷과 허용치 안에서 같음(O-11 우회 확인,
    기준 이미지가 없는 버전에서도; 커밋된 기준 이미지도 `changed` 0) → `quit.ps1`로 닫힘
 7. worktree 격리(G5-2): 에이전트 worktree 2개. A가 깨진 코드를 `submit.ps1 -SkipCheck` → `stage=compile` + `reverted` + `restore.ok`,
    그 사이 B의 `submit.ps1`은 락 대기 후 녹색. 게이트(`-SkipCheck` 없이)는 에디터 트리를 건드리지 않고 거부. submit 도중 kill →
-   다음 `loop.ps1`에 `recoveredSubmit`, 녹색. 끝나면 메인 트리 `git status`로 테스트 사본이 남지 않았는지 확인
+   다음 `loop.ps1`에 `recoveredSubmit`, 녹색. 끝나면 메인 트리 `git status`로 테스트 사본이 남지 않았는지 확인.
+   계약(W9): B의 새 계약 파일은 B 소유(`contracts.json`)이고 게이트가 계약을 쓰는 Smoke·Stage도 컴파일(G5-3); 타입 해시가 주석·줄바꿈에는 같고 필드 타입에는
+   다름; A가 올라간 `SpinnerLap`을 바꿈 → `stage=submit` + `contractChanged`; A가 B의 미병합 `ProbeEcho`와 같은 이름을 Smoke 파일에 덧붙임 →
+   `contractConflicts`(상대가 미병합임을 보고), 에디터 트리 무변경; A가 B의 미병합 `ProbeEvents.cs`를 자기 내용으로 → `contractOwner` B;
+   A가 `Light`를 덧붙임 → 게이트가 `StageModule.cs`의 CS0104(모듈 Stage)로 `stage=compile`; B가 자기 미병합 계약에 필드를 더해 다시 submit → 녹색·`contractsUpdated`
 8. land(G5-5): 새 모듈을 submit → 커밋 → `land.ps1` 녹색(에디터 트리 `git status` 깨끗, stash 버림, 소유 해제), 그 사이 다른 worktree의
    submit은 락 대기 후 녹색. 컴파일 에러 커밋 land → `stage=compile` + `land.reverted` + `restore.ok`, HEAD·`git status` 동일.
    land를 병합 직후 kill → 다음 `loop.ps1`에 `recoveredLand`, 녹색, HEAD·`git status` 동일. `.meta` 미커밋·충돌 → `stage=land` 거부, 무변경.
    (selftest는 이미 병합됨·미커밋·에디터 트리 직접 수정 거부까지 보고, 끝나면 worktree·`selftest/*` 브랜치·테스트 커밋을 스스로 걷어낸다)
+   계약(W9): 첫 land가 모듈과 함께 계약 파일 소유도 해제(`releasedContracts`); A의 브랜치가 올라간 `ProbeEcho`와 같은 이름을 선언 → `stage=land` +
+   `contractConflicts`(landed), 올라간 타입을 바꿈 → `contractChanged`, 둘 다 HEAD·`git status` 무변경; A가 Smoke 파일에 새 이벤트를 덧붙여 submit(A 소유) →
+   커밋 → land(병합 커밋) 녹색, 소유 해제, 에디터 트리 깨끗
 9. 새 클론(O-8): `tools/`·`ProjectSettings/`·`Packages/`·`.gitignore`·에디터 시작 코드를 바꿨으면 임시 커밋 후
    `tools/fresh-clone-test.ps1 -SelfTest -ExpectFingerprint <1의 fingerprint>` 녹색(클론이 메인 트리와 같은 fingerprint), `shots/`를 Read로 확인.
    루프 요약의 `golden`: 샘플 버전(6000.3.11f1)은 커밋된 기준 이미지와 `same=3`(새 Library의 첫 임포트도 같은 픽셀), 다른 버전은 `missing`.
@@ -479,6 +486,53 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G5-4 `Assets/Game/Contracts`가 공유 지점이다** · **G5-3 compile-check는 다른 모듈의 최신 변경을 모른다** (2026-09-30, W9)
+  - 현상(전): 계약 폴더는 "추가만" 규칙과 주석("One file per publishing module")으로 버텼다. submit은 에디터 트리에 있는 계약 **파일**이 달라지면 거부했고(자기가 막
+    올린 미병합 계약도 못 고침), 같은 이벤트 이름을 두 에이전트가 다른 파일에 만들면 에디터 트리 루프가 CS0101(같은 네임스페이스)로 빨개지거나, 다른 네임스페이스면
+    컴파일은 되는데 `play.events`가 둘을 한 이름으로 셌다(`EventBus`가 `typeof(T).Name`으로 센다). land는 계약을 검사하지 않았다. compile-check의 검사 집합 밖은
+    에디터 DLL 기준이라 "다른 모듈의 최신 변경을 모른다"(G5-3 `[~]`).
+  - 조사(G5-3): 집합이 **참조하는** 쪽(Harness, 다른 패키지)은 에디터 DLL이 정확히 맞다 — submit이 코드를 넣을 에디터 트리가 컴파일하는 그 DLL이다. 모듈끼리는
+    `module-boundary`로 서로 참조하지 않는다. 문제는 집합을 **참조하는** 쪽이었다: worktree에서 Smoke 파일에 `public readonly struct Light { }`를 더하면 게이트
+    (`-Module Smoke` = Smoke + Contracts)는 녹색인데 에디터 트리에서는 `StageModule.cs:18`이 CS0104(`Game.Contracts.Light` vs `UnityEngine.Light`)로 깨진다 →
+    남의 모듈 에러로 submit이 되돌려지고 그동안 에디터 트리 락을 잡는다. 추가만 하는 계약이 다른 모듈을 깨뜨리는 유일한 길이 이 이름 충돌이다.
+    기존 프로젝트의 `modules[]` 배치는 모듈끼리 직접 참조할 수 있어 더 흔하다: BagelGame(`-Module Game=Assets/Game,UI=Assets/UI`)에서 Game의 공개 속성
+    `BagelTracker.bagelTrackerData`의 이름을 바꾸면 `-Module Game` 게이트는 녹색(0.47 s), `-Dependents`는 UI 모듈의 `BagelTrackerDriver.cs:22` CS1061로 빨강(0.70 s;
+    BagelUI·BagelUIEditor·BagelTests·BagelTestsEditor까지 검사).
+  - 방법:
+    - lint(`Editor/HarnessContracts.cs`, `harness_lint`): `contract-file` — 계약 폴더의 .cs는 `<Module>Events.cs`(모듈 = 모듈 루트의 폴더·`modules[]`), 모듈 M이
+      발행하는 계약 타입은 `MEvents.cs`에(발행 = M의 런타임 어셈블리 IL에서 `call EventBus.Publish<T>`를 찾음: `MethodBody.GetILAsByteArray` + `Module.ResolveMethod`,
+      람다·상태 기계 포함, 제네릭 T는 건너뜀), 두 모듈이 발행하면 각 모듈에 한 줄. `contract-name` — 계약의 최상위 타입 이름(+arity)이 두 번(네임스페이스가 달라도).
+      선언은 Pipeline이 번들한 Roslyn(3.11) 구문 트리로.
+    - `harness_contracts`: 소스(경로 또는 텍스트)가 선언하는 최상위 타입 `{name, ns, full, kind, line, hash}` — hash는 그 타입의 토큰(속성 포함, 공백·주석 제외).
+    - submit(`Get-ContractPlan`, 락 안, 복사 전): 계약 파일마다 — 두 트리가 같거나 이 worktree가 바꾸지 않은 파일(에디터 트리 브랜치와 만나는 merge-base와 같음:
+      뒤처졌을 뿐, `contractsBehind`)은 그대로; 다른 살아 있는 worktree가 올리고 아직 land하지 않은 파일은 거부(`contractOwner`, `-Takeover`); 올라간 .cs는
+      **타입 단위 add-only**(올라간 타입이 모두 같은 hash로 남아야 함 — 새 타입은 덧붙여도 됨, `contractChanged`), 올라간 .meta는 불변; 뒤의 계약 전체에서 새 타입
+      이름이 한 번(`contractConflicts`, 상대가 landed/미병합인지). 이 worktree의 미병합 계약은 고치거나 지울 수 있다(`contractsUpdated`/`contractsDeleted`).
+      유지되면 쓴 파일을 `Library/Harness/submit/contracts.json`에 이 worktree 소유로(올라간 내용으로 되돌린 파일은 해제).
+    - land(병합 전): 병합이 바꾸는 계약 파일에 다른 worktree의 미병합 submit이 있으면 거부(`contractOwner`), 병합 결과로 올라간 타입이 바뀌면(`contractChanged`),
+      병합 결과 + 에디터 트리의 나머지 계약(미병합 포함)에서 이름이 겹치면(`contractConflicts`). 이 브랜치 소유의 미병합 계약 사본은 `foreign`이 아니다.
+      녹색이면 커밋된 것과 같아진 계약 파일의 소유를 해제(`releasedContracts`; 아직 다르면 `stillPending`).
+    - compile-check `-Dependents`(submit 게이트가 씀): 모듈의 어셈블리와, 에디터 트리와 소스가 다른 참조 어셈블리(계약 추가)를 참조하는 프로젝트 어셈블리를 이
+      worktree 소스로 함께 컴파일(`dependentOf`). 에디터가 컴파일하지 않는(응답 파일 없는) 어셈블리는 건너뜀(`dependentsSkipped`).
+  - 조사하며 찾은 것:
+    1. 예전 add-only는 파일 단위였다 — 문서(`SmokeEvents.cs` 주석 "add new files/structs")보다 엄격했고, "발행 모듈별 파일"과 합치면 올라간 `<Module>Events.cs`에
+       그 모듈의 새 이벤트를 영영 더할 수 없었다 → 타입 단위. 올라간 파일이 자라기 시작하면 그 파일을 안 건드린 worktree도 뒤처지므로 merge-base와 비교해 건너뛴다.
+    2. land는 계약을 검사하지 않았다(브랜치가 올라간 계약을 바꿔도 병합했고, 같은 이름은 병합 뒤 CS0101 → 전체 루프 → 되돌림).
+    3. lint의 첫 판은 도메인 리로드 직후 83–158 ms였다 — `CompilationPipeline.GetAssemblies(Editor)`(캐시 전 ~60 ms)와 Builders 어셈블리까지 훑은 탓 → static-reset이
+       이미 받은 Player 목록(런타임 어셈블리)으로 21–30 ms(Roslyn 파싱 12–19 ms, IL 4–6 ms), 웜 2.5 ms.
+    4. PowerShell 모듈(`Set-StrictMode -Version Latest`)에서 해시테이블의 없는 키를 속성 문법(`$h.text`)으로 읽으면 예외다 → 인덱서(`$h['text']`).
+  - 검증: 매트릭스 1–8 녹색(에디터 트리 520 s, fingerprint `345ba0d7`, 표식 줄 64/71/77/87 그대로; 5번 lint 5건 25 s, 7번 26개 검사 79 s, 8번 24개 75 s).
+    9: 새 클론 6.3 녹색(701 s: 루프 3회 `345ba0d7`·기준 이미지 same=3, 클론 selftest 1–8 598 s, 플레이어 422 fps), 6.0 녹색(528 s, `c8561a2d`, selftest 437 s;
+    플레이어 단계는 W8처럼 URP 다운그레이드로 빌드 전에 건너뜀), 6.6 녹색(742 s, `7cda8899`, selftest 618 s, 플레이어 330 fps; 빌드가 쓴 6.6 직렬화는 보고만).
+    10: BagelGame 녹색(50 s, 루프 3회 `619be553`, 출시 빌드에 `Harness.*` 없음, 제거 뒤 깨끗), Fluid-Sim 녹색(29 s, `54880f05`), 사내 프로젝트 A 녹색
+    (`brd-attach.json`, 81 s, `6664b723`). 기존 프로젝트는 `contracts`가 비어 있어 계약 규칙이 돌지 않는다(루프·lint 그대로); `-Dependents`는 BagelGame에
+    설치해 따로 확인했다(위 조사, 제거 뒤 `git status` 깨끗).
+  - 측정값(이 머신): submit 게이트 `compile-check -Module Smoke` 1.15 s → 계약이 바뀐 `-Dependents` 1.42 s(Game.Stage 컴파일 +0.13 s; 계약이 같으면 추가 없음),
+    worktree 게이트 1.27–1.39 s. 계약 거부는 게이트 뒤 락 안에서 ~1 s(submit 한 번 2.1–2.4 s), land 거부 1.5–1.7 s. `harness_contracts` 소스 2개 17 ms.
+    lint 전체는 리로드 직후 ~100–125 ms(계약 21–30 ms), 루프 시간은 그대로.
+  - 남은 것: 발행 모듈은 모듈 루트의 asmdef 모듈만 본다(`modules[]`의 `Assembly-CSharp` 코드가 발행하는 계약은 파일 규칙에서 빠짐). 파일 사이로 옮긴 타입은
+    "지움 + 새 타입"이라 올라간 뒤엔 거부된다. 역의존은 이 worktree의 소스로 컴파일한다(worktree가 뒤처졌으면 그 스냅샷 기준 — 최종 판정은 에디터 트리 루프).
 
 - [x] **G3-2 에디터 플레이 모드 FPS는 실제 성능을 대표하지 못한다** · **G3-8 에디터 캡처의 UI가 게임의 화면 크기 코드와 어긋날 수 있다**(경로; 사내 프로젝트 A 확인은 [~])
   (+ **G3-12 캡처가 HDR 이미션·블룸을 잘랐다**, **G3-13 6.6의 render 카운터**, 2026-09-30, W8)

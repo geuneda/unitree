@@ -34,10 +34,13 @@ namespace Harness.Editor
             "Rule checks: (static-reset) with Domain Reload off, mutable statics in module/harness runtime assemblies must live in a " +
             "type with a [RuntimeInitializeOnLoadMethod(SubsystemRegistration)] reset; (module-asmdef) every .cs of a module under a " +
             "module root belongs to that module's asmdef; (module-boundary) modules under a module root reference no other module " +
-            "except the contracts. Modules: ProjectSettings/AgentHarness.json. Returns {ok, issues[], skipped[]}.",
+            "except the contracts; (contract-file) a contracts file is <Module>Events.cs and holds the events that module publishes " +
+            "(EventBus.Publish in its compiled code), one publishing module per event; (contract-name) no two contracts types share a " +
+            "name. Modules and contracts: ProjectSettings/AgentHarness.json. Returns {ok, issues[], skipped[]}.",
             Tags = new[] { "harness", "scripts" })]
         public static object Lint()
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var issues = new List<Issue>();
             var skipped = new List<string>();
             // With Domain Reload on (an attached project's default) statics are reset by the reload itself.
@@ -45,7 +48,10 @@ namespace Harness.Editor
                 CheckStatics(issues);
             else skipped.Add("static-reset: Domain Reload is on, statics are reset on every play");
             CheckModuleAssemblies(issues);
-            return new { ok = issues.Count == 0, issues, skipped };
+            var contractsMs = sw.Elapsed.TotalMilliseconds;
+            HarnessContracts.Lint(issues);
+            contractsMs = sw.Elapsed.TotalMilliseconds - contractsMs;
+            return new { ok = issues.Count == 0, issues, skipped, ms = Math.Round(sw.Elapsed.TotalMilliseconds, 1), contractsMs = Math.Round(contractsMs, 1) };
         }
 
         static void CheckStatics(List<Issue> issues)
