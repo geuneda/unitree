@@ -9,7 +9,7 @@ namespace Harness.Procedural
     /// Accumulates vertices/triangles and produces a Mesh (normals, tangents, bounds, 32-bit indices
     /// when needed). Static factories cover the common primitives; everything is deterministic.
     /// </summary>
-    public sealed class MeshBuilder
+    public sealed partial class MeshBuilder
     {
         public readonly List<Vector3> Vertices = new List<Vector3>();
         public readonly List<Vector3> Normals = new List<Vector3>();

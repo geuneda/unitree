@@ -25,6 +25,17 @@ namespace Harness.Editor
         /// <summary>HDR emission color; anything but black turns emission on. <see cref="EmissionMap"/> multiplies it.</summary>
         public Color Emission = Color.black;
         public Texture EmissionMap;
+        /// <summary>
+        /// Tiling detail for close-ups (URP Lit detail maps, UVs = the main UVs x <see cref="DetailTiling"/>): the albedo is multiplied by
+        /// 2 x this, so 0.5 changes nothing - import it linear (<c>SaveTexture(..., sRGB: false)</c> or <c>BakeTexture(..., sRGB: false)</c>).
+        /// </summary>
+        public Texture DetailAlbedoMap;
+        /// <summary>A normal map blended over <see cref="NormalMap"/> at the detail tiling.</summary>
+        public Texture DetailNormalMap;
+        public float DetailNormalScale = 1f;
+        public Vector2 DetailTiling = Vector2.one;
+        /// <summary>Where the detail shows (alpha channel); null = everywhere.</summary>
+        public Texture DetailMask;
         /// <summary>Alpha-blended in the transparent queue instead of opaque.</summary>
         public bool Transparent;
         /// <summary>Alpha clipping threshold (0..1); null = no clipping.</summary>
@@ -51,6 +62,8 @@ namespace Harness.Editor
             CheckTexture(name, "NormalMap", s.NormalMap, normalMap: true);
             CheckTexture(name, "MetallicGlossMap", s.MetallicGlossMap, normalMap: false);
             CheckTexture(name, "OcclusionMap", s.OcclusionMap, normalMap: false);
+            CheckTexture(name, "DetailAlbedoMap", s.DetailAlbedoMap, normalMap: false);
+            CheckTexture(name, "DetailNormalMap", s.DetailNormalMap, normalMap: true);
             return Material(name, shader, m =>
             {
                 m.SetColor("_BaseColor", s.BaseColor);
@@ -66,6 +79,11 @@ namespace Harness.Editor
                 m.SetFloat("_OcclusionStrength", s.OcclusionStrength);
                 m.SetColor("_EmissionColor", s.Emission);
                 m.SetTexture("_EmissionMap", s.EmissionMap);
+                m.SetTexture("_DetailAlbedoMap", s.DetailAlbedoMap);
+                m.SetTexture("_DetailNormalMap", s.DetailNormalMap);
+                m.SetFloat("_DetailNormalMapScale", s.DetailNormalScale);
+                m.SetTextureScale("_DetailAlbedoMap", s.DetailTiling);
+                m.SetTexture("_DetailMask", s.DetailMask);
                 // URP's validation turns _EMISSION on only when the GI flags are not EmissiveIsBlack (the Emission toggle);
                 // enabling the keyword by hand is undone.
                 m.globalIlluminationFlags = s.Emission.maxColorComponent > 0f ? MaterialGlobalIlluminationFlags.RealtimeEmissive : MaterialGlobalIlluminationFlags.EmissiveIsBlack;
@@ -83,7 +101,7 @@ namespace Harness.Editor
             if (normalMap && imp.textureType != TextureImporterType.NormalMap)
                 Warn($"material '{material}': {slot} '{texture.name}' is not imported as a normal map (ctx.SaveTexture(..., normalMap: true)); its colors are read as normals");
             if (!normalMap && imp.sRGBTexture)
-                Warn($"material '{material}': {slot} '{texture.name}' is imported as sRGB; mask data should be linear (ctx.SaveTexture(..., sRGB: false))");
+                Warn($"material '{material}': {slot} '{texture.name}' is imported as sRGB; URP reads it as linear data (ctx.SaveTexture or ctx.BakeTexture with sRGB: false)");
         }
 
         // URP keeps these for upgrading Built-in materials; the Lit shaders never read them.

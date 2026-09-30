@@ -39,12 +39,13 @@ namespace Harness.Editor
         /// Skip expensive generation when nothing that could change its output changed. Returns true (and keeps the
         /// listed assets alive) when the assets exist and the key matches; otherwise generate and save them yourself.
         /// Key = <paramref name="name"/> + <paramref name="inputs"/> + compiled content of this step's assembly and of
-        /// Harness.Runtime (deterministic compile: MVID changes iff code changes). Pass anything else the output depends
-        /// on (e.g. a file hash) in <paramref name="inputs"/>. harness_build --no_cache ignores it.
+        /// Harness.Runtime (deterministic compile: MVID changes iff code changes) + the source of the module's shaders and of the
+        /// harness shader includes (a GPU bake's shader changed). Pass anything else the output depends on (e.g. a file hash) in
+        /// <paramref name="inputs"/>. harness_build --no_cache ignores it.
         /// </summary>
         public bool CacheHit(string name, string[] relativeAssets, params object[] inputs)
         {
-            var parts = new List<string> { Module, name, StepAssembly?.ManifestModule.ModuleVersionId.ToString(), typeof(ShotPreset).Assembly.ManifestModule.ModuleVersionId.ToString() };
+            var parts = new List<string> { Module, name, StepAssembly?.ManifestModule.ModuleVersionId.ToString(), typeof(ShotPreset).Assembly.ManifestModule.ModuleVersionId.ToString(), ShadersHash() };
             foreach (var i in inputs) parts.Add(Convert.ToString(i, System.Globalization.CultureInfo.InvariantCulture));
             var key = string.Join("|", parts);
             var cacheName = Module + "/" + name;
@@ -72,6 +73,26 @@ namespace Harness.Editor
 
         internal int CacheHits;
 
+        readonly Dictionary<string, string> m_ShadersHash = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        /// <summary>Source hash of this module's shaders (.shader/.hlsl/.cginc/.compute) and the harness's Shaders/ includes, once per build.</summary>
+        string ShadersHash()
+        {
+            if (m_ShadersHash.TryGetValue(Module ?? "", out var h)) return h;
+            var folder = ModuleFolder();
+            h = (folder == null ? "none" : SourcesHash(folder, ".shader", ".hlsl", ".cginc", ".compute")) + "+" + SourcesHash(HarnessConfig.PackageRoot + "/Shaders", ".hlsl");
+            return m_ShadersHash[Module ?? ""] = h;
+        }
+
+        /// <summary>The folder of the module whose step is running (ProjectSettings/AgentHarness.json), or null.</summary>
+        internal string ModuleFolder()
+        {
+            var config = HarnessPaths.Config;
+            foreach (var m in config.modules) if (m.name == Module) return m.path;
+            foreach (var root in config.moduleRoots) if (AssetDatabase.IsValidFolder(root + "/" + Module)) return root + "/" + Module;
+            return null;
+        }
+
         internal void CommitCache()
         {
             foreach (var kv in PendingCacheKeys) m_Cache.Set(kv.Key, kv.Value);
@@ -85,6 +106,9 @@ namespace Harness.Editor
         {
 #if AGENTHARNESS_ANIMATION
             CheckAnimations();
+#endif
+#if AGENTHARNESS_URP
+            CheckDecals();
 #endif
         }
 
@@ -182,7 +206,12 @@ namespace Harness.Editor
             var existing = AssetDatabase.LoadMainAssetAtPath(path);
             if (existing != null && existing.GetType() == obj.GetType())
             {
-                EditorUtility.CopySerialized(obj, existing);
+                // CopySerialized replaces a mesh's or cubemap's serialized data but not the data the engine draws from: the next
+                // play mode and captures drew the previous geometry (the first loop after a change showed the old rocks; the
+                // loop after it the new ones). Those go through their own API.
+                if (obj is Mesh srcMesh) CopyMesh(srcMesh, (Mesh)(Object)existing);
+                else if (obj is Cubemap srcCube && srcCube.isReadable) CopyCubemap(srcCube, (Cubemap)(Object)existing);
+                else EditorUtility.CopySerialized(obj, existing);
                 existing.name = obj.name;
                 EditorUtility.SetDirty(existing);
                 if (!EditorUtility.IsPersistent(obj)) Object.DestroyImmediate(obj);
@@ -191,6 +220,41 @@ namespace Harness.Editor
             if (existing != null) AssetDatabase.DeleteAsset(path);
             AssetDatabase.CreateAsset(obj, path);
             return obj;
+        }
+
+        /// <summary>Replace <paramref name="dst"/>'s geometry with <paramref name="src"/>'s through the Mesh API (so it is drawn at once).</summary>
+        static void CopyMesh(Mesh src, Mesh dst)
+        {
+            dst.Clear();
+            dst.indexFormat = src.indexFormat;
+            dst.SetVertices(src.vertices);
+            if (src.HasVertexAttribute(VertexAttribute.Normal)) dst.SetNormals(src.normals);
+            if (src.HasVertexAttribute(VertexAttribute.Tangent)) dst.SetTangents(src.tangents);
+            if (src.HasVertexAttribute(VertexAttribute.Color)) dst.SetColors(src.colors);
+            var uvs = new List<Vector4>();
+            for (var ch = 0; ch < 8; ch++)
+            {
+                if (!src.HasVertexAttribute(VertexAttribute.TexCoord0 + ch)) continue;
+                src.GetUVs(ch, uvs);
+                dst.SetUVs(ch, uvs);
+            }
+            dst.subMeshCount = src.subMeshCount;
+            for (var s = 0; s < src.subMeshCount; s++) dst.SetIndices(src.GetIndices(s), src.GetTopology(s), s, false);
+            dst.bounds = src.bounds;
+        }
+
+        /// <summary>Replace <paramref name="dst"/>'s pixels (every face and mip) with <paramref name="src"/>'s and upload them.</summary>
+        static void CopyCubemap(Cubemap src, Cubemap dst)
+        {
+            if (dst.width != src.width || dst.format != src.format || dst.mipmapCount != src.mipmapCount || !dst.isReadable)
+            {
+                EditorUtility.CopySerialized(src, dst);   // a different layout: nothing to copy into
+                return;
+            }
+            for (var face = 0; face < 6; face++)
+            for (var mip = 0; mip < src.mipmapCount; mip++)
+                dst.SetPixelData(src.GetPixelData<byte>(mip, (CubemapFace)face), mip, (CubemapFace)face);
+            dst.Apply(false, false);
         }
 
         public Material Material(string name, string shaderName, Action<Material> setup = null)
@@ -236,7 +300,10 @@ namespace Harness.Editor
         /// Write <paramref name="tex"/> as a PNG (viewable by agents) and import it with matching settings.
         /// The in-memory texture is destroyed; use the returned asset.
         /// </summary>
-        public Texture2D SaveTexture(Texture2D tex, string name, bool sRGB = true, bool normalMap = false)
+        public Texture2D SaveTexture(Texture2D tex, string name, bool sRGB = true, bool normalMap = false) => SaveTexture(tex, name, sRGB, normalMap, null);
+
+        /// <param name="gpuKey">A GPU bake's input hash (<see cref="BakeTexture"/>): kept in the importer's userData, where the fingerprint reads it instead of the PNG.</param>
+        internal Texture2D SaveTexture(Texture2D tex, string name, bool sRGB, bool normalMap, string gpuKey)
         {
             var path = AssetPath(name + ".png");
             EnsureFolder(Path.GetDirectoryName(path));
@@ -263,6 +330,7 @@ namespace Harness.Editor
             Set(imp.mipmapEnabled, mips, v => imp.mipmapEnabled = v);
             Set(imp.anisoLevel, aniso, v => imp.anisoLevel = v);
             Set(imp.textureCompression, TextureImporterCompression.CompressedHQ, v => imp.textureCompression = v);
+            Set(imp.userData ?? "", gpuKey ?? "", v => imp.userData = v);
             if (dirty) imp.SaveAndReimport();
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }

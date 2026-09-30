@@ -223,6 +223,8 @@ namespace Harness.Editor
                 components = fp.components,
                 generatedAssets = ctx.TouchedAssets.Count,
                 cacheHits = ctx.CacheHits,
+                bakes = ctx.Bakes,                 // GPU bakes drawn (BakeTexture)
+                bakesSkipped = ctx.BakesSkipped,   // GPU bakes whose inputs were the same as the PNG's
                 deletedAssets = deleted,
                 settings = applied ? SettingsSummary(settings) : null,
                 steps = allSteps,

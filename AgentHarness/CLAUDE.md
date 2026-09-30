@@ -15,7 +15,7 @@ Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **
 | 1 | 모든 게 텍스트(JS 코드) | 씬/프리팹이 GUID로 얽힌 YAML, GUI 중심 도구 | 씬은 `IBuildStep` 코드가 생성, 렌더 파이프라인 설정은 `ISettingsStep` 코드, HLSL·UXML/USS·코드로 만든 머티리얼/Volume/라이팅/파티클/애니메이션 클립 |
 | 2 | 수정→새로고침이 초 단위 | 컴파일 + 도메인 리로드 | Domain Reload 끔, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 본문만 바꾸면 컴파일 없이 적용하는 핫 루프(`loop.ps1 -Hot`) |
 | 3 | 스크린샷·콘솔·FPS를 눈/기계로 확인 | 에이전트가 화면을 못 봄 | `harness_capture/play`가 PNG + 이미지 통계, `harness_console/stats`가 JSON |
-| 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/Texture 베이크), URP Volume을 코드로, 파티클·키프레임 애니메이션을 코드로(`ctx.Particles`, `ctx.AnimationClip` + Playables `ClipPlayer`) |
+| 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/SDF/스플라인/스캐터), GPU 텍스처 베이크(`ctx.BakeTexture`, C#과 같은 HLSL 노이즈), URP Volume·데칼을 코드로, 파티클·키프레임 애니메이션을 코드로(`ctx.Particles`, `ctx.AnimationClip` + Playables `ClipPlayer`) |
 | 5 | 레지스트리 구조라 병렬 작업이 쉬움 | 에디터 하나를 공유 | `GameRoot.Register` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 git worktree + `submit.ps1`/`land.ps1` 트랜잭션 |
 
 모든 설계 결정의 기준: **"Three.js 환경의 어떤 성질을 복원하는가"**. URP·물리·엔진 기능을 쓰니 결과는 그 이상을 노린다.
@@ -45,7 +45,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 `tools/loop.ps1` = recompile → (C# 컴파일 에러면 즉시 중단) → lint → `harness_build` → `harness_shaders` → `harness_play`(기본 3컷)
 → `harness_console` + `harness_stats` → `HarnessOut/latest/report.json` (stdout에도 같은 JSON). 종료코드 0 = 전부 녹색.
 **모듈의 `[CodeReload] Tick` 본문만 고쳤으면 `tools/loop.ps1 -Hot`**: 컴파일·도메인 리로드·빌드 없이 그 본문을 바꿔 넣고 같은 시나리오를 돈다
-(~3.3 s, 전체 루프 ~9 s). 그 밖의 변경이면 알아서 전체 루프를 돌고 이유를 `hot.fallback`에 남긴다(아래 "핫 루프").
+(~3.4 s, 전체 루프 ~9.5 s). 그 밖의 변경이면 알아서 전체 루프를 돌고 이유를 `hot.fallback`에 남긴다(아래 "핫 루프").
 
 **매 루프 후 반드시**: `report.json`의 `ok/stage`를 보고, `shots`의 PNG를 **Read 툴로 직접 열어** 눈으로 확인한다. `build.warnings`(머티리얼 설정 실수 등)도 읽는다.
 `shotStats[].blank=true`(평평/검은 화면)면 렌더가 깨진 것이다. `dark=true`(픽셀 98% 이상이 거의 검정)는 실패로 치지 않지만
@@ -109,8 +109,8 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 }
 ```
 
-측정된 한 바퀴 시간(이 머신, W6a — ROADMAP "기준선"): 코드 변경 없음 **~3.6s**, 셰이더만 수정 **~3.8s**(도메인 리로드 없음), 모듈 C# 1줄 수정 **~9.0s**
-(컴파일 ~0.4s + 도메인 리로드 ~2.5s + 리로드 뒤 에디터 자체 작업 ~0.9s + 리로드 직후 빌드 ~1.0s + 플레이 ~2.6s), **`-Hot`(본문만) ~3.3s**
+측정된 한 바퀴 시간(이 머신, W6c — ROADMAP "기준선"): 코드 변경 없음 **~3.8s**, 셰이더만 수정 **~4s**(도메인 리로드 없음), 모듈 C# 1줄 수정 **~9.6s**
+(컴파일 ~0.4s + 도메인 리로드 ~2.5s + 리로드 뒤 에디터 자체 작업 ~0.9s + 리로드 직후 빌드 ~1.2s + 플레이 ~2.9s), **`-Hot`(본문만) ~3.4s**
 (도메인 리로드 뒤 첫 핫 루프는 +0.7s), 컴파일 에러 보고 **~1.1s**. 도메인 리로드는 에디터를 오래 띄워 둘수록 늘었다(2.5 → 3.5s, 아래 "함정").
 
 ## 규칙 (반드시 지킬 것)
@@ -145,11 +145,14 @@ Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json:
                                CaptureUi: 스크린 공간 UI 합성, ContactSheet: 연속 캡처 시트), ClipPlayer(Playables 클립 재생, ClipEvent),
                                PanelClock(시나리오 동안 UI Toolkit 시간 = 프레임), UI/(Gauge, ToastStack: UI 킷 컨트롤)
                                (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
-  Runtime/Procedural/          MeshBuilder, Noise(Perlin/fBm/Ridged/Worley/Rng), TextureBaker, PMath, AmbientProbe(큐브맵 → 앰비언트 SH)
+  Runtime/Procedural/          MeshBuilder(+Sdf: FromSdf, +Spline: Tube, +Scatter: Rock·Icosphere), Noise(Perlin/fBm/Ridged/Worley/Rng), Sdf, Spline,
+                               Scatter(Poisson), TextureBaker, PMath, AmbientProbe(큐브맵 → 앰비언트 SH)
   Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교, HarnessHot: 핫 루프) 와 BuildContext(+.Materials: LitMaterial,
-                               +.Particles: Particles·ParticleMaterial, +.Animation: AnimationClip·Animate)/IBuildStep,
+                               +.Particles: Particles·ParticleMaterial, +.Animation: AnimationClip·Animate, +.Bake: BakeTexture·FloatTexture,
+                               +.Decals: Decal·DecalMaterial)/IBuildStep,
                                SettingsContext/ISettingsStep(렌더 설정), HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
   UI/                          DefaultRuntimeTheme.tss (UI Toolkit 기본 테마) + HarnessKit.uss (UI 킷: 디자인 변수·컴포넌트 클래스, 텍스트)
+  Shaders/                     HarnessBake.hlsl (GPU 베이크 셰이더의 정점·도우미) + HarnessNoise.hlsl (C# Noise와 같은 HLSL 노이즈)
   Tools~/                      도구 본체(.ps1, Harness.psm1) + templates/ (진입점, 기본 시나리오, 기존 프로젝트용 안내서, HarnessInput.cs)
 ProjectSettings/AgentHarness.json   하네스 설정: setup 모드, 모듈 루트/폴더, contracts, 생성물 경로, 빌드·플레이 씬
 Assets/Game/Contracts/         모듈 간 이벤트 타입 (Game.Contracts, 추가만)
@@ -230,7 +233,8 @@ public sealed class FooBuildStep : IBuildStep
 }
 ```
 `BuildContext`는 산출물을 제자리 덮어쓰기(GUID 유지)하고, 이번 빌드에서 아무도 만들지 않은 `Assets/Generated` 에셋은 지운다.
-`ctx.CacheHit`: 스텝 어셈블리·Harness.Runtime 코드와 입력이 같으면 재생성을 건너뛴다(`harness_build {"no_cache":true}`로 무시).
+`ctx.CacheHit`: 스텝 어셈블리·Harness.Runtime 코드, 모듈 폴더의 셰이더 소스(include 포함)와 입력이 같으면 재생성을 건너뛴다(`harness_build {"no_cache":true}`로 무시).
+생성 메시·큐브맵은 Mesh·Texture API로 제자리 덮어쓴다(GUID 유지, 바꾼 첫 루프부터 새 모양이 그려짐 — 아래 "함정").
 환경 헬퍼: `ctx.BakeSkyReflection()`(스카이박스→HDR 큐브맵, 기본 반사로), `ctx.SkyAmbient(cube)`(그 큐브맵의 SH를 씬 라이팅 데이터의
 앰비언트로 — 스카이박스 앰비언트를 베이크 없이), `ctx.Create(path, types)`, `ctx.Root()`, `ctx.Seed(salt)`.
 - 머티리얼: URP Lit은 `ctx.LitMaterial(name, m => …)`(`LitSettings`: BaseColor/BaseMap/Tiling, Metallic/Smoothness/MetallicGlossMap,
@@ -291,6 +295,47 @@ var player = ctx.Animate(halo, orbit);   // Animator(컨트롤러 없음, 루트
 - 편집 모드 캡처(`harness_capture`, `-NoPlay`)에는 파티클이 없다(시뮬레이션하지 않음). 움직임은 플레이 캡처·연속 캡처(`"frames"`)로 본다.
 - 출시 빌드: `ClipPlayer`는 `Harness.Runtime`에 있어 `GameRoot`처럼 `AGENTHARNESS_RUNTIME`이 필요하다. 타임라인(TimelineAsset) 헬퍼는 없다 — 여러 오브젝트의
   순서는 클립 + `ClipEvent` + 모듈 코드로.
+
+### GPU 베이크 · 절차적 라이브러리 (G4-1, G4-4)
+
+```csharp
+// GPU 베이크: 베이크 셰이더(HLSL)의 한 패스가 텍스처의 모든 텍셀을 그린다 → <name>.png (샘플: Assets/Game/Stage/Shaders/TerrainBake.shader)
+var heights = BuildContext.FloatTexture(TextureBaker.SampleGrid(257, 257, (u, v) => Height(u, v, seed)), 257, 257);   // CPU 값을 GPU 입력으로
+var albedo = ctx.BakeTexture("TerrainAlbedo", 1024, 1024, "Game/Stage/TerrainBake", m => { m.SetTexture("_HeightMap", heights); m.SetInteger("_Seed", seed); },
+                             wrap: TextureWrapMode.Clamp, pass: 0);                       // sRGB 색, normalMap: true / sRGB: false도
+Object.DestroyImmediate(heights);
+// 절차적 메시
+var stone = MeshBuilder.FromSdf(p => Sdf.SmoothSubtract(Sdf.RoundBox(p, half, 0.16f), Sdf.Sphere(p - top, 0.42f), 0.12f), bounds, cellSize: 0.07f);
+var arch  = MeshBuilder.Tube(new Spline(points), t => Mathf.Lerp(0.55f, 0.32f, Mathf.Sin(t * Mathf.PI)), segments: 96, radialSegments: 16);
+var rock  = MeshBuilder.Rock(seed, radius: 1f, subdivisions: 2, roughness: 0.4f);
+foreach (var p in Scatter.Poisson(new Rect(-150, -150, 300, 300), minDistance: 5.5f, seed)) { /* 높이·경사로 거르고 */ all.Append(rock, Matrix4x4.TRS(...)); }
+// 데칼(URP): 렌더러에 DecalRendererFeature가 있어야 그린다(ISettingsStep에서 SettingsContext.AddRendererFeature<DecalRendererFeature>)
+ctx.Decal("Props/Runes", ctx.DecalMaterial("Runes", runeTexture), new Vector3(8f, 8f, 3f)).transform.localPosition = new Vector3(0, 1.5f, 0);
+// 가까이서 선명하게: URP Lit 디테일 맵(타일링)
+ctx.LitMaterial("Terrain", m => { m.BaseMap = albedo; m.DetailAlbedoMap = detail; m.DetailNormalMap = detailNormal; m.DetailTiling = new Vector2(80, 80); });
+```
+- 베이크 셰이더: `#include "Packages/com.geuneda.agentharness/Shaders/HarnessBake.hlsl"` → 정점 셰이더 `BakeVert`(전체 화면 삼각형, `i.uv` (0,0) = 텍스처 첫 텍셀 =
+  아래 왼쪽, `TextureBaker`의 (u, v)와 같음), `_BakeTexelSize`(1/w, 1/h, w, h), `SrgbToLinear`/`LinearToSrgb`, `EncodeNormal(dhdx, dhdy, strength)`. 보통 셰이더처럼
+  **선형 색**을 돌려준다(sRGB 베이크는 PNG에 sRGB로 저장). `ZTest Always ZWrite Off Cull Off`. 속성의 정수는 ShaderLab `Integer`로 선언한다(`Int`는 float라 `SetInteger`와 충돌).
+- `HarnessNoise.hlsl`(HarnessBake가 가져옴): `Noise_Perlin/Fbm/Ridged/Worley/Value01/Hash` — **C# `Harness.Procedural.Noise`와 같은 해시·기울기·옥타브 시드**라
+  CPU로 만든 지형 메시와 GPU로 구운 텍스처가 같은 무늬다(8비트 반올림 안에서 같음, selftest가 확인). 타일링 텍스처는 `Noise_PerlinTiled/FbmTiled/WorleyTiled`.
+- 비용: 1024² 그리기+리드백 ~9 ms, 2048² ~28 ms. 대부분은 PNG 인코딩(1024² ~70 ms)과 임포트(압축)다. **입력(셰이더 소스와 include, 속성 값, 입력 텍스처, 크기)이 디스크의 PNG와
+  같으면 그리지 않는다**(`build.bakesSkipped`). 그 입력 해시가 임포터 `userData`에 남고 **fingerprint는 PNG 대신 그 해시**를 쓴다(GPU·드라이버마다 끝 비트가 다를 수 있어;
+  모양은 기준 이미지가 본다).
+- `ctx.CacheHit`의 키에는 모듈 폴더의 셰이더 소스(.shader/.hlsl/.cginc/.compute, include 포함, 줄바꿈 정규화)와 하네스 `Shaders/`도 들어간다 → 베이크 셰이더만 고쳐도 다시 굽는다.
+- `Sdf`: `Sphere/Box/RoundBox/Capsule/Torus/Cylinder/Plane`, `Union/Subtract/Intersect`, `SmoothUnion/SmoothSubtract/SmoothIntersect(k)`, `Normal`. 음수가 안쪽, 원점 중심 —
+  옮기려면 `p - center`, 돌리려면 `Quaternion.Inverse(rot) * p`. `MeshBuilder.FromSdf(sdf, bounds, cellSize, uvScale)`: 서피스 네트(칸마다 정점 하나를 면 위로 옮김) →
+  닫힌 매끈한 메시, 노멀은 SDF에서, UV는 박스 투영. 두 칸보다 작은 모양은 사라진다. 셀 1,600만 개가 한도.
+- `Spline(points, closed)`: 구심 Catmull-Rom(점이 몰려도 고리·뾰족점 없음), `Evaluate(t)`·`Tangent(t)`는 **호 길이** 기준(같은 t 간격 = 같은 거리), `Length`.
+  `MeshBuilder.Tube(spline, radius(t) 또는 float, segments, radialSegments, caps)`: 회전 최소 프레임(갑작스런 비틀림 없음), 닫힌 튜브는 남는 비틀림을 전체에 나눈다.
+- `Scatter.Poisson(rect, minDistance, seed)`: 포아송 디스크(겹치지도 뭉치지도 않음, 같은 시드 = 같은 점·순서). 높이·경사·거리로 거른 뒤 `MeshBuilder.Append`로 한 메시에
+  모으거나(수백 개도 드로콜 하나) 오브젝트를 둔다. `MeshBuilder.Rock(seed, radius, subdivisions 0-4, roughness, scale)`: 노이즈로 울퉁불퉁한 아이코스피어, 면마다 평평한 노멀.
+  `MeshBuilder.Icosphere(n)`, `MeshBuilder.BoxUv(p, n)`.
+- `ctx.DecalMaterial(name, baseMap, normalMap, normalBlend)`(URP Decal 셰이더 그래프: 색 + 알파 = 덮는 정도), `ctx.Decal(path, material, size, pointDown)`
+  (기본으로 아래를 향함, 상자 깊이는 투영 방향). 빌드 뒤 렌더러에 `DecalRendererFeature`가 없으면 `build.warnings`.
+- `LitSettings`에 디테일 맵: `DetailAlbedoMap`(선형, 0.5 = 변화 없음 — URP가 알베도에 2 × 이 값을 곱한다; sRGB로 임포트돼 있으면 경고), `DetailNormalMap`, `DetailNormalScale`,
+  `DetailTiling`, `DetailMask`.
+- 빌드가 만드는 큰 메시(샘플 바위 14만 정점)는 매 빌드 디스크에서 다시 읽고 fingerprint가 해시한다(각 수십 ms) — 멀리 보이는 것은 덜 쪼갠다.
 
 ### UI 킷 (G1-4)
 
@@ -371,7 +416,7 @@ public sealed class FooRenderSettings : ISettingsStep     // Builders/ 폴더, �
 
 | 커맨드 | 하는 일 |
 |---|---|
-| `harness_build` | Builders의 ISettingsStep(렌더 설정, harness 프로젝트만) → IBuildStep을 Order 순으로 빈 씬에 실행 → `buildScene` 저장. `{ok, fingerprint, steps[], settings, cacheHits, deletedAssets}`. `dry_run`, `no_cache`. 빌드 스텝이 없고 `playScene`이 build가 아니면(기존 프로젝트) 플레이 씬을 열고 에셋 기준 fingerprint만(`skipped`) |
+| `harness_build` | Builders의 ISettingsStep(렌더 설정, harness 프로젝트만) → IBuildStep을 Order 순으로 빈 씬에 실행 → `buildScene` 저장. `{ok, fingerprint, steps[], settings, cacheHits, bakes, bakesSkipped, deletedAssets}`. `dry_run`, `no_cache`. 빌드 스텝이 없고 `playScene`이 build가 아니면(기존 프로젝트) 플레이 씬을 열고 에셋 기준 fingerprint만(`skipped`) |
 | `harness_capture` | `{"preset":"all"\|"<name>"\|"main","out":"HarnessOut/capture","scene":"","ui":true}` 편집 모드 오프스크린 PNG(프로젝트 캡처 크기, 화면의 카메라들 + 스크린 공간 UI 합성) + `meanLuma/stdLuma/blank/dark/magenta/cameras/ui`. 샷 = 씬의 ShotPreset + 설정 `shots`. 플레이 씬을 먼저 연다(`"scene":"open"`이면 열린 씬 그대로) |
 | `harness_golden` | `{"shots":"[{\"path\",\"name\",\"ignore\":[{x,y,w,h}]}]","golden":"","key":"default","out":"","update":false}` 샷을 `<golden>/<Unity 버전>/<key>/<파일>`과 비교(샷마다 status·meanDiff·changedRatio·ssim·rect, 바뀌었으면 `<out>/golden/<샷>.diff.png`) 또는 그 폴더에 씀(`update`). 루프가 매번 부른다 |
 | `harness_play` | `{"scenario":"tools/scenarios/default.json"\|"{...inline}","out":"HarnessOut/play"}` 즉시 반환 → `harness_play_status` 폴링 |
@@ -480,7 +525,7 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1                 # 이후
 ## 핫 루프 (loop.ps1 -Hot, G2-1)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -Hot           # 본문만 고쳤으면 ~3.3s, 아니면 알아서 전체 루프
+powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -Hot           # 본문만 고쳤으면 ~3.4s, 아니면 알아서 전체 루프
 powershell -ExecutionPolicy Bypass -File tools/uc.ps1 harness_hot '{"mode":"check"}'   # 무엇이 바뀌었고 핫으로 되는지만
 ```
 - **핫으로 되는 것**: 마지막 전체 루프가 컴파일한 뒤 바뀐 것이 `[CodeReload]` 메서드의 **본문뿐**일 때. 그 파일들을 Pipeline의 인터프리터 백엔드
@@ -607,7 +652,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~5분
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 1c6fa406
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 345ba0d7
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
 - 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark/magenta 없음, 모든 샷 1280x720에 HUD 합성, 기준 이미지: 루프 1이 `HarnessOut/selftest/golden`에
@@ -622,11 +667,14 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   `LitMaterial`의 이미션·알파 클립) + 콘텐츠 헬퍼(G1-3: 빌드된 불씨의 고정 시드·`AlwaysSimulate`, Halo의 `ClipPlayer`; 픽스처 클립의 경로·컴포넌트·머티리얼 속성·
   Transform 속성 오타 → 경고 한 줄씩, 선형 회전 샘플, 파티클 두 번 시뮬레이션이 같음, 가산 `ParticleMaterial`; 플레이 중 런타임 클립을 받은 `ClipPlayer`의
   끝까지 재생·이벤트 `ClipEvent:RiseEnd`·크로스페이드) + UI 킷(G1-4: 루프의 `play.uiClock`이 `frames`; 빌드된 HUD의 Gauge·ToastStack·킷 버튼, 테마 변수 해석,
-  토스트 클래스; 플레이 중 라벨·게이지가 모듈 데이터 객체를 따름(바인딩), REVERSE 버튼을 이름으로 클릭, 페이드 중 토스트 캡처가 두 번 픽셀까지 같음) + `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 + 핫 루프(G2-1: `[CodeReload] Tick` 본문 수정 →
+  토스트 클래스; 플레이 중 라벨·게이지가 모듈 데이터 객체를 따름(바인딩), REVERSE 버튼을 이름으로 클릭, 페이드 중 토스트 캡처가 두 번 픽셀까지 같음) + GPU 베이크(G4-1:
+  텍셀 줄 방향, HLSL 노이즈 = C# `Noise`, 같은 입력이면 건너뜀, fingerprint 키) + 절차적 라이브러리(G4-4: SDF 메시가 닫히고 면 위에, 면 방향, 스플라인 끝점·호 길이,
+  포아송 거리·결정성; 빌드된 소품·룬 데칼과 `DecalRendererFeature`·지형 디테일 맵) + `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 + 핫 루프(G2-1: `[CodeReload] Tick` 본문 수정 →
   `-Hot`이 컴파일·빌드·도메인 리로드 없이 반영, events 같음, golden `changed` → 되돌리면 교체 해제·`same` → 필드 추가는 전체 루프(사유에 그 줄) →
   핫 본문의 예외는 전체 루프가 주입한 줄로 보고) ·
   4 HLSL 에러(재임포트 없는 다음 루프에서도) + 되돌린 상태를 기준 이미지로 → 셰이더 한 줄(스펙큘러 절반) → golden `changed`(rect·diff PNG), 루프는 녹색 +
-  파이프라인이 못 그리는 머티리얼(받침대를 `Standard`로 → 샷 `magenta`, `hint`에 `Smoke/Pedestal`, golden `changed`, 루프는 녹색 → 되돌리면 `same`) · 5 리셋 없는 static(lint) · 6 루프 2개 동시 · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
+  파이프라인이 못 그리는 머티리얼(받침대를 `Standard`로 → 샷 `magenta`, `hint`에 `Smoke/Pedestal`, golden `changed`, 루프는 녹색 → 되돌리면 `same`) + 빌더 메시 변경(아치 두께 2배, G3-11 →
+  첫 루프가 벌써 새 메시: golden `changed`이고 다음 루프와 같음 → 되돌리면 `same`) · 5 리셋 없는 static(lint) · 6 루프 2개 동시 · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
   다른 worktree의 새 모듈·계약은 락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부) ·
   8 land(fast-forward + 그 사이 submit 락 대기, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
   병합 직후 kill → `recoveredLand`). 에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
@@ -645,13 +693,13 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-09-30 W6a, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W6a에서 스모크 씬에 파티클·애니메이션이 더해져 새 값):
+- 검증한 버전(2026-09-30 W6c, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W6c에서 스모크 씬에 GPU 베이크 지형·소품이 더해져 새 값):
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
-  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `4ffb4440…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·파티클·클립 포함), 샷 62.7/55.9/45.7(6.3과 같음) |
-  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `1c6fa406…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·파티클·클립 포함), 커밋된 기준 이미지와 같음 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `5ab10290…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·파티클·클립 포함), 샷 62.8/56.0/45.8(W4 전에는 첫 플레이 뒤 검었다 — ROADMAP P-4) |
+  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `c8561a2d…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크 포함), 샷 67.8/60.8/48.5(6.3과 같음) |
+  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `345ba0d7…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크 포함), 커밋된 기준 이미지와 같음 |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `7cda8899…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크 포함), 샷 67.9/60.8/48.5(W4 전에는 첫 플레이 뒤 검었다 — ROADMAP P-4) |
 
   fingerprint는 버전마다 다르다(URP가 만드는 머티리얼·에셋 직렬화가 다르다). 같은 버전 안에서만 매번 같아야 한다.
 - 다른 버전으로 열면 Unity가 다시 쓰는 파일(커밋하지 않는다): `Packages/packages-lock.json`, `Assets/Settings/UniversalRenderPipelineGlobalSettings.asset`,
@@ -760,6 +808,18 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   빼지 않으면 먼저 잰 설정만 어둡다(P-4 조사 초기에 "소프트 그림자만 어둡다"로 잘못 본 원인).
 - W4 전 `build.fingerprint`는 씬의 GameObject만 훑어서 RenderSettings(안개·앰비언트·스카이박스·반사)와 라이팅 데이터가 바뀌어도 그대로였다 → 지금은 들어간다.
   W6a 전에는 AnimationCurve를 키 개수로만, Gradient는 아예 해시하지 않았다(파티클 커브·색, 클립 키 값을 바꿔도 그대로) → 지금은 모든 키.
+- **`EditorUtility.CopySerialized`로 덮어쓴 메시는 다음 플레이·캡처에서 옛 모양으로 그려졌다**: 직렬화 데이터(`mesh.vertices`, fingerprint)는 새 값인데 엔진이 그리는
+  데이터는 그대로라, 빌더가 메시를 바꾼 **첫 루프의 샷이 이전 메시**였고 둘째 루프부터 새 메시였다(바위 크기 2배: 루프 1 작음, 루프 2 큼, fingerprint는 둘 다 새 값;
+  `UploadMeshData`로도 안 됨). W6 이전부터 있던 문제다(메시를 바꾼 에이전트가 보는 바로 그 루프가 틀림). → 메시는 Mesh API(`Clear` → `SetVertices`/`SetIndices`…),
+  큐브맵은 면별 `SetPixelData` + `Apply`로 덮어쓴다. selftest 4번이 "아치 두께 2배 → 첫 루프 = 다음 루프"로 확인한다.
+- ShaderLab 속성 `Int`는 역사적으로 float다 — `Material.SetInteger`가 "already exists with a different type" 에러를 낸다. 정수는 `Integer`로 선언한다.
+- Unity의 앞면은 **시계 방향**(왼손 좌표계, 앞면 법선 = `cross(b − a, c − a)`). 흔히 쓰는 아이코스피어 표는 이미 그 순서였는데 반대로 뒤집어 바위가 속이 빈 껍데기로
+  보였다 → 새 메시 생성기는 추측하지 말고 selftest 1번의 방향 검사(면 법선이 정점 노멀·바깥쪽과 같은 쪽인 비율)로 잰다.
+- GPU 베이크를 리드백하면 Direct3D·Metal·Vulkan은 렌더 타깃의 첫 줄이 위다(`SystemInfo.graphicsUVStartsAtTop`) — `BakeTexture`가 뒤집어 `uv.y = 0`이 Texture2D의
+  아래 줄(0행)이 되게 한다(selftest가 uv를 구워 확인).
+- `ctx.CacheHit`·`ctx.LoadAsset`은 매 빌드 에셋을 디스크에서 다시 읽는다(빌드가 새 씬을 만들며 앞 빌드의 에셋이 내려간다). 29만 정점 메시가 ~90 ms였다 → 큰 생성 메시는
+  멀리 보이는 부분을 덜 쪼갠다(샘플 바위 14만 정점, 소품 스텝 ~60 ms).
+- `eval_file`은 메인 스레드 작업이 5 s를 넘으면 `Main thread operation timed out after 5000ms`로 끊긴다 — 무거운 실험(CPU 1024² 베이크)은 나눠서 돌린다.
 - **새로 만든 `.anim`과 제자리 덮어쓴 `.anim`의 직렬화가 다르다**: `AnimationUtility.SetEditorCurves` 직후 저장한 클립은 파생 바인딩 캐시 `m_ClipBindingConstant`가
   채워져 있고, `CopySerialized`로 덮어쓴 뒤에는 비어 있다(재생은 같다). 생성물을 지운 뒤 첫 빌드만 fingerprint가 달랐다 → 그 경로는 해시에서 뺐다.
   생성물 폴더를 지우고 루프 2회로 첫 빌드 = 다음 빌드를 확인하는 것이 이런 차이를 잡는 방법이다(새 클론의 첫 루프가 그 경우).
@@ -852,7 +912,7 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - 캡처 카메라는 메인 카메라 설정(후처리 포함)을 복사해 오프스크린 렌더한다. 메인 카메라가 없으면 캡처 실패.
 - 에디터 플레이 모드 FPS는 에디터 오버헤드·autotick 영향을 받는다. 절대값이 아니라 **변경 전후 비교**용이다(`editorFocused` 확인).
 - Code Optimization은 Debug(정확한 예외 줄 번호). Release면 throw 위치가 메서드 끝 줄로 보고되고, **절차적 메시·텍스처의 float 결과가 달라져
-  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `1c6fa406…`).
+  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `345ba0d7…`).
   `CompilationPipeline.codeOptimization`은 에디터 세션 동안만 유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다
   → `HarnessCodeOptimization`([InitializeOnLoad])이 도메인이 로드될 때마다 이 프로젝트만 Debug로 되돌린다(재컴파일 1회; 그래서 이 프로젝트에선
   Release가 유지되지 않는다). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다.

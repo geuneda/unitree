@@ -4,40 +4,54 @@ using UnityEngine;
 
 namespace Game.Stage.Builders
 {
-    /// <summary>Procedural terrain: ridged mountains around a flat central plateau, with a baked albedo + detail normal map.</summary>
+    /// <summary>
+    /// Procedural terrain: ridged mountains around a flat central plateau. The mesh comes from the height function on the CPU;
+    /// its textures are baked on the GPU (TerrainBake.shader) from the same heights: a 1024² albedo and normal map over the
+    /// whole terrain, plus a 512² tiling detail albedo and normal (URP Lit detail maps) for close-ups.
+    /// </summary>
     public sealed class StageTerrainStep : IBuildStep
     {
         public int Order => 10;
 
-        const float Size = 320f;
+        public const float Size = 320f;
         const int Resolution = 200;
-        const int TextureSize = 512;
+        const int HeightField = 257;
+        const int TextureSize = 1024;
+        const int DetailSize = 512;
+        const float DetailTiling = 80f;   // one detail tile per 4 m
+
+        /// <summary>Terrain height at (u, v) in [0, 1] over the terrain (world y). Props place themselves on it.</summary>
+        public static float Height(float u, float v, int seed)
+        {
+            var x = (u - 0.5f) * Size; var z = (v - 0.5f) * Size;
+            var r = Mathf.Sqrt(x * x + z * z);
+            var ring = PMath.Smoothstep(10f, 70f, r);
+            var mountains = Noise.Ridged(u * 5f, v * 5f, 6, 2.05f, 0.5f, seed) * 42f;
+            var hills = Noise.Fbm(u * 12f, v * 12f, 5, 2f, 0.5f, seed + 11) * 3.5f;
+            return mountains * ring * ring + hills * (0.12f + 0.88f * ring) - 0.4f;
+        }
+
+        /// <summary>World-space height at (x, z).</summary>
+        public static float HeightAt(float x, float z, int seed) => Height(x / Size + 0.5f, z / Size + 0.5f, seed);
 
         public void Build(BuildContext ctx)
         {
             var seed = ctx.Seed("terrain");
 
-            float Height(float u, float v)
-            {
-                var x = (u - 0.5f) * Size; var z = (v - 0.5f) * Size;
-                var r = Mathf.Sqrt(x * x + z * z);
-                var ring = PMath.Smoothstep(10f, 70f, r);
-                var mountains = Noise.Ridged(u * 5f, v * 5f, 6, 2.05f, 0.5f, seed) * 42f;
-                var hills = Noise.Fbm(u * 12f, v * 12f, 5, 2f, 0.5f, seed + 11) * 3.5f;
-                return mountains * ring * ring + hills * (0.12f + 0.88f * ring) - 0.4f;
-            }
-
-            // The bake is ~1 s; skip it when this assembly, Harness.Runtime and the inputs are unchanged.
-            if (!ctx.CacheHit("terrain", new[] { "TerrainMesh.asset", "TerrainAlbedo.png", "TerrainNormal.png" }, Size, Resolution, TextureSize, seed))
-                Bake(ctx, Height, seed);
+            // The CPU part is the mesh and the height field the GPU bakes read; cached while this code and the inputs are the same.
+            if (!ctx.CacheHit("terrain", new[] { "TerrainMesh.asset", "TerrainAlbedo.png", "TerrainNormal.png", "TerrainDetail.png", "TerrainDetailNormal.png" },
+                    Size, Resolution, HeightField, TextureSize, DetailSize, seed))
+                Bake(ctx, seed);
             var mesh = ctx.LoadAsset<Mesh>("TerrainMesh.asset");
-            var albedo = ctx.LoadAsset<Texture2D>("TerrainAlbedo.png");
-            var normal = ctx.LoadAsset<Texture2D>("TerrainNormal.png");
 
             var mat = ctx.LitMaterial("Terrain", m =>
             {
-                m.BaseMap = albedo;
-                m.NormalMap = normal;
+                m.BaseMap = ctx.LoadAsset<Texture2D>("TerrainAlbedo.png");
+                m.NormalMap = ctx.LoadAsset<Texture2D>("TerrainNormal.png");
+                m.DetailAlbedoMap = ctx.LoadAsset<Texture2D>("TerrainDetail.png");
+                m.DetailNormalMap = ctx.LoadAsset<Texture2D>("TerrainDetailNormal.png");
+                m.DetailTiling = new Vector2(DetailTiling, DetailTiling);
+                m.DetailNormalScale = 0.8f;
                 m.Smoothness = 0.12f;
             });
 
@@ -49,40 +63,20 @@ namespace Game.Stage.Builders
             ctx.Shot("horizon", new Vector3(-10f, 1.6f, -13f), new Vector3(0f, 3.4f, 0f), 50f);
         }
 
-        static void Bake(BuildContext ctx, System.Func<float, float, float> Height, int seed)
+        static void Bake(BuildContext ctx, int seed)
         {
-            ctx.SaveMesh(MeshBuilder.Grid(Size, Size, Resolution, Resolution, Height).ToMesh("Terrain"), "TerrainMesh");
-
-            // Evaluate each field once on the texel grid; derive slope and normals from neighbours.
-            const int N = TextureSize;
-            var heights = TextureBaker.SampleGrid(N, N, Height);
-            var variation = TextureBaker.SampleGrid(N, N, (u, v) => Noise.Fbm(u * 60f, v * 60f, 3, 2f, 0.5f, seed + 5) * 0.5f + 0.5f);
-            var detail = TextureBaker.SampleGrid(N, N, (u, v) => Noise.Fbm(u * 140f, v * 140f, 4, 2f, 0.5f, seed + 23) * 0.3f);
-            var texel = Size / N;
-
-            var grass = new Color(0.16f, 0.25f, 0.08f);
-            var dry = new Color(0.38f, 0.33f, 0.17f);
-            var rock = new Color(0.30f, 0.27f, 0.24f);
-            var snow = new Color(0.90f, 0.92f, 0.96f);
-            var albedo = TextureBaker.Bake(N, N, (u, v) =>
+            ctx.SaveMesh(MeshBuilder.Grid(Size, Size, Resolution, Resolution, (u, v) => Height(u, v, seed)).ToMesh("Terrain"), "TerrainMesh");
+            // Heights at texel centers of a 257² grid for the GPU (bilinear in between); the albedo's slope and snow line come from it.
+            var heights = BuildContext.FloatTexture(TextureBaker.SampleGrid(HeightField, HeightField, (u, v) => Height(u, v, seed)), HeightField, HeightField, "TerrainHeights");
+            try
             {
-                var x = Mathf.Min(N - 1, (int)(u * N)); var y = Mathf.Min(N - 1, (int)(v * N));
-                var h = heights[y * N + x];
-                var dx = (TextureBaker.At(heights, N, N, x + 1, y) - TextureBaker.At(heights, N, N, x - 1, y)) / (2f * texel);
-                var dz = (TextureBaker.At(heights, N, N, x, y + 1) - TextureBaker.At(heights, N, N, x, y - 1)) / (2f * texel);
-                var slope = Mathf.Clamp01(Mathf.Sqrt(dx * dx + dz * dz));
-                var n = variation[y * N + x];
-                var c = PMath.Mix(grass, dry, PMath.Smoothstep(0.4f, 0.8f, n));
-                c = PMath.Mix(c, rock, PMath.Smoothstep(0.45f, 0.85f, slope));
-                c = PMath.Mix(c, snow, PMath.Smoothstep(20f, 30f, h + n * 6f) * (1f - PMath.Smoothstep(0.6f, 1.2f, slope)));
-                c *= 0.8f + 0.4f * n;
-                c.a = 1f;
-                return c;
-            }, wrap: TextureWrapMode.Clamp, name: "TerrainAlbedo");
-            ctx.SaveTexture(albedo, "TerrainAlbedo");
-
-            var normal = TextureBaker.NormalMapFromGrid(detail, N, N, strength: 1f / (2f * texel), name: "TerrainNormal");
-            ctx.SaveTexture(normal, "TerrainNormal", sRGB: false, normalMap: true);
+                void Inputs(Material m) { m.SetTexture("_HeightMap", heights); m.SetFloat("_Size", Size); m.SetInteger("_Seed", seed); }
+                ctx.BakeTexture("TerrainAlbedo", TextureSize, TextureSize, "Game/Stage/TerrainBake", Inputs, wrap: TextureWrapMode.Clamp, pass: 0);
+                ctx.BakeTexture("TerrainNormal", TextureSize, TextureSize, "Game/Stage/TerrainBake", Inputs, normalMap: true, wrap: TextureWrapMode.Clamp, pass: 1);
+                ctx.BakeTexture("TerrainDetail", DetailSize, DetailSize, "Game/Stage/TerrainBake", Inputs, sRGB: false, pass: 2);
+                ctx.BakeTexture("TerrainDetailNormal", DetailSize, DetailSize, "Game/Stage/TerrainBake", Inputs, normalMap: true, pass: 3);
+            }
+            finally { Object.DestroyImmediate(heights); }
         }
     }
 }

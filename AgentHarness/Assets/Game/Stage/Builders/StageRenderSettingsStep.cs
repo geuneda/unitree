@@ -42,6 +42,7 @@ namespace Game.Stage.Builders
                     SettingsContext.Set(ssao, "m_Settings.Intensity", 0.4f);
                     SettingsContext.Set(ssao, "m_Settings.Radius", 0.3f);
                 });
+                SettingsContext.AddRendererFeature<DecalRendererFeature>(renderer);   // ctx.Decal (the rune circle, StagePropsStep)
             });
 
             // The URP template's mobile values: lower resolution, one hard-shadow cascade, no SSAO.

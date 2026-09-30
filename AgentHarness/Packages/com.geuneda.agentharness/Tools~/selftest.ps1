@@ -28,7 +28,10 @@
     their event into play.events and cross-fades; UI kit (G1-4): the loops' UI Toolkit panels tell time by frames
     (play.uiClock), the built HUD's Gauge / ToastStack / kit button, data binding to the module's data class, the theme
     variables resolved, a toast's classes; in play mode the REVERSE button clicked by name, and a toast captured while
-    fading in and out the same pixel for pixel in two runs (USS transitions follow the frames, G3-10)
+    fading in and out the same pixel for pixel in two runs (USS transitions follow the frames, G3-10); GPU bakes (G4-1):
+    texel rows, the HLSL noise equal to Harness.Procedural.Noise, skipped when the inputs are the same, the fingerprint key;
+    the procedural library (G4-4): SDF meshes closed and on the surface, faces outward, spline ends and arc-length steps,
+    Poisson disk distance and determinism; the built props, the rune decal and its renderer feature, terrain detail maps
   2 C# compile error in Smoke -> stage=compile at the injected file/line, module Smoke; reverted -> green
   3 runtime exception in Smoke -> stage=runtime at the injected line; reverted -> green. Hot loop (G2-1): an edit of the
     [CodeReload] Tick body -> loop.ps1 -Hot reloads it (no compile, build or domain reload), same events, golden changed;
@@ -37,7 +40,9 @@
   4 HLSL error in the Smoke shader -> stage=shader at the injected line, again in the next loop (no reimport);
     reverted -> green (and the golden images of item 4). A one-line shader change (specular halved) -> golden
     "changed" with a diff image, loop green. A material the pipeline cannot draw (Standard in URP, G3-5) -> magenta
-    shots whose hint names the renderer and whose golden changed, loop still green; reverted -> no magenta, golden same
+    shots whose hint names the renderer and whose golden changed, loop still green; reverted -> no magenta, golden same.
+    A builder's mesh changed (the arch twice as thick, G3-11) -> the first loop already draws it (golden changed, the same
+    pixels as the next loop); reverted -> same
   5 mutable static without a reset -> stage=lint (static-reset); removed -> green
   6 two loops at once -> both green, one of them waited for the lock
   7 worktrees + submit.ps1: the compile-check gate refuses a broken module without touching the Editor tree; a forced
@@ -92,6 +97,9 @@ $ShaderAnchor = 'half4 Frag(Varyings i) : SV_Target'
 $ShaderBroken = 'float3 n = normalize(i.selftestMissing);'
 $SmokeBuilder = 'Assets/Game/Smoke/Builders/SmokeBuildStep.cs'
 $MagentaMarker = '"PedestalStone", "Universal Render Pipeline/Lit"'
+$StageProps = 'Assets/Game/Stage/Builders/StagePropsStep.cs'
+$MeshMarker = 'Mathf.Lerp(0.55f, 0.32f,'   # the arch's radius along it (a mesh the builder makes and saves in place)
+$MeshChanged = 'Mathf.Lerp(1.1f, 0.64f,'
 $MagentaBroken = '"PedestalStone", "Standard"'   # a Built-in pipeline shader: URP draws it with its error material
 $VisualMarker = 'half spec = pow(saturate(dot(n, h)), _Gloss) * atten;'
 $VisualChanged = 'half spec = pow(saturate(dot(n, h)), _Gloss) * atten * 0.5h;'   # a valid one-line change: specular halved
@@ -983,6 +991,143 @@ return "armed";
 $KitStateText = @'
 return UnityEditor.SessionState.GetString("AgentHarness.selftest.kit", "");
 '@
+# GPU bakes (G4-1), in edit mode: a scratch bake shader writes uv and the harness HLSL noise; the PNG's first row is uv.y = 0, the
+# noise matches Harness.Procedural.Noise (C#), the same inputs are not baked again, another property value is, the fingerprint key.
+$BakeCheckText = @'
+var r = new System.Collections.Generic.Dictionary<string, object>();
+const string dir = "Assets/_SelftestBake";
+var shaderPath = dir + "/SelftestBake.shader";
+System.IO.Directory.CreateDirectory(dir);
+System.IO.File.WriteAllText(shaderPath,
+"Shader \"Hidden/Harness/SelftestBake\" { Properties { _Seed (\"Seed\", Integer) = 7 } SubShader { ZTest Always ZWrite Off Cull Off Pass {\n" +
+"HLSLPROGRAM\n#pragma vertex BakeVert\n#pragma fragment Frag\n#include \"Packages/com.geuneda.agentharness/Shaders/HarnessBake.hlsl\"\nint _Seed;\n" +
+"float4 Frag(BakeVaryings i) : SV_Target { return float4(i.uv.x, i.uv.y, Noise_Fbm(i.uv * 4.0, 5, 2.0, 0.5, _Seed) * 0.5 + 0.5, Noise_Ridged(i.uv * 3.0, 4, 2.0, 0.5, _Seed)); }\n" +
+"ENDHLSL\n} } }\n");
+UnityEditor.AssetDatabase.ImportAsset(shaderPath, UnityEditor.ImportAssetOptions.ForceSynchronousImport);
+var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+var scene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(UnityEditor.SceneManagement.NewSceneSetup.EmptyScene, UnityEditor.SceneManagement.NewSceneMode.Additive);
+try
+{
+    var ctx = (Harness.Editor.BuildContext)System.Activator.CreateInstance(typeof(Harness.Editor.BuildContext), flags, null, new object[] { scene, false }, null);
+    typeof(Harness.Editor.BuildContext).GetProperty("Module").SetValue(ctx, "_SelftestBake");
+    const int N = 16;
+    var tex = ctx.BakeTexture("Probe", N, N, "Hidden/Harness/SelftestBake", null, sRGB: false, mipmaps: false);
+    UnityEngine.Color32[] px;
+    var png = new UnityEngine.Texture2D(2, 2, UnityEngine.TextureFormat.RGBA32, false, true);
+    UnityEngine.ImageConversion.LoadImage(png, System.IO.File.ReadAllBytes(UnityEditor.AssetDatabase.GetAssetPath(tex)));
+    px = png.GetPixels32();
+    float uvErr = 0f, fbmErr = 0f, ridgedErr = 0f;
+    for (var y = 0; y < N; y++)
+    for (var x = 0; x < N; x++)
+    {
+        var p = px[y * N + x];
+        float u = (x + 0.5f) / N, v = (y + 0.5f) / N;
+        uvErr = UnityEngine.Mathf.Max(uvErr, UnityEngine.Mathf.Abs(p.r / 255f - u), UnityEngine.Mathf.Abs(p.g / 255f - v));
+        fbmErr = UnityEngine.Mathf.Max(fbmErr, UnityEngine.Mathf.Abs(p.b / 255f - (Harness.Procedural.Noise.Fbm(u * 4f, v * 4f, 5, 2f, 0.5f, 7) * 0.5f + 0.5f)));
+        ridgedErr = UnityEngine.Mathf.Max(ridgedErr, UnityEngine.Mathf.Abs(p.a / 255f - Harness.Procedural.Noise.Ridged(u * 3f, v * 3f, 4, 2f, 0.5f, 7)));
+    }
+    UnityEngine.Object.DestroyImmediate(png);
+    r["uvErr"] = uvErr; r["fbmErr"] = fbmErr; r["ridgedErr"] = ridgedErr;
+    var imp = (UnityEditor.TextureImporter)UnityEditor.AssetImporter.GetAtPath(UnityEditor.AssetDatabase.GetAssetPath(tex));
+    r["key"] = imp.userData;
+    var bakes = (int)typeof(Harness.Editor.BuildContext).GetField("Bakes", flags).GetValue(ctx);
+    ctx.BakeTexture("Probe", N, N, "Hidden/Harness/SelftestBake", null, sRGB: false, mipmaps: false);
+    ctx.BakeTexture("Probe", N, N, "Hidden/Harness/SelftestBake", m => m.SetInteger("_Seed", 8), sRGB: false, mipmaps: false);
+    var imp2 = (UnityEditor.TextureImporter)UnityEditor.AssetImporter.GetAtPath(UnityEditor.AssetDatabase.GetAssetPath(tex));
+    r["bakes"] = $"{bakes}+{(int)typeof(Harness.Editor.BuildContext).GetField("Bakes", flags).GetValue(ctx) - bakes} skipped={(int)typeof(Harness.Editor.BuildContext).GetField("BakesSkipped", flags).GetValue(ctx)} keyChanged={imp2.userData != (string)r["key"]}";
+}
+finally
+{
+    UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
+    UnityEditor.AssetDatabase.DeleteAsset(Harness.Editor.HarnessPaths.GeneratedRoot + "/_SelftestBake");
+    UnityEditor.AssetDatabase.DeleteAsset(dir);
+}
+return r;
+'@
+
+# The procedural library (G4-4) and the built props: SDF meshes closed and on the surface, faces outward (SDF, rock, icosphere, tubes),
+# spline end points and arc-length steps, Poisson disk distance and determinism; the rune decal and its renderer feature, terrain detail maps.
+$ProcCheckText = @'
+var r = new System.Collections.Generic.Dictionary<string, object>();
+// Face orientation: a triangle's front (cross(b - a, c - a), Unity's clockwise-from-outside) agrees with its vertex normals and,
+// for closed convex-ish shapes, points away from the centroid.
+System.Func<Harness.Procedural.MeshBuilder, bool, string> orient = (b, convex) =>
+{
+    var c = UnityEngine.Vector3.zero; foreach (var v in b.Vertices) c += v; c /= b.Vertices.Count;
+    int outward = 0, along = 0, tris = b.Triangles.Count / 3;
+    for (var t = 0; t < b.Triangles.Count; t += 3)
+    {
+        int i0 = b.Triangles[t], i1 = b.Triangles[t + 1], i2 = b.Triangles[t + 2];
+        var a = b.Vertices[i0]; var p1 = b.Vertices[i1]; var p2 = b.Vertices[i2];
+        var n = UnityEngine.Vector3.Cross(p1 - a, p2 - a);
+        if (UnityEngine.Vector3.Dot(n, (a + p1 + p2) / 3f - c) > 0f) outward++;
+        if (UnityEngine.Vector3.Dot(n, b.Normals[i0] + b.Normals[i1] + b.Normals[i2]) > 0f) along++;
+    }
+    return $"{along * 100 / tris}%" + (convex ? $"/{outward * 100 / tris}%" : "");
+};
+// A closed surface: every edge is shared by exactly two triangles.
+System.Func<Harness.Procedural.MeshBuilder, int> openEdges = b =>
+{
+    var edges = new System.Collections.Generic.Dictionary<long, int>();
+    for (var t = 0; t < b.Triangles.Count; t += 3)
+        for (var e = 0; e < 3; e++)
+        {
+            int u = b.Triangles[t + e], w = b.Triangles[t + (e + 1) % 3];
+            var key = u < w ? ((long)u << 32) | (uint)w : ((long)w << 32) | (uint)u;
+            edges.TryGetValue(key, out var n); edges[key] = n + 1;
+        }
+    var open = 0; foreach (var kv in edges) if (kv.Value != 2) open++;
+    return open;
+};
+var sphere = Harness.Procedural.MeshBuilder.FromSdf(p => Harness.Procedural.Sdf.Sphere(p, 1f), new UnityEngine.Bounds(UnityEngine.Vector3.zero, UnityEngine.Vector3.one * 2.6f), 0.1f);
+var maxR = 0f; var minR = 9f; foreach (var v in sphere.Vertices) { maxR = UnityEngine.Mathf.Max(maxR, v.magnitude); minR = UnityEngine.Mathf.Min(minR, v.magnitude); }
+r["sdfSphere"] = $"orient={orient(sphere, true)} open={openEdges(sphere)} radius={minR:0.000}..{maxR:0.000}";
+var blob = Harness.Procedural.MeshBuilder.FromSdf(p => Harness.Procedural.Sdf.SmoothUnion(Harness.Procedural.Sdf.Sphere(p, 0.8f), Harness.Procedural.Sdf.Box(p - new UnityEngine.Vector3(0.8f, 0f, 0f), new UnityEngine.Vector3(0.5f, 0.3f, 0.3f)), 0.25f), new UnityEngine.Bounds(new UnityEngine.Vector3(0.3f, 0f, 0f), new UnityEngine.Vector3(3.2f, 2.2f, 2.2f)), 0.08f);
+r["sdfBlob"] = $"orient={orient(blob, false)} open={openEdges(blob)}";
+r["rock"] = $"orient={orient(Harness.Procedural.MeshBuilder.Rock(3), true)}";
+r["icosphere"] = $"orient={orient(Harness.Procedural.MeshBuilder.Icosphere(2), true)} open={openEdges(Harness.Procedural.MeshBuilder.Icosphere(2))}";
+var pts = new System.Collections.Generic.List<UnityEngine.Vector3>();
+for (var i = 0; i < 6; i++) { var a = i / 6f * 6.2831853f; pts.Add(new UnityEngine.Vector3(UnityEngine.Mathf.Cos(a) * 3f, i % 2 * 0.5f, UnityEngine.Mathf.Sin(a) * 3f)); }
+var closed = new Harness.Procedural.Spline(pts, true);
+var open = new Harness.Procedural.Spline(pts, false);
+r["tube"] = $"closed={orient(Harness.Procedural.MeshBuilder.Tube(closed, 0.3f, 64, 12), false)} open={orient(Harness.Procedural.MeshBuilder.Tube(open, t => 0.2f + 0.1f * t, 48, 10), false)}";
+// Spline: through its end points, equal steps of t are equal distances.
+var steps = new System.Collections.Generic.List<float>();
+for (var i = 0; i < 20; i++) steps.Add((open.Evaluate((i + 1) / 20f) - open.Evaluate(i / 20f)).magnitude);
+steps.Sort();
+r["spline"] = $"ends={(open.Evaluate(0f) - pts[0]).magnitude:0.0000}/{(open.Evaluate(1f) - pts[5]).magnitude:0.0000} step={steps[0]:0.000}..{steps[19]:0.000} length={open.Length:0.00}";
+// Poisson disk: no two points closer than the distance, the same seed the same points.
+var a1 = Harness.Procedural.Scatter.Poisson(new UnityEngine.Rect(0, 0, 50, 30), 2f, 11);
+var a2 = Harness.Procedural.Scatter.Poisson(new UnityEngine.Rect(0, 0, 50, 30), 2f, 11);
+var minD = 9f; for (var i = 0; i < a1.Count; i++) for (var j = i + 1; j < a1.Count; j++) minD = UnityEngine.Mathf.Min(minD, (a1[i] - a1[j]).magnitude);
+var same = a1.Count == a2.Count; for (var i = 0; same && i < a1.Count; i++) same = a1[i] == a2[i];
+r["poisson"] = $"n={a1.Count} minDist={minD:0.000} same={same}";
+// The built scene: the props, and the rune decal with a renderer that draws decals.
+var decal = UnityEngine.GameObject.Find("Stage/Props/RuneCircle");
+var dp = decal == null ? null : decal.GetComponent<UnityEngine.Rendering.Universal.DecalProjector>();
+r["decal"] = dp == null ? "none" : $"{dp.material.shader.name} size={dp.size}";
+var rp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline as UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset;
+var hasFeature = false;
+using (var so = new UnityEditor.SerializedObject(rp))
+{
+    var list = so.FindProperty("m_RendererDataList");
+    var data = list.GetArrayElementAtIndex(so.FindProperty("m_DefaultRendererIndex").intValue).objectReferenceValue as UnityEngine.Rendering.Universal.ScriptableRendererData;
+    foreach (var f in data.rendererFeatures) if (f is UnityEngine.Rendering.Universal.DecalRendererFeature && f.isActive) hasFeature = true;
+}
+r["decalFeature"] = hasFeature;
+var props = new System.Collections.Generic.List<string>();
+foreach (var n in new[] { "StandingStones", "Rocks", "Arch" })
+{
+    var go = UnityEngine.GameObject.Find("Stage/Props/" + n);
+    var mf = go == null ? null : go.GetComponent<UnityEngine.MeshFilter>();
+    props.Add(n + "=" + (mf == null || mf.sharedMesh == null ? 0 : mf.sharedMesh.vertexCount));
+}
+r["props"] = string.Join(" ", props);
+var terrain = UnityEngine.GameObject.Find("Stage/Terrain").GetComponent<UnityEngine.MeshRenderer>().sharedMaterial;
+r["terrainDetail"] = $"keywords={string.Join(",", terrain.shaderKeywords)} tiling={terrain.GetTextureScale("_DetailAlbedoMap")}";
+return r;
+'@
+
 # The kit in play mode: a click on the HUD's REVERSE button (a kit button, by name) reverses the spin and shows a toast;
 # one capture while it fades in, one while it fades out.
 $KitScenarioText = @'
@@ -1266,6 +1411,22 @@ function Invoke-Item1 {
     $kbClick = @($kb.play.clicks)
     Test-Check 'UI kit (play): loops green; the REVERSE button clicked by name (uitk) reverses the spin' ([bool]$ka.ok -and [bool]$kb.ok -and $kbClick.Count -eq 1 -and $kbClick[0].via -eq 'uitk' -and (Get-EventCount $kb 'SpinDirectionChanged') -eq 1) "$(Get-Summary $ka) | $(Get-Summary $kb) clicks=$(@($kbClick | ForEach-Object { "$($_.target) $($_.via)" }) -join ',')"
     Test-Check 'UI clock (play): the toast captured fading in and out is the same pixel for pixel in both runs' ((@(Get-Golden $kb) -join ',') -eq 'toast_in:same,toast_out:same' -and $kb.play.uiClock.mode -eq 'frames') "$((Get-Golden $kb) -join ',') uiClock=$($kb.play.uiClock.mode)/$($kb.play.uiClock.panels) $(Get-GoldenDetail $kb)"
+    # GPU bakes (G4-1) and the procedural library (G4-4).
+    $bc = (Join-Path $outAbs 'bake-check.cs').Replace('\', '/')
+    Write-TextFile $bc $BakeCheckText
+    $k = Invoke-Eval $bc
+    Test-Check 'GPU bake: the first texel row is uv.y = 0; the HLSL noise is Harness.Procedural.Noise (fBm, ridged) within 8-bit rounding' ([double]$k.uvErr -lt 0.003 -and [double]$k.fbmErr -lt 0.004 -and [double]$k.ridgedErr -lt 0.004) "uv=$($k.uvErr) fbm=$($k.fbmErr) ridged=$($k.ridgedErr)"
+    Test-Check 'GPU bake: the same inputs are not baked again, another property value is; the fingerprint key in the importer' ($k.bakes -eq '1+1 skipped=1 keyChanged=True' -and "$($k.key)" -like 'harness-gpu:*') "$($k.bakes) key=$($k.key)"
+    $pc = (Join-Path $outAbs 'proc-check.cs').Replace('\', '/')
+    Write-TextFile $pc $ProcCheckText
+    $k = Invoke-Eval $pc
+    Test-Check 'SDF mesh: closed, facing out, vertices on the surface (a sphere of radius 1); a smooth union closed too' ($k.sdfSphere -eq 'orient=100%/100% open=0 radius=1.000..1.000' -and $k.sdfBlob -eq 'orient=100% open=0') "$($k.sdfSphere) | $($k.sdfBlob)"
+    Test-Check 'procedural meshes face out: rock, icosphere (closed), closed and open tubes' ($k.rock -eq 'orient=100%/100%' -and $k.icosphere -eq 'orient=100%/100% open=0' -and $k.tube -eq 'closed=100% open=100%') "rock $($k.rock) | ico $($k.icosphere) | tube $($k.tube)"
+    $sp = [regex]::Match("$($k.spline)", 'ends=([\d.]+)/([\d.]+) step=([\d.]+)\.\.([\d.]+)')
+    Test-Check 'spline through its end points, equal steps of t equal distances (3%); Poisson disk keeps its distance, same seed same points' ($sp.Success -and [double]$sp.Groups[1].Value -lt 1e-3 -and [double]$sp.Groups[2].Value -lt 1e-3 -and [double]$sp.Groups[4].Value / [double]$sp.Groups[3].Value -lt 1.03 -and "$($k.poisson)" -match 'minDist=2\.0\d\d same=True') "$($k.spline) | $($k.poisson)"
+    Test-Check 'built props: standing stones, rocks, arch; the rune decal with a DecalRendererFeature; terrain detail maps' ($k.props -notmatch '=0( |$)' -and "$($k.decal)" -like 'Shader Graphs/Decal *' -and [bool]$k.decalFeature -and "$($k.terrainDetail)" -like '*_DETAIL_MULX2*tiling=(80.00, 80.00)') "$($k.props) | $($k.decal) feature=$($k.decalFeature) | $($k.terrainDetail)"
+    $state.item['procedural'] = [ordered]@{ sdf = $k.sdfSphere; spline = $k.spline; poisson = $k.poisson; props = $k.props }
+
     $state.item['uiKit'] = [ordered]@{ clocks = $clocks; bound = $(if ($kd) { "laps=$($kd.lapsText) spin=$($kd.dirText) gauge=$($kd.gauge)" }); scope = $kb.play.uiClock.scope; shots = @($kb.shots) }
 
     $cc = Invoke-HarnessProcess $ps @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'tools/compile-check.ps1'), '-IncludeHarness') -Environment $childEnv -TimeoutSec 300
@@ -1386,6 +1547,20 @@ function Invoke-Item4 {
     Test-Check 'no magenta after the revert' (@($r.shotStats | Where-Object { $_.magenta }).Count -eq 0) (@($r.shotStats | ForEach-Object { "$($_.name) $($_.magentaRatio)" }) -join ' | ')
     Test-Check 'golden same again after the reverts' (@(Get-Golden $r | Where-Object { $_ -notlike '*:same' }).Count -eq 0 -and @(Get-Golden $r).Count -gt 0) (Get-GoldenDetail $r)
     $state.item['magenta'] = @($m | ForEach-Object { "$($_.name) $($_.magentaRatio) golden=$($_.golden.status)" })
+
+    # A mesh a builder makes, changed (the arch twice as thick, G3-11): the first loop after the change already draws it - the same
+    # pixels as the loop after it. An in-place overwrite used to keep drawing the old geometry until play mode reloaded the mesh.
+    Protect-EditorFile $StageProps
+    [void](Edit-Line (Get-Abs $root $StageProps) $MeshMarker $MeshChanged)
+    $r1 = Invoke-Loop '4-mesh' @('-Golden', $gold)
+    $r2 = Invoke-Loop '4-mesh-again' @('-Golden', $gold)
+    $d1 = @($r1.shotStats | ForEach-Object { if ($_.golden) { "$($_.name):$($_.golden.status)/$($_.golden.meanDiff)" } }) -join ','
+    $d2 = @($r2.shotStats | ForEach-Object { if ($_.golden) { "$($_.name):$($_.golden.status)/$($_.golden.meanDiff)" } }) -join ','
+    Test-Check 'mesh change: the first loop draws the new mesh (golden changed, the same as the loop after it)' ([bool]$r1.ok -and [bool]$r2.ok -and $d1 -like '*:changed/*' -and $d1 -eq $d2) "first: $d1 | next: $d2"
+    Restore-EditorFiles
+    $r = Test-GreenAgain '4-mesh-restored' @('-Golden', $gold)
+    Test-Check 'mesh reverted: golden same (its first loop too)' (@(Get-Golden $r | Where-Object { $_ -notlike '*:same' }).Count -eq 0 -and @(Get-Golden $r).Count -gt 0) (Get-GoldenDetail $r)
+    $state.item['meshChange'] = $d1
     Complete-Item
 }
 

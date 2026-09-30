@@ -286,6 +286,9 @@ namespace Harness.Editor
                     MemoryMarshal.AsBytes(triangles.AsSpan()).CopyTo(bytes.AsSpan(vertices.Length * 12));
                     return mesh.vertexCount + "|" + mesh.bounds.ToString("R") + "|" + Sha1(bytes);
                 }
+                // A GPU bake: the hash of its inputs (BuildContext.BakeTexture), not of the PNG - GPUs and drivers can differ in the last bits.
+                if (AssetImporter.GetAtPath(path) is TextureImporter gpu && gpu.userData != null && gpu.userData.StartsWith(BuildContext.GpuKeyPrefix, StringComparison.Ordinal))
+                    return gpu.userData + "|" + ImporterSummary(path);
                 return File.Exists(full) ? Sha1(File.ReadAllBytes(full)) + "|" + ImporterSummary(path) : "missing";
             }
             // One dump per object, sorted: LoadAllAssetsAtPath lists sub-objects in local fileID order, which depends on the
