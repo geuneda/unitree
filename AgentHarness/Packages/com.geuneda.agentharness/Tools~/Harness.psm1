@@ -10,6 +10,8 @@ Add-Type -AssemblyName System.Net.Http
 # Editor project they drive (Library/, the Pipeline descriptor, the lock). They are the same folder unless this is an
 # agent worktree (G5-2): a checkout without Library/ (e.g. `git worktree add`) drives the Editor of the main worktree at
 # the same sub-path. AGENTHARNESS_EDITOR_ROOT overrides the detection (e.g. for a plain copy of the project).
+# A worktree that has its own Library/ (tools/open.ps1 -Own, W7) drives its own Editor; submit.ps1 and land.ps1 still
+# integrate into the main worktree (Use-HarnessIntegrationRoot).
 function Find-HarnessProjectAbove([string]$Dir) {
     $d = $Dir
     while ($d) {
@@ -33,14 +35,47 @@ function Resolve-HarnessEditorRoot([string]$WorkRoot) {
     $WorkRoot
 }
 
+# The checkout submit/land integrate into: the main worktree at the same sub-path when this is a linked worktree (with or
+# without its own Editor), else this checkout. AGENTHARNESS_EDITOR_ROOT overrides it like the Editor root.
+function Get-HarnessIntegrationRoot {
+    if ($env:AGENTHARNESS_EDITOR_ROOT) { return [IO.Path]::GetFullPath($env:AGENTHARNESS_EDITOR_ROOT).TrimEnd('\', '/') }
+    try {
+        $main = @(& git -C $script:WorkRoot worktree list --porcelain 2>$null) | Select-Object -First 1
+        $prefix = & git -C $script:WorkRoot rev-parse --show-prefix 2>$null
+        if ($main -like 'worktree *') {
+            $candidate = [IO.Path]::GetFullPath([IO.Path]::Combine($main.Substring(9), "$prefix")).TrimEnd('\', '/')
+            if (Test-Path -LiteralPath (Join-Path $candidate 'ProjectSettings')) { return $candidate }
+        }
+    } catch { }
+    $script:WorkRoot
+}
+
+# The Editor project the functions below drive, and the paths that hang off it (Pipeline descriptor, submit/land journals).
+function Set-HarnessEditorRoot([string]$Root) {
+    if ($null -ne $script:Mutex) { throw "Set-HarnessEditorRoot while holding the lock of $script:ProjectRoot" }
+    $script:ProjectRoot = $Root
+    $script:Descriptor = Join-Path $Root 'Library/Pipeline/.unity-pipeline-port'
+    $script:SubmitDir = Join-Path $Root 'Library/Harness/submit'
+    $script:JournalPath = Join-Path $script:SubmitDir 'pending.json'
+    $script:OwnersPath = Join-Path $script:SubmitDir 'owners.json'
+    $script:LandDir = Join-Path $Root 'Library/Harness/land'
+    $script:LandJournalPath = Join-Path $script:LandDir 'pending.json'
+    $script:RepoRoot = $null
+}
+
+# submit.ps1 / land.ps1: from a worktree with its own Editor too, they put the work into the shared Editor tree.
+function Use-HarnessIntegrationRoot { Set-HarnessEditorRoot (Get-HarnessIntegrationRoot) }
+
+$script:Mutex = $null
 $script:WorkRoot = if ($env:AGENTHARNESS_WORK_ROOT) { [IO.Path]::GetFullPath($env:AGENTHARNESS_WORK_ROOT).TrimEnd('\', '/') } else { Find-HarnessProjectAbove $PSScriptRoot }
-$script:ProjectRoot = Resolve-HarnessEditorRoot $script:WorkRoot
-$script:Descriptor = Join-Path $script:ProjectRoot 'Library\Pipeline\.unity-pipeline-port'
+Set-HarnessEditorRoot (Resolve-HarnessEditorRoot $script:WorkRoot)
 $script:Client = $null
 
 function Get-HarnessProjectRoot { $script:ProjectRoot }
 function Get-HarnessWorkRoot { $script:WorkRoot }
 function Test-HarnessWorktree { $script:WorkRoot -ne $script:ProjectRoot }
+# An agent worktree running its own Editor (its own Library/, open.ps1 -Own).
+function Test-HarnessOwnEditor { ($script:ProjectRoot -eq $script:WorkRoot) -and ((Get-HarnessIntegrationRoot) -ne $script:WorkRoot) }
 
 # ---- ProjectSettings/AgentHarness.json (the same file the Editor reads: Harness.HarnessConfig) ---------------------
 # Missing file or field = the defaults of an attached project. Modules: every folder under a moduleRoots entry, and
@@ -282,10 +317,87 @@ function Read-HarnessLogTail([string]$Path, [int]$Lines = 40) {
     @($text -split "`r?`n" | Where-Object { $_ -ne '' } | Select-Object -Last $Lines)
 }
 
+# Command line of an Editor started by the tools (W7, G2-2). Every one gets -automated (EditorUtility.DisplayDialog*
+# answer their default at once instead of blocking the main thread; the window layout is not saved on exit) unless
+# -Interactive (a person uses that Editor), and -debugCodeOptimization (Debug from the start: exact exception lines and the
+# stable fingerprint without the extra recompile HarnessCodeOptimization would do). -Headless: -batchmode without -quit, a
+# resident Editor without a window that renders with the GPU; -ignoreCompilerErrors lets it start on the last good
+# assemblies when the scripts do not compile (batch mode would exit instead; a windowed -automated Editor enters Safe Mode).
+function Get-HarnessEditorArguments {
+    param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Log, [switch]$Headless, [switch]$Interactive)
+    $a = @()
+    if ($Headless) { $a += @('-batchmode', '-ignoreCompilerErrors') }
+    $a += @('-projectPath', $Root, '-logFile', $Log, '-debugCodeOptimization')
+    if (-not $Interactive) { $a += '-automated' }
+    $a
+}
+
+# The C# compiler errors of the latest compile in an Editor log (Safe Mode or a headless start: nothing else has them).
+function Get-HarnessLogCompileErrors([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return @() }
+    $s = New-Object IO.FileStream($Path, 'Open', 'Read', 'ReadWrite, Delete')
+    try { $text = (New-Object IO.StreamReader($s, [Text.Encoding]::UTF8)).ReadToEnd() } finally { $s.Dispose() }
+    # Each compile run logs its errors after starting the build program; keep the last run's.
+    $start = $text.LastIndexOf('bee_backend')
+    if ($start -gt 0) { $text = $text.Substring($start) }
+    $seen = @{}
+    # (The same errors also come as ##utp JSON lines: a file name with no quote in it skips those.)
+    @([regex]::Matches($text, '(?m)^(?<file>[^\r\n("]+\.cs)\((?<line>\d+),(?<col>\d+)\): error (?<code>CS\d+): (?<msg>[^\r\n]*)') | ForEach-Object {
+        $file = $_.Groups['file'].Value.Replace('\', '/')
+        $key = "$file|$($_.Groups['line'].Value)|$($_.Groups['code'].Value)|$($_.Groups['msg'].Value)"
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            [ordered]@{ file = $file; line = [int]$_.Groups['line'].Value; msg = "$($_.Groups['code'].Value): $($_.Groups['msg'].Value.Trim())"; module = (Get-HarnessModuleOf $file).name }
+        }
+    })
+}
+
+# A windowed Editor in Safe Mode (compile errors at startup; -automated enters it without asking): no Pipeline server,
+# the window title says so.
+function Test-HarnessSafeMode([int]$ProcessId) {
+    if ($ProcessId -le 0) { return $false }
+    [bool](@(Get-HarnessWindowTitles $ProcessId) | Where-Object { $_ -match 'SAFE MODE' })
+}
+
+# Seed an agent worktree's Library/ with a copy of the Editor tree's (open.ps1 -Own): the imported assets, the package
+# cache and the compiled scripts come along, so its Editor does not import the project again (it recompiles the scripts once:
+# their paths changed). Not copied: what belongs to the running Editor or the Editor tree (the Pipeline descriptor, the
+# harness state with the submit/land journals, lock and pid files). Copied to a temporary folder, then renamed, so a
+# half-done copy never looks like a Library. Returns @{ files; mb; sec }.
+function Copy-HarnessLibrary {
+    param([Parameter(Mandatory)][string]$From, [Parameter(Mandatory)][string]$To)
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $src = [IO.Path]::GetFullPath($From).TrimEnd('\', '/')
+    $dst = [IO.Path]::GetFullPath($To).TrimEnd('\', '/')
+    $tmp = "$dst.seed"
+    if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
+    $skipDirs = @('Pipeline', 'Harness', 'AgentHarness', 'TempArtifacts')
+    $skipFiles = @('EditorInstance.json', 'ilpp.pid', 'ArtifactDB-lock', 'SourceAssetDB-lock')
+    $robocopy = Get-Command robocopy -ErrorAction SilentlyContinue
+    if ($robocopy) {
+        # Windows: multi-threaded (1.9 GB, 27k files in ~7 s here). Exit codes below 8 are success.
+        $rcArgs = @($src, $tmp, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NP', '/MT:16', '/R:2', '/W:1', '/XD') + @($skipDirs | ForEach-Object { Join-Path $src $_ }) + @('/XF') + $skipFiles
+        $r = Invoke-HarnessProcess $robocopy.Source $rcArgs
+        if ($r.code -ge 8) { throw "copying $src failed (robocopy $($r.code)): $($r.out.Trim()) $($r.err.Trim())" }
+    } else {
+        foreach ($f in [IO.Directory]::EnumerateFiles($src, '*', [IO.SearchOption]::AllDirectories)) {
+            $rel = $f.Substring($src.Length + 1)
+            $top = $rel.Split([char[]]@('\', '/'))[0]
+            if ($skipDirs -contains $top -or $skipFiles -contains $rel) { continue }
+            $target = [IO.Path]::Combine($tmp, $rel)
+            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
+            [IO.File]::Copy($f, $target, $true)
+        }
+    }
+    [IO.Directory]::Move($tmp, $dst)
+    $files = @([IO.Directory]::EnumerateFiles($dst, '*', [IO.SearchOption]::AllDirectories))
+    $bytes = 0; foreach ($f in $files) { $bytes += (New-Object IO.FileInfo $f).Length }
+    [ordered]@{ from = $src.Replace('\', '/'); files = $files.Count; mb = [math]::Round($bytes / 1MB); sec = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
+}
+
 # ---- Editor lock -------------------------------------------------------------------------------------
 # One Editor, many agents: every Editor-mutating operation (recompile/build/play/capture/submit...) runs under a
 # machine-wide mutex per project, so parallel agents queue instead of interleaving.
-$script:Mutex = $null
 $script:LastRecovery = $null
 $script:LastLandRecovery = $null
 $script:ReadOnlyCommands = @('harness_ping', 'harness_console', 'harness_play_status', 'harness_stats', 'harness_lint', 'harness_shaders',
@@ -333,8 +445,7 @@ function Add-HarnessRecovery([System.Collections.IDictionary]$Report) {
 # write it backs up every file it will overwrite or delete and writes a journal (Library/Harness/submit/pending.json).
 # The journal is removed once the submit has kept or reverted its files. A journal seen by the next lock holder means
 # that submit died half-way; it is rolled back, so a crashed submit cannot leave its code in the Editor tree.
-$script:SubmitDir = Join-Path $script:ProjectRoot 'Library\Harness\submit'
-$script:JournalPath = Join-Path $script:SubmitDir 'pending.json'
+# ($script:SubmitDir, $script:JournalPath: Set-HarnessEditorRoot.)
 
 # Writes: @{ rel = 'Assets/Game/Foo/X.cs'; src = <absolute source file> }. Deletes: project-relative files.
 # CreatedDirs: project-relative folders that do not exist yet (removed with their Unity .meta on revert).
@@ -485,8 +596,7 @@ function Test-HarnessSamePath([string]$a, [string]$b) {
     [IO.Path]::GetFullPath($a).TrimEnd('\', '/') -ieq [IO.Path]::GetFullPath($b).TrimEnd('\', '/')
 }
 
-# Top level of the Editor tree's repository (what land.ps1 merges into; forward slashes).
-$script:RepoRoot = $null
+# Top level of the Editor tree's repository (what land.ps1 merges into; forward slashes). Cached until Set-HarnessEditorRoot.
 function Get-HarnessRepoRoot {
     if ($null -eq $script:RepoRoot) { $script:RepoRoot = (Invoke-HarnessGit $script:ProjectRoot @('rev-parse', '--show-toplevel') -Check).out.Trim() }
     $script:RepoRoot
@@ -518,7 +628,7 @@ function Get-HarnessContentIds([string]$Repo, [string[]]$Paths) {
 # ---- Module owners: one module = one agent (G5-5) ----------------------------------------------------------------
 # submit.ps1 records which worktree last kept each module in the Editor tree; land.ps1 releases the modules of the
 # branch it landed. A module whose Editor-tree copy still has un-landed changes from another live worktree is refused.
-$script:OwnersPath = Join-Path $script:SubmitDir 'owners.json'
+# ($script:OwnersPath: Set-HarnessEditorRoot.)
 
 # module -> @{ workRoot; branch; runId; at }
 function Get-HarnessOwners {
@@ -551,8 +661,7 @@ function Get-HarnessModuleChanges([string]$Module) {
 # copies of what was submitted, which make git refuse the merge, so it stashes exactly the paths the merge touches
 # (plus leftovers in the merged modules), merges, and runs the loop. A journal (Library/Harness/land/pending.json)
 # lives from before the stash until the land is kept or undone; the next lock holder undoes a land that died.
-$script:LandDir = Join-Path $script:ProjectRoot 'Library\Harness\land'
-$script:LandJournalPath = Join-Path $script:LandDir 'pending.json'
+# ($script:LandDir, $script:LandJournalPath: Set-HarnessEditorRoot.)
 
 function Save-HarnessLandJournal {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Journal)
@@ -828,7 +937,8 @@ function Invoke-HarnessLoop {
     $ep = Get-HarnessEndpoint
     if (-not $ping.success -and ($ping.unreachable -or $ping.busy) -and $ep -and (Get-Process -Id $ep.Pid -ErrorAction SilentlyContinue)) {
         $sw = [Diagnostics.Stopwatch]::StartNew()
-        # A fresh Editor also recompiles once for Debug code optimization (HarnessCodeOptimization): ~30 s measured.
+        # A fresh Editor opened without tools/open.ps1 (no -debugCodeOptimization) also recompiles once for Debug code
+        # optimization (HarnessCodeOptimization): ~30 s measured.
         while (-not $ping.success -and $sw.Elapsed.TotalSeconds -lt 120) {
             Start-Sleep -Milliseconds 250
             $ping = Invoke-UnityCommand -Name 'harness_ping' -TimeoutSec 10
@@ -837,9 +947,22 @@ function Invoke-HarnessLoop {
     }
     if (-not $ping.success) {
         $report.stage = 'editor'
-        $report['error'] = "Editor not reachable: $($ping.error). Open it with tools/open.ps1 (waits until it answers). If it is open, it may be in Safe Mode (compile errors at startup): run 'unity pipeline list'."
+        $launched = Get-HarnessLaunchedEditor
+        if ($launched -and (Test-HarnessSafeMode $launched.Id)) {
+            # A windowed Editor started on scripts that do not compile: -automated enters Safe Mode without asking.
+            $report['safeMode'] = $true
+            $report.compileErrors = @(Get-HarnessLogCompileErrors (Join-Path $script:ProjectRoot 'Logs/Editor.log'))
+            $report['error'] = "The Editor is in Safe Mode: the scripts did not compile when it started (compileErrors, from its log). Fix them, then tools/quit.ps1 -Force and tools/open.ps1 (or open.ps1 -Headless, which starts on the last good assemblies)."
+        } else {
+            $own = if (Test-HarnessOwnEditor) { ' This worktree has its own Editor (Library/): tools/open.ps1 -Own starts it.' } else { '' }
+            $report['error'] = "Editor not reachable: $($ping.error). Open it with tools/open.ps1 (waits until it answers).$own If it is open, it may be in Safe Mode (compile errors at startup): tools/open.ps1 reports it."
+        }
         return $report
     }
+    # Which Editor ran the loop (W7): a headless one (-batchmode) has no Game view, so nothing renders the game between
+    # captures - fps is the game's update alone and there are no render counts; "screen" captures are refused.
+    $report['editor'] = [ordered]@{ pid = $ping.result.pid; mode = $(if ($ping.result.editorMode) { $ping.result.editorMode } else { 'window' }); automated = [bool]$ping.result.automated }
+    if (Test-HarnessOwnEditor) { $report.editor['own'] = $true }
     # Keep the Editor ticking while it is not the foreground app (otherwise compile/play stall). Idempotent.
     Invoke-UnityCommand -Name 'set_autotick' -Params @{ enable = $true } -TimeoutSec 10 | Out-Null
     if ($ping.result.isPlaying -or $ping.result.willChangePlaymode) {
@@ -1044,8 +1167,13 @@ function Invoke-HarnessLoop {
     if ($stats -and $stats.success -and $stats.result.ok) {
         $f = $stats.result.fps
         $report.fps = [ordered]@{ avg = [math]::Round($f.avg, 1); min = [math]::Round($f.min, 1); p95ms = [math]::Round($f.p95ms, 2); p99ms = [math]::Round($f.p99ms, 2); hitches = $f.hitches; cpuMainAvgMs = [math]::Round($f.cpuMainAvgMs, 2); samples = $f.samples; editorFocused = $stats.result.editorFocused }
-        $r = $stats.result.render
-        $report['render'] = [ordered]@{ batches = [math]::Round($r.batches, 1); setPassCalls = [math]::Round($r.setPassCalls, 1); drawCalls = [math]::Round($r.drawCalls, 1); triangles = [math]::Round($r.triangles); vertices = [math]::Round($r.vertices) }
+        if ($report.editor.mode -eq 'headless') {
+            $report.fps['note'] = 'headless Editor: nothing renders the game between captures, so these frames are its update alone (not comparable with a windowed Editor)'
+            $report['render'] = $null
+        } else {
+            $r = $stats.result.render
+            $report['render'] = [ordered]@{ batches = [math]::Round($r.batches, 1); setPassCalls = [math]::Round($r.setPassCalls, 1); drawCalls = [math]::Round($r.drawCalls, 1); triangles = [math]::Round($r.triangles); vertices = [math]::Round($r.vertices) }
+        }
     }
     if ($playResult) {
         $report['play'] = [ordered]@{ success = $playResult.success; error = $playResult.error; probeReady = $playResult.probeReady; readySec = [math]::Round($playResult.readySec, 2); wallSec = [math]::Round($playResult.wallSec, 2); gameSec = [math]::Round($playResult.gameSec, 2); frames = $playResult.frames; modules = @($playResult.modules); failedModules = @($playResult.failedModules); inputEventsApplied = $playResult.inputEventsApplied; events = @($playResult.events | ForEach-Object { [ordered]@{ name = $_.name; count = $_.count } }) }
@@ -1137,6 +1265,8 @@ function Save-HarnessReport {
 }
 
 Export-ModuleMember -Function Get-HarnessProjectRoot, Get-HarnessWorkRoot, Test-HarnessWorktree, Get-HarnessEndpoint, Invoke-UnityCommand,
+    Get-HarnessIntegrationRoot, Set-HarnessEditorRoot, Use-HarnessIntegrationRoot, Test-HarnessOwnEditor, Get-HarnessEditorArguments,
+    Get-HarnessLogCompileErrors, Test-HarnessSafeMode, Copy-HarnessLibrary,
     Get-HarnessConfig, Get-HarnessModuleOf, Get-HarnessModuleFolder, Initialize-HarnessOut, Find-HarnessProjectAbove,
     Wait-UnityReachable, Get-HarnessEditorProcess, Get-HarnessLaunchedEditor, Save-HarnessLaunchedEditor, Get-HarnessWindowTitles, Test-HarnessProjectOpen,
     Get-HarnessProjectVersion, Get-HarnessInstalledEditors,

@@ -14,7 +14,8 @@
   Exit code 0 = everything green (no compile/build/runtime errors, no blank shots), 1 = see report.json "stage".
   Shots are compared with the golden images (golden/<Unity version>/<scenario>/, report "golden"); a difference is
   reported, not a failure.
-  In an agent worktree use tools/submit.ps1 instead (it runs this same loop on the Editor tree, as a transaction).
+  In an agent worktree use tools/submit.ps1 instead (it runs this same loop on the Editor tree, as a transaction), or
+  give the worktree an Editor of its own (tools/open.ps1 -Own): then this loop runs there, in parallel with the Editor tree's.
 #>
 param(
     [string]$Scenario = 'tools/scenarios/default.json',
@@ -36,7 +37,7 @@ $timings = [ordered]@{}
 # The loop compiles whatever is in the Editor tree. From an agent worktree that is not this checkout's code.
 if (Test-HarnessWorktree) {
     $report = [ordered]@{ ok = $false; stage = 'submit'; compileErrors = @(); runtimeErrors = @(); fps = $null; shots = @(); durationSec = 0
-        error = "This is an agent worktree ($(Get-HarnessWorkRoot)); the Editor runs on $root. Run tools/submit.ps1 -Module <YourModule> to test your module there." }
+        error = "This is an agent worktree ($(Get-HarnessWorkRoot)); the Editor runs on $root. Run tools/submit.ps1 -Module <YourModule> to test your module there, or give this worktree an Editor of its own with tools/open.ps1 -Own (then loop.ps1 runs here, in parallel)." }
     Save-HarnessReport $report $outAbs $clock $timings
     exit 1
 }

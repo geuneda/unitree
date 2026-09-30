@@ -28,13 +28,13 @@
 | W4 | 렌더 설정을 코드로 | G1-1, P-4, G4-3, G4-2 | L | W3 | 완료 (2026-09-30) |
 | W5 | 루프 속도 | G2-3, G2-1 | L | — | 완료 (2026-09-30) |
 | W6 | 콘텐츠 헬퍼(a/b/c로 나눠 진행) | G1-3, G1-4, G4-1, G4-4 (+G3-10, G3-11) | L | W3, W4 (W6b는 W2) | 완료 (2026-09-30; 남은 하늘·반사는 G4-5) |
-| W7 | 에디터 밖·여러 에디터 | G2-2, G2-4, G1-2, G5-1 | L | — | 대기 |
+| W7 | 에디터 밖·여러 에디터 | G2-2, G2-4, G1-2, G5-1 | L | — | 완료 (2026-09-30; G2-4는 Unity 쪽 리로드만 남음) |
 | W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 | L | W1 | 대기 |
 | W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 대기 |
 | W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 대기 |
 | W11 | 백그라운드 에디터의 실제 입력 격리 | G3-9 | S | — | 대기 |
 | W12 | 핫 루프 넓히기 | G2-5 | M | W5 | 대기 |
-| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, P-4·G2-5 신고 | S | 새 버전이 나올 때 | — |
+| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, P-4·G2-5 신고 | S | 새 버전이 나올 때 | — |
 | 마지막 | macOS | P-3 | L | 실제 Mac | 대기 |
 
 ### W1 시나리오 입력 격리 (G3-6) — 완료 (2026-09-29, 아래 "해결됨")
@@ -105,14 +105,13 @@
 - 공통: 셋 다 `Editor/Build/BuildContext.cs`에 헬퍼를 더한다. 따로 진행하려면 헬퍼별 파일(`partial class`)로 나눈다.
   새 콘텐츠는 W4의 `ctx.LitMaterial`을 쓰고, 기존 샷 회귀가 없는지 W3 기준 이미지로 본다.
 
-### W7 에디터 밖·여러 에디터 (G2-2 → G1-2 → G5-1) — 조사부터
-- 순서: G2-2 조사(상주 batchmode 에디터에서 GPU 렌더·캡처가 되는가. 안 되면 GUI 에디터를 `-automated`로 띄워 모달만 막는다)가 먼저다.
-  batchmode 렌더가 안 되면 G1-2(복제 프로젝트 + batchmode 빌더)와 G5-1(에디터 풀로 루프 분산)은 GUI 에디터 N개가 된다.
-- 고치는 곳: `Tools~/open.ps1`, `Tools~/Harness.psm1`(락·에디터 선택), `Tools~/loop.ps1`.
-- 비용: 에디터마다 라이선스 좌석, 복제마다 `Library/`(디스크·첫 임포트 시간), O-7 같은 전역 자원 충돌.
-- 추가 검증: 루프 2개 동시 실행 시 대기가 사라짐(지금 두 번째가 3.55s 대기). 매트릭스 6의 기대값이 "대기"에서 "병렬"로 바뀌면 selftest도 고친다.
-- G2-4(W5에서 옮겨 옴): batchmode·`-automated` 에디터에서 C# 1줄 루프의 도메인 리로드와 리로드 뒤 ~0.9 s(창 다시 그리기로 보임)를 같은 방법으로 잰다
-  (에디터 로그의 `Domain Reload Profiling` + 첫 두 `EditorApplication.update` 틱 간격). 창이 없으면 사라지는지가 관건.
+### W7 에디터 밖·여러 에디터 (G2-2 → G1-2 → G5-1) — 완료 (2026-09-30, 아래 "해결됨")
+- 조사 결과: 상주 batchmode 에디터(`-batchmode`, `-quit`·`-nographics` 없음)가 D3D11로 렌더하고 Pipeline 서버·플레이 모드·오프스크린 캡처·UI Toolkit 합성이
+  모두 된다(fingerprint·events 같음) → GUI 에디터 N개가 아니라 **창 없는 에디터**로 갔다. 창 에디터는 `-automated`(대화상자가 기본값으로 바로 닫힘)로 띄운다.
+- 결과: `open.ps1`이 항상 `-automated -debugCodeOptimization`(`-Interactive`로 뺌), `-Headless`(창 없음), `-Own`(worktree에 에디터 트리 `Library/` 사본 +
+  그 worktree만의 창 없는 에디터 → 루프가 나란히, submit/land는 여전히 에디터 트리). 창 없는 에디터에서 루프 ~2.4 s(창 ~3.9 s), C# 1줄 ~7.0 s(창 ~9.5 s:
+  리로드 뒤 ~0.9 s가 사라지고 리로드도 2.7 → 2.1 s). 하다가 창 없는 에디터가 세션에서 처음 그리는 메시를 쓰레기 값으로 그리는 것을 찾아 캡처가 한 번 버리고 그린다.
+- 매트릭스 6이 "대기"와 "나란히(대기 0)"를 둘 다 본다(worktree 전용 에디터, 시작 컴파일 에러 보고, 첫 샷 기준 이미지 포함).
 
 ### W8 플레이어에서 돌리기 (G3-2, G3-8)
 - 개발 빌드 플레이어 + 런타임 Pipeline 서버로 같은 시나리오를 돌리는 `harness_perf`(fps, 프레임 p95, batches).
@@ -147,10 +146,11 @@
 - 핫 루프 동안 `fps`가 인터프리터 비용을 포함한다 → 인터프리터로 돈 메서드와 호출 수를 report에 넣어 전체 루프와 비교할 수 있게 한다.
 - 추가 검증: selftest 3번에 "Tick이 새 헬퍼 메서드를 부름 → 핫" 단계.
 
-### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, P-4·G2-5 신고)
+### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, P-4·G2-5 신고)
 - 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존)과 G2-5의 인터프리터 2건(`try/catch` 미지원,
   교체 본문이 던진 예외를 줄 없이 로그하고 원래 본문으로 이어 돌림), Unity에 P-4의 원인
-  (`Camera.RenderToCubemap(Cubemap)`: 6.6은 CPU 픽셀을 안 채우고 6.3은 sRGB로 인코딩 — 빈 씬 + 스카이박스 + half 큐브맵 한 개로 재현), O-6 Unity Search 예외.
+  (`Camera.RenderToCubemap(Cubemap)`: 6.6은 CPU 픽셀을 안 채우고 6.3은 sRGB로 인코딩 — 빈 씬 + 스카이박스 + half 큐브맵 한 개로 재현), O-6 Unity Search 예외,
+  O-11(batchmode의 첫 메시 그리기 — 빈 프로젝트 재현부터). O-10: Unity 6.7이 나오면 `EditorDialogEvents`로 자동으로 닫힌 대화상자를 report에 싣는다.
 - 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
   install의 Input System 추가, `HarnessReleaseBuild`)를 걷어낼 수 있는지 본다. O-9: 새 버전에서 selftest 1번의 HUD 검사(`uiError` 없음)를 보고,
   UI Toolkit에 패널을 지금 그리는 공개 API가 생기면 리플렉션을 걷어낸다.
@@ -161,19 +161,23 @@
 
 ## 기준선 (비교용)
 
-1차 버전(2026-09-28), W5·W6a·W6c 뒤(2026-09-30, 새로 연 에디터에서 각 3회, 이 머신). 워크플로우가 루프 시간을 바꾸면 열을 더한다(W6a: 파티클·링 애니메이션,
-W6c: GPU 베이크 지형·소품; 잰 것만).
+1차 버전(2026-09-28), W5·W6a·W6c·W7 뒤(2026-09-30, 새로 연 에디터에서 각 3회, 이 머신). 워크플로우가 루프 시간을 바꾸면 열을 더한다(W6a: 파티클·링 애니메이션,
+W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 / 창 없는 에디터 `-Headless`; 잰 것만).
 
-| 항목 | 1차 버전 | W5 | W6a | W6c |
-|---|---|---|---|---|
-| 루프: 코드 변경 없음 | 3.5–3.8s (build 0.7s 캐시 적중, play 2.6s) | 3.47–3.68s (build 0.47s, play 2.4–2.6s, 첫 캡처 1.75s) | 3.52–3.64s (build 0.51–0.53s, play 2.39–2.51s) | 3.73–3.91s (build 0.61–0.64s, play 2.49–2.66s) |
-| 루프: 셰이더만 수정 | ~4s (도메인 리로드 없음) | 3.79–3.83s | — | 4.06–4.50s |
-| 루프: 모듈 C# 1줄 수정 | ~9.2s (compile+reload 4.1s, build 1.9s, play 2.8s) | 8.84–9.08s (compile 4.7–4.9s = Tundra 0.35s + 리로드 ~2.5s + 리로드 뒤 에디터 ~0.9s, build 0.93–1.0s, play 2.55s) | 8.88–9.39s (compile 4.64–5.09s, build 0.97–1.03s, play 2.57–2.63s) | 9.53–9.69s (compile 4.73–4.92s, build 1.14–1.23s, play 2.86–2.97s) |
-| 루프: `-Hot`(Tick 본문 1줄) | — | 3.00–3.06s (판정+교체 0.14s, 첫 캡처 1.27s); 도메인 리로드 뒤 첫 번째 3.81–3.89s (교체 0.9s) | 3.21–3.29s (교체 0.15s, play 2.42–2.50s); 리로드 뒤 첫 번째 3.97s (교체 0.94s) | 3.35–3.45s (교체 0.15s, play 2.51–2.62s); 리로드 뒤 첫 번째 4.11s |
-| 루프: C# 컴파일 에러 보고 | ~1s | 0.94–1.14s | — | — |
-| 빌드 단계(lint + `harness_build` + 셰이더; 웜 / 리로드 직후) | ~0.9s / 1.9s | 0.47s / 0.93–1.0s (리로드 뒤 에디터 ~0.9s는 이제 compile 쪽에서 기다림) | 0.51–0.53s / 0.97–1.03s (FX 스텝 7.5–8 ms) | 0.61–0.64s / 1.14–1.23s (소품 스텝 ~60 ms, 큰 메시 fingerprint ~60 ms) |
-| compile-check csc / msbuild | 어셈블리당 ~0.1s / 웜 0.5–2s, 콜드 10–75s | 어셈블리당 0.13–0.16s / 웜 0.45–0.63s, 콜드 4–13s | — | — |
-| 스모크 씬 렌더 | batches ~46, SetPass ~43, tris ~60만 | 같음 (45.8 / 42.8 / 59만) | 50.9 / 47.8 / 61만 (링 2개 + 파티클) | 67.1 / 51.9 / 124만 (선돌·바위·아치·데칼, 그림자 캐스케이드 포함) |
+| 항목 | 1차 버전 | W5 | W6a | W6c | W7 창(`-automated`) / 창 없음(`-Headless`) |
+|---|---|---|---|---|---|
+| 루프: 코드 변경 없음 | 3.5–3.8s (build 0.7s 캐시 적중, play 2.6s) | 3.47–3.68s (build 0.47s, play 2.4–2.6s, 첫 캡처 1.75s) | 3.52–3.64s (build 0.51–0.53s, play 2.39–2.51s) | 3.73–3.91s (build 0.61–0.64s, play 2.49–2.66s) | 3.82–3.90s (build 0.59–0.61s, play 2.51–2.62s) / **2.36–2.50s** (build 0.52–0.54s, play 1.18–1.30s) |
+| 루프: 셰이더만 수정 | ~4s (도메인 리로드 없음) | 3.79–3.83s | — | 4.06–4.50s | 3.94–4.27s / **2.47–2.68s** |
+| 루프: 모듈 C# 1줄 수정 | ~9.2s (compile+reload 4.1s, build 1.9s, play 2.8s) | 8.84–9.08s (compile 4.7–4.9s = Tundra 0.35s + 리로드 ~2.5s + 리로드 뒤 에디터 ~0.9s, build 0.93–1.0s, play 2.55s) | 8.88–9.39s (compile 4.64–5.09s, build 0.97–1.03s, play 2.57–2.63s) | 9.53–9.69s (compile 4.73–4.92s, build 1.14–1.23s, play 2.86–2.97s) | 9.27–9.67s (compile 4.61–4.99s, 리로드 2.73–2.77s, build 1.14–1.23s, play 2.73–2.87s) / **6.75–7.10s** (compile 3.23–3.42s, 리로드 2.07–2.10s, 리로드 뒤 에디터 작업 없음, build 1.33–1.35s, play 1.59–1.69s) |
+| 루프: `-Hot`(Tick 본문 1줄) | — | 3.00–3.06s (판정+교체 0.14s, 첫 캡처 1.27s); 도메인 리로드 뒤 첫 번째 3.81–3.89s (교체 0.9s) | 3.21–3.29s (교체 0.15s, play 2.42–2.50s); 리로드 뒤 첫 번째 3.97s (교체 0.94s) | 3.35–3.45s (교체 0.15s, play 2.51–2.62s); 리로드 뒤 첫 번째 4.11s | 3.14–3.42s; 리로드 뒤 첫 번째 4.34s / **1.96–2.18s**; 리로드 뒤 첫 번째 3.01s |
+| 루프: C# 컴파일 에러 보고 | ~1s | 0.94–1.14s | — | — | — |
+| 빌드 단계(lint + `harness_build` + 셰이더; 웜 / 리로드 직후) | ~0.9s / 1.9s | 0.47s / 0.93–1.0s (리로드 뒤 에디터 ~0.9s는 이제 compile 쪽에서 기다림) | 0.51–0.53s / 0.97–1.03s (FX 스텝 7.5–8 ms) | 0.61–0.64s / 1.14–1.23s (소품 스텝 ~60 ms, 큰 메시 fingerprint ~60 ms) | 0.59–0.65s / 1.14–1.23s — 창 없음 0.52–0.60s / 1.33–1.35s |
+| compile-check csc / msbuild | 어셈블리당 ~0.1s / 웜 0.5–2s, 콜드 10–75s | 어셈블리당 0.13–0.16s / 웜 0.45–0.63s, 콜드 4–13s | — | — | — |
+| 스모크 씬 렌더 | batches ~46, SetPass ~43, tris ~60만 | 같음 (45.8 / 42.8 / 59만) | 50.9 / 47.8 / 61만 (링 2개 + 파티클) | 67.1 / 51.9 / 124만 (선돌·바위·아치·데칼, 그림자 캐스케이드 포함) | 같음 / 없음(Game 뷰가 그리지 않음, `render` null) |
+| 에디터 열기(재시작, `open.ps1`이 준비될 때까지) | ~30s (첫 응답 뒤 Debug 재컴파일 + 리로드 ~10s 포함) | — | — | — | 14.3s (`-debugCodeOptimization`: 재컴파일 없음) / 12.1s |
+| 창 없는 에디터 유휴 CPU | — | — | — | — | 쉬지 않는 루프 1코어의 120% → `HarnessHeadless` 1코어의 ~8%, ping 17–22 → ~8 ms |
+| 루프 2개 동시 | 두 번째가 3.55s 대기 | — | — | — | 같은 에디터: 두 번째가 4.59s 대기 / worktree 전용 에디터(`-Own`): 둘 다 대기 0 (창 4.4–4.9s, 창 없음 2.7–2.9s) |
+| worktree 전용 에디터 준비(`open.ps1 -Own`) | — | — | — | — | 28.7–29.3s (`Library/` 사본 1.9 GB·2.7만 파일 11.4s + 스크립트 전체 재컴파일 ~17s), 첫 루프 9.8s (빌드 캐시 없음) |
 
 ---
 
@@ -181,9 +185,8 @@ W6c: GPU 베이크 지형·소품; 잰 것만).
 
 - **G1-1 프로젝트 설정과 URP 에셋이 여전히 YAML** → 2026-09-30 해결(W4, 아래 "해결됨"). RP 밖의 프로젝트 설정은 G1-5.
 
-- [ ] **G1-2 빌더가 에디터 안에서만 실행된다**
-  - 현상: 빌더 결과(씬·생성 에셋)를 보려면 반드시 떠 있는 에디터와 루프가 필요하다. 에디터 없이 가능한 건 컴파일 체크까지다.
-  - 방향: 조사 필요. 같은 프로젝트를 두 에디터가 열 수 없으므로(프로젝트 잠금) 복제 프로젝트 + batchmode 빌드 등을 검토.
+- **G1-2 빌더가 에디터 안에서만 실행된다** → 2026-09-30 해결(W7, 아래 "해결됨"): 창 없는 에디터(`open.ps1 -Headless`)와 worktree 사본마다의 에디터
+  (`open.ps1 -Own`). 여전히 에디터 프로세스는 필요하다(빌더는 에디터 API).
 
 - **G1-3 파티클·애니메이션·타임라인용 코드 헬퍼가 없다** → 2026-09-30 해결(W6a, 아래 "해결됨"). 타임라인은 넣지 않았다(클립 + `ClipEvent` + 모듈 코드로 대신).
 
@@ -202,19 +205,21 @@ W6c: GPU 베이크 지형·소품; 잰 것만).
 - **G2-1 C# 1줄 수정에 ~9초 (컴파일 + 도메인 리로드 ~4초가 고정비)** → 2026-09-30 해결(W5, 아래 "해결됨"): `[CodeReload]` 본문만 바꿨으면 `loop.ps1 -Hot` ~3.0 s.
   그 밖의 C# 변경은 여전히 ~9 s → G2-4(고정비), G2-5(핫 범위).
 
-- [ ] **G2-2 GUI 에디터가 떠 있어야 하고, 모달 다이얼로그가 뜨면 멈춘다**
-  - 현상: 에디터가 `-automated`로 실행되지 않아 다이얼로그가 메인 스레드를 막을 수 있다(Pipeline descriptor의 `info` 경고). 라이선스 좌석도 점유.
-  - 방향: `tools/open-editor.ps1`로 `-automated` 실행, 또는 상주 batchmode 에디터에서 GPU 렌더·캡처가 되는지 검증.
+- **G2-2 GUI 에디터가 떠 있어야 하고, 모달 다이얼로그가 뜨면 멈춘다** → 2026-09-30 해결(W7, 아래 "해결됨"): `open.ps1`이 `-automated`로 연다
+  (`DisplayDialog`가 기본값으로 바로 닫힘), `-Headless`면 창 없이. 에디터가 뜨기 전의 창(새 버전의 이용 약관)은 여전히 사람 몫, 6.0–6.6에서는 자동으로 닫힌
+  대화상자가 보이지 않는다(O-10).
 
 - **G2-3 도메인 리로드 직후 첫 `harness_build`가 ~2초 (JIT 워밍업)** → 2026-09-30 해결(W5, 아래 "해결됨"). 대부분이 JIT가 아니라 에디터의 리로드 뒤 작업이었다(G2-4).
 
-- [ ] **G2-4 전체 루프의 고정비는 Unity 쪽이다** (2026-09-30, W5에서 드러남)
+- [~] **G2-4 전체 루프의 고정비는 Unity 쪽이다** (2026-09-30, W5에서 드러남)
   - 현상: C# 1줄 루프 ~8.9 s 중 도메인 리로드 ~2.5 s(`Domain Reload Profiling`: `CreateAndSetChildDomain` ~0.5 s, `[InitializeOnLoad]` ~0.4 s,
     `AwakeInstancesAfterBackupRestoration` ~0.46 s, …)와 리로드 뒤 첫 두 에디터 틱 사이의 네이티브 작업 ~0.9 s(관리 코드 `update`·`delayCall` 콜백은 모두
     20 ms 미만 — 창 다시 그리기로 보인다), 리로드 직후 빌드가 웜보다 ~0.5 s 더 든다(Unity·패키지 쪽 JIT; 하네스 코드만 미리 JIT하면 ~75 ms). 리로드는 에디터를
     오래 띄워 둘수록 늘었다(2.5 → 3.5 s, 재시작하면 돌아옴).
-  - 방향: 하네스가 줄일 수 있는 건 거의 없다. W7에서 batchmode·`-automated` 에디터(창 없음)로 같은 구간을 잰다. 루프가 에디터 세션의 나이를 보고(리로드 시간 추세)
-    재시작을 권하는 것도 검토. Unity의 CoreCLR 에디터가 나오면 다시 잰다.
+  - 2026-09-30 W7 측정(새로 연 에디터 각 3회, 위 "기준선"): 창 없는 에디터에서는 리로드 뒤 ~0.9 s가 **없고**(창 다시 그리기였다) 리로드도 2.73–2.77 → 2.07–2.10 s,
+    플레이 2.8 → 1.6 s → C# 1줄 9.27–9.67 s → **6.75–7.10 s**. 창 에디터(`-automated`)는 전과 같다.
+  - 남은 것: 도메인 리로드 ~2.1 s와 리로드 직후 빌드 +0.8 s는 Unity 쪽이다(CoreCLR 에디터가 나오면 다시 잰다). 에디터 세션의 나이를 보고 재시작을 권하는 것은
+    하지 않았다.
 
 - [ ] **G2-5 핫 루프는 `[CodeReload]` 메서드 본문만 받는다** (2026-09-30, W5)
   - 현상: 새 메서드·필드·시그니처, `try/catch`(Pipeline 인터프리터가 못 돌림), 표식 없는 메서드는 전체 루프(~9 s)다. 교체 본문이 던진 예외는 Pipeline이 줄 없이
@@ -283,8 +288,8 @@ W6c: GPU 베이크 지형·소품; 잰 것만).
 
 ## 성질 5 — 병렬 작업이 쉽다
 
-- [ ] **G5-1 에디터 1개 → 루프가 직렬화된다**
-  - 현상: 뮤텍스로 안전하게 줄을 세우지만, 에이전트 N명이면 대기가 선형으로 는다(2개 동시 실행 시 두 번째가 3.55s 대기).
+- **G5-1 에디터 1개 → 루프가 직렬화된다** → 2026-09-30 해결(W7, 아래 "해결됨"): worktree마다 에디터(`open.ps1 -Own`), 루프 2개 동시에 대기 0.
+  에디터 수 = worktree 수라 메모리(~2 GB)·디스크(`Library/`)가 그만큼 든다. 에디터 몇 개를 여러 worktree가 나눠 쓰는 풀은 만들지 않았다.
 
 - [~] **G5-3 compile-check는 다른 모듈의 최신 변경을 모른다**
   - 2026-09-29 부분 해결(G5-2 작업 중): 한 실행에서 검사하는 어셈블리는 의존 순서로 컴파일해 방금 만든 DLL을 참조한다(체인).
@@ -375,11 +380,22 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
   - 할 일(상시): 새 Unity 버전마다 매트릭스 9의 selftest 1번 HUD 검사로 확인. 공개 API가 생기면 교체.
   - 2026-09-30(W6b): 시나리오 동안의 UI 시계(`Runtime/PanelClock.cs`, G3-10)도 내부 API(`BaseVisualElementPanel.TimeSinceStartupFunc`,
     `UIElementsRuntimeUtility.GetSortedPlayerPanels`)에 기댄다. 없으면 `play.uiClock`이 `real` + `error`이고 selftest 1번의 UI 시계 검사가 빨갛다.
+- [ ] **O-10 `-automated`가 닫은 대화상자가 6.0–6.6에서는 보이지 않는다** (2026-09-30, W7)
+  - 현상: `-automated` 에디터의 `EditorUtility.DisplayDialog`는 곧바로 `false`, `DisplayDialogComplex`는 1(취소)을 돌려주고 로그에 아무것도 남기지 않는다.
+    Pipeline이 대화상자를 보는 `EditorDialogEvents`는 6.7부터라(`EditorDialogStateMirror`가 `#if UNITY_6000_7_OR_NEWER`) 6.0–6.6에서는 에디터 작업이 "취소"로
+    끝난 이유를 알 수 없다. 에디터가 뜨기 전의 창(새로 설치한 버전의 이용 약관)은 `-automated`와 무관하게 여전히 사람을 기다린다(`open.ps1`의 `dialog`).
+  - 방향: 6.7 이상에서 Pipeline의 `dialogsDuringExecution`을 loop report에 옮긴다(W7 때는 설치된 6.7이 없어 확인하지 못함). 그 전에는 `DisplayDialog`를
+    부르는 에디터 코드를 하네스 명령에서 부르지 않는다.
+- [ ] **O-11 창 없는 에디터가 세션에서 처음 그리는 메시를 쓰레기 값으로 그린다** (2026-09-30, W7, 우회함)
+  - 현상: `-batchmode` 에디터를 새로 열고 첫 캡처에서 매듭(커스텀 HLSL)이 노랑·흰색, 선돌이 검정이었다(매번 다른 색). 같은 머티리얼의 아치는 정상이라 메시의 첫
+    그리기다. 두 번째 그리기는 같은 프레임 안에서도 정상, 하늘만 보는 렌더로 미리 그려도 소용없음, `-force-gfx-mt`로도 같음(6.3 확인).
+  - 지금: `HarnessCapture.Render`가 batchmode면 카메라들을 한 번 버리고 다시 그린다 → 매트릭스 6이 창 없는 에디터의 첫 샷들을 기준 이미지와 비교한다.
+  - 할 일(상시): 빈 프로젝트로 재현해 Unity에 신고하고, 고쳐진 버전에서 두 번 그리기를 걷어낸다.
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
-**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~5분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
-(새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~5분), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
+**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~7분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
+(새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~9분), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
 
 1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark·magenta 샷 없음, 모든 샷 1280x720에
@@ -416,7 +432,10 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    → 샷 `magenta` + `hint`에 `Smoke/Pedestal` + golden `changed`, 루프는 녹색 → 원복 후 마젠타 없음·golden `same`. 빌더 메시 변경(아치 두께 2배, G3-11)
    → 첫 루프가 이미 새 메시(golden `changed`, 다음 루프와 같은 값) → 원복 후 `same`
 5. 리셋 없는 static 추가 → `stage=lint` → 원복
-6. 루프 2개 동시 실행 → 두 번째가 대기 후 성공
+6. 루프 2개 동시 실행 → 두 번째가 대기 후 성공. 그리고 worktree 전용 에디터(W7): 커밋된 코드의 detached worktree(`<저장소>-st-o`)에 컴파일 에러를 넣고
+   `open.ps1 -Own` → `Library/` 사본 + 창 없는·`-automated` 에디터가 그래도 뜸(`compileFailed`) → 그 루프가 주입한 줄로 `stage=compile` → 되돌리면 에디터 트리
+   루프와 동시에 둘 다 녹색·대기 0·fingerprint·events 같음·`render` 없음(`fps.note`)·첫 샷들이 그 에디터 트리 루프의 샷과 허용치 안에서 같음(O-11 우회 확인,
+   기준 이미지가 없는 버전에서도; 커밋된 기준 이미지도 `changed` 0) → `quit.ps1`로 닫힘
 7. worktree 격리(G5-2): 에이전트 worktree 2개. A가 깨진 코드를 `submit.ps1 -SkipCheck` → `stage=compile` + `reverted` + `restore.ok`,
    그 사이 B의 `submit.ps1`은 락 대기 후 녹색. 게이트(`-SkipCheck` 없이)는 에디터 트리를 건드리지 않고 거부. submit 도중 kill →
    다음 `loop.ps1`에 `recoveredSubmit`, 녹색. 끝나면 메인 트리 `git status`로 테스트 사본이 남지 않았는지 확인
@@ -442,6 +461,54 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G2-2 GUI 에디터가 떠 있어야 하고, 모달 다이얼로그가 뜨면 멈춘다** · **G1-2 빌더가 에디터 안에서만 실행된다** · **G5-1 에디터 1개 → 루프가 직렬화된다**
+  (+ **G2-4** 측정, 2026-09-30, W7)
+  - 현상(전): 루프는 사람이 쓰는 GUI 에디터 하나에 붙었다. `open.ps1`이 `-automated` 없이 띄워서 에디터의 모달 대화상자가 메인 스레드를 막을 수 있었고
+    (Pipeline 디스크립터의 `info` 경고), 에이전트가 여럿이면 뮤텍스로 줄을 섰다(두 번째 루프 3.55 s 대기). 새로 연 에디터는 첫 응답 뒤 Debug 코드 최적화로
+    한 번 더 컴파일했다(재시작 ~30 s).
+  - 조사: (1) `-automated`(Unity 명령줄 인자, `IsHumanControllingUs: 0`)면 `EditorUtility.DisplayDialog`가 1 ms 만에 `false`, `DisplayDialogComplex`가 1(취소)을
+    돌려준다(eval로 확인, 로그 없음). Cecil로 에디터 DLL을 훑어 보니 `isHumanControllingUs`는 창 배치 저장·닫기 전 저장 확인·검색 모니터·라이선스 UI에서 쓰인다.
+    (2) 상주 batchmode 에디터(`-batchmode`, `-quit`·`-nographics` 없음)가 D3D11(RTX 4060 Ti)로 렌더하고 Pipeline 서버(디스크립터 `mode: batchmode`)·플레이 모드·
+    오프스크린 캡처·UI Toolkit 합성이 모두 된다 → GUI 에디터 N개가 아니라 창 없는 에디터로 갔다. (3) 같은 프로젝트는 에디터 하나만 열 수 있으니 복제 프로젝트가
+    필요한데, `Library/`를 통째로 복사한 worktree(1.9 GB, robocopy 7–11 s)는 에셋을 다시 임포트하지 않고 스크립트만 다시 컴파일했다(경로가 바뀌어 ~17 s). Pipeline
+    포트는 7800–7849에서 자동으로 골라 에디터 여럿이 충돌하지 않는다.
+  - 발견: 창 없는 에디터의 **첫 캡처에서 매듭이 노랑·흰색, 선돌이 검정**(O-11) — 같은 머티리얼의 아치는 정상이라 메시의 첫 그리기이고, 같은 프레임의 두 번째
+    그리기는 정상, 하늘만 보는 사전 렌더·`-force-gfx-mt`로는 안 고쳐짐. 유휴 창 없는 에디터가 초당 ~6만 틱(1.2코어). `-automated` 창 에디터는 시작 때 컴파일 에러가
+    있으면 묻지 않고 Safe Mode(Pipeline 없음, 백그라운드에서 고쳐도 안 나옴), batchmode는 종료(코드 1), `-batchmode -ignoreCompilerErrors`는 마지막으로 성공한
+    어셈블리로 뜬다. 그때의 컴파일 에러는 하네스가 로드되기 전이라 아무 데도 없고, 바뀐 게 없으면 `recompile`이 다시 컴파일하지 않는다.
+  - 방법(G2-2, `Tools~/open.ps1`·`Harness.psm1` `Get-HarnessEditorArguments`): 에디터를 항상 `-automated -debugCodeOptimization`으로 띄운다(`-Interactive`면
+    `-automated` 없이 — 사람이 쓰는 에디터). `-Headless` = `-batchmode -ignoreCompilerErrors`(창 없음). 창 에디터가 Safe Mode면(창 제목) `open.ps1`과 루프가
+    `safeMode` + 에디터 로그에서 읽은 `compileErrors`(file·line·module)를 보고한다(`quit.ps1 -Force` → 고치고 `open.ps1`). 준비 대기 3 → 2 s(Debug 재컴파일이 없다).
+    - `Editor/HarnessHeadless.cs`: 에디터 모드(`window`/`headless`, `automated`)를 `harness_ping`과 report `editor`에. 창 없는 에디터는 할 일 없는 틱(플레이·컴파일·
+      임포트 아님)마다 1 ms 자고 이 프로세스의 Windows 타이머를 1 ms로(`timeBeginPeriod`; 15.6 ms 기본이면 명령이 틱을 기다려 ping 17 → 32 ms). `HarnessCodeOptimization`·
+      핫 루프 워밍업이 batchmode라고 건너뛰던 것을 `-quit` 한 번짜리만 건너뛰게.
+    - `Runtime/HarnessCapture.cs`: batchmode면 카메라들을 한 번 버리고 다시 그린다(O-11 우회). `ScenarioRunner`: 창 없는 에디터의 `"screen"` 샷은 즉시 에러.
+      report: 창 없는 에디터면 `render` null, `fps.note`(Game 뷰가 그리지 않는 프레임).
+    - `HarnessConsole`: 시작할 때 컴파일이 실패해 있고 이 프로세스가 본 에러가 없으면 세션에 한 번 `RequestScriptCompilation()` → 루프가 정확한 줄을 보고한다.
+  - 방법(G5-1·G1-2, `open.ps1 -Own`): 에이전트 worktree에 에디터 트리 `Library/`의 사본을 두고(에디터 트리의 락 + 그 에디터 idle; 임시 폴더에 복사 후 이름 변경;
+    Pipeline 디스크립터·`Library/Harness`·락·pid 파일은 빼고) 그 worktree만의 창 없는 에디터를 띄운다(`-Window`면 창). `Library/`가 있는 worktree는 이미 자기
+    프로젝트로 풀리므로(`Resolve-HarnessEditorRoot`) `loop`·`uc`·`quit`·`compile-check`가 자기 에디터·자기 락을 쓰고, `submit.ps1`·`land.ps1`만
+    `Use-HarnessIntegrationRoot`로 메인 worktree(에디터 트리)에 붙는다(루트에 딸린 경로를 `Set-HarnessEditorRoot` 한 곳에서). report `editor.own`.
+    사본은 에디터 트리의 Unity 버전으로 연다 — 6.0 새 클론(`-UnityVersion`으로 연 에디터 트리)의 첫 매트릭스에서 worktree가 커밋된 `ProjectVersion.txt`(6.3)로
+    6.0 `Library` 사본을 열어 업그레이드하고(열기 72 s) fingerprint가 6.3 값이 되어 6번이 빨갰다.
+  - 검증(이 머신): 창 없는 에디터 루프 3회 녹색·fingerprint `345ba0d7…`·events 같음, 첫 루프부터 기준 이미지 `same=3`(`meanDiff` 0.45–0.49, 최대 2 — 디더링 순번,
+    창 없는 에디터끼리는 픽셀까지 같음). 유휴 CPU 120 → ~8 %. 창 없는 에디터가 컴파일 에러로 시작 → `open.ps1` 녹색 + `compileFailed`, 루프 `stage=compile`
+    `SmokeModule.cs:64 [Smoke]` → 고치면 녹색. 창 에디터가 컴파일 에러로 시작 → `open.ps1` 6.7 s 만에 `safeMode` + 같은 에러, `quit.ps1 -Force` → 녹색.
+    `-Own` worktree(에디터 트리 창 에디터가 떠 있는 채로): 사본 11.4 s, 준비 28.7 s, 첫 루프 9.8 s(빌드 캐시 없음) `same=3`; 에디터 트리 루프와 동시에 두 번 →
+    둘 다 락 대기 0.00–0.01 s, 창 4.4–4.9 s · 창 없음 2.7–2.9 s, fingerprint·events 같음; 그 worktree에서 `submit.ps1 -Module Smoke`가 에디터 트리(창 에디터)에서 녹색.
+    측정(G2-4, 새로 연 에디터 각 3회, 위 "기준선"): 창 없는 에디터 변경 없음 2.36–2.50 s(창 3.82–3.90), C# 1줄 6.75–7.10 s(창 9.27–9.67: 리로드 2.73–2.77 → 2.07–2.10 s,
+    리로드 뒤 ~0.9 s 없음), `-Hot` 1.96–2.18 s(창 3.14–3.42), 셰이더 2.47–2.68 s(창 3.94–4.27). 재시작 창 14.3 s · 창 없음 12.1 s(전 ~30 s).
+    - selftest 1–8 녹색 424 s(`345ba0d7…`, 6번 62.6 s: 새 검사 12개 — 위 "검증 매트릭스" 6).
+    - 9(커밋된 코드): 새 클론 6000.3.11f1 녹색 509 s(`345ba0d7…`, 기준 이미지 `same=3`), 6000.0.84f1 녹색 480 s(`c8561a2d…`, 67.8/60.8/48.5),
+      6000.6.3f1 녹색 565 s(`7cda8899…`, 67.9/60.8/48.5) — 세 버전 모두 새 클론 옆의 전용 에디터 6번 녹색(첫 샷이 에디터 트리 샷과 `same`, `meanDiff` 0.45–0.49),
+      루프 경고·에디터 에러 0. 창 에디터 열기(`-automated`, 새 Library 첫 임포트) 53–89 s.
+    - 10(`-automated -debugCodeOptimization`으로 여는 `open.ps1`): BagelGame 녹색 49.0 s(`619be553…` = W5, 출시 빌드 `Managed/` 132개·`Harness.*` 0개),
+      Fluid-Sim 녹색 29.7 s(`54880f05…`, 103개·0개), 사내 프로젝트 A 녹색 80.1 s(`6664b723…`, `brd-attach.json`, Domain Reload 켜짐) — 에디터 열기가 Debug 재컴파일이
+      없어 W6c보다 빨라졌다(30.3 → 20.1 s, 16.5 → 13.1 s, 51.5 → 37.3 s). fingerprint·`git status` 그대로.
+  - 남은 것: 에디터 몇 개를 여러 worktree가 나눠 쓰는 풀(지금은 worktree = 에디터), worktree 전용 에디터의 첫 열기 스크립트 재컴파일·캐시 없는 빌드(~30 s + 10 s),
+    창 없는 에디터의 성능 수치(렌더 없음 → W8 플레이어 `harness_perf`), 자동으로 닫힌 대화상자 보고(O-10, 6.7+), batchmode 첫 그리기 신고(O-11).
+    도메인 리로드 ~2.1 s는 Unity 쪽(G2-4 `[~]`).
 
 - [x] **G4-1 CPU(C#) 텍스처 베이크가 느리다** · **G4-4 절차적 라이브러리가 기본 수준이다** · **G3-11 빌더가 메시를 바꾼 첫 루프의 샷이 옛 메시를 그린다**
   (2026-09-30, W6c)

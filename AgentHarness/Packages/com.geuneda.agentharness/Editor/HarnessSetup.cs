@@ -11,14 +11,15 @@ namespace Harness.Editor
     /// CompilationPipeline.codeOptimization lasts one Editor session: a restarted Editor comes back as Release (the
     /// user-wide "Code Optimization On Startup" preference, which is left alone). Release moves exception lines to the
     /// method's closing brace and changes procedural float results, i.e. the build fingerprint. Re-apply Debug for this
-    /// project whenever an Editor session starts (one extra recompile).
+    /// project whenever an Editor session starts (one extra recompile). tools/open.ps1 starts Editors with
+    /// -debugCodeOptimization, which makes the session Debug from the start (no extra recompile, W7).
     /// </summary>
     [InitializeOnLoad]
     static class HarnessCodeOptimization
     {
         static HarnessCodeOptimization()
         {
-            if (Application.isBatchMode || AssetDatabase.IsAssetImportWorkerProcess()) return;
+            if (AssetDatabase.IsAssetImportWorkerProcess() || (Application.isBatchMode && !HarnessHeadless.IsHeadless)) return;
             if (UnityEditor.Compilation.CompilationPipeline.codeOptimization == UnityEditor.Compilation.CodeOptimization.Debug) return;
             UnityEditor.Compilation.CompilationPipeline.codeOptimization = UnityEditor.Compilation.CodeOptimization.Debug;
             Debug.Log("[Harness] Code optimization set to Debug for this Editor session (exact exception lines, stable build fingerprint)");

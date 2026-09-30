@@ -39,6 +39,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Harness.psm1') -Force
+Use-HarnessIntegrationRoot   # the Editor tree, also from a worktree with its own Editor (open.ps1 -Own)
 $clock = [Diagnostics.Stopwatch]::StartNew()
 $work = Get-HarnessWorkRoot
 $root = Get-HarnessProjectRoot

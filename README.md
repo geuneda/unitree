@@ -24,10 +24,10 @@ URP 후처리 + 회전 오브젝트 + 코드로 만든 파티클·애니메이�
 | Three.js 환경의 성질 | 이 하네스의 복원 방법 |
 |---|---|
 | 1. 모든 게 텍스트 | 씬은 `IBuildStep` 빌더 코드가 생성(YAML 직접 수정 금지), URP·Renderer 에셋과 품질 레벨별 파이프라인은 `ISettingsStep` 코드가 생성. HLSL `.shader`, UI Toolkit UXML/USS(+ UI 킷: 디자인 변수·판·버튼·게이지·토스트, UXML 데이터 바인딩), 머티리얼·Volume·라이팅·파티클·애니메이션 클립도 코드 |
-| 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 메서드 본문만 고쳤으면 컴파일 없이 바꿔 넣는 핫 루프(`loop.ps1 -Hot`) |
+| 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 메서드 본문만 고쳤으면 컴파일 없이 바꿔 넣는 핫 루프(`loop.ps1 -Hot`), 모달 대화상자에 멈추지 않는 `-automated` 에디터와 창 없는 에디터(`open.ps1 -Headless`, 한 바퀴 ~2.4 s) |
 | 3. 눈으로 검증 | 캡처 PNG(화면의 카메라 스택·미니맵 + 스크린 공간 UI) + 이미지 통계, 연속 캡처 시트, 기준 이미지와의 diff 점수·바뀐 곳 PNG(시나리오 동안 UI Toolkit transition도 프레임 시계라 UI가 움직이는 중에도 픽셀까지 같음), 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로 |
 | 4. 에셋 없이 완성도 | 절차적 메시(SDF → 서피스 네트, 스플라인 튜브, 바위)·포아송 스캐터·노이즈, GPU 텍스처 베이크(`ctx.BakeTexture`: HLSL이 C# 노이즈와 같은 무늬, 입력이 같으면 건너뜀), URP 데칼·디테일 맵, 코드로 만든 URP 후처리, 라이팅 베이크 없는 스카이 반사·앰비언트, 키워드를 알아서 맞추는 `LitMaterial`, 설정 한 벌로 만드는 결정적 파티클(`ctx.Particles`), 키를 코드로 쓰는 애니메이션 클립을 Playables로 재생(`ctx.AnimationClip` + `ClipPlayer`, 틀린 경로·속성은 빌드 경고) |
-| 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 worktree + 트랜잭션 submit / land |
+| 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 worktree + 트랜잭션 submit / land, worktree마다 따로 도는 창 없는 에디터(`open.ps1 -Own`, 루프가 서로 기다리지 않음) |
 
 ## 루프 한 방
 
@@ -47,20 +47,24 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
   "play": { "events": [{ "name": "ClipEvent:HaloHalfTurn", "count": 1 }, { "name": "SpinDirectionChanged", "count": 1 }, { "name": "SpinnerLap", "count": 2 }] },
   "render": { "batches": 67.1, "setPassCalls": 51.9, "triangles": 1236392 },
   "golden": { "version": "6000.3.11f1", "same": 3, "changed": 0, "missing": 0 },
-  "durationSec": 3.8 }
+  "editor": { "mode": "window", "automated": true },
+  "durationSec": 3.9 }
 ```
 
 실패하면 `stage`(compile / build / shader / play / runtime / lint / shots)와 함께 `{"file","line","msg","module"}`가 나옵니다.
-샷은 커밋된 기준 이미지(`golden/<Unity 버전>/<시나리오>/`)와 비교됩니다. 같은 머신이면 픽셀까지 같아서, 셰이더 한 줄(스펙큘러 절반)도
+샷은 커밋된 기준 이미지(`golden/<Unity 버전>/<시나리오>/`)와 비교됩니다. 같은 머신·같은 에디터 모드면 픽셀까지 같아서, 셰이더 한 줄(스펙큘러 절반)도
 `changed` + 바뀐 곳을 칠한 diff PNG로 드러납니다(실패로 치지는 않음). 의도한 변경이면 `loop.ps1 -UpdateGolden`으로 갱신합니다.
 
-| 상황 (측정) | 한 바퀴 |
-|---|---|
-| 코드 변경 없음 | ~3.8 s |
-| 셰이더만 수정 | ~4 s |
-| 모듈 C# 1줄 수정 | ~9.6 s (Unity 컴파일 ~0.4 s + 도메인 리로드 ~2.5 s + 리로드 뒤 에디터 자체 작업 ~0.9 s 포함) |
-| 같은 수정이 `[CodeReload] Tick` 본문 안이면 `loop.ps1 -Hot` | **~3.4 s** |
-| C# 컴파일 에러 보고 | ~1.1 s |
+| 상황 (측정) | 창 에디터 | 창 없는 에디터 (`open.ps1 -Headless`) |
+|---|---|---|
+| 코드 변경 없음 | ~3.9 s | **~2.4 s** |
+| 셰이더만 수정 | ~4.1 s | ~2.6 s |
+| 모듈 C# 1줄 수정 | ~9.5 s (Unity 컴파일 ~0.4 s + 도메인 리로드 ~2.7 s + 리로드 뒤 에디터 자체 작업 ~0.9 s 포함) | ~7.0 s (리로드 ~2.1 s, 리로드 뒤 작업 없음) |
+| 같은 수정이 `[CodeReload] Tick` 본문 안이면 `loop.ps1 -Hot` | **~3.3 s** | **~2.1 s** |
+| C# 컴파일 에러 보고 | ~1.1 s | — |
+
+창 없는 에디터는 GPU로 렌더하고 캡처·기준 이미지·이벤트가 창 에디터와 같습니다(디더링 한 단계 차이, 허용치 안). Game 뷰가 없어서 플레이 동안
+아무것도 그리지 않으니 빠르고, 대신 `"screen"` 캡처와 batches 같은 렌더 통계가 없습니다.
 
 `-Hot`은 마지막 전체 루프가 컴파일한 소스와 Roslyn 토큰으로 비교해, 바뀐 것이 `[CodeReload]` 메서드 본문뿐이면 Unity Pipeline 패키지의 인터프리터로
 그 본문만 바꿔 넣고(컴파일·도메인 리로드·씬 빌드 없음) 같은 시나리오를 처음부터 돕니다 — 이벤트 수·기준 이미지 비교가 전체 루프와 그대로 맞고, 같은 코드면
@@ -102,7 +106,7 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
   아래는 BagelGame에 붙인 뒤 시나리오 한 번(`waitTarget play-button` → `click` → `waitTarget select-button` → `click`)이 찍은 Game 뷰 3컷입니다.
 - 검증: 하네스를 모르는 공개 프로젝트 2개 — [BagelGame](https://github.com/Unity-Technologies/BagelGame)(URP, Unity 6.3, 기존 씬 `Main.unity`)과
   [SebLague/Fluid-Sim](https://github.com/SebLague/Fluid-Sim)(Built-in, 2022.3 → 6.0, 컴퓨트 셰이더). 설치 → 기존 씬으로 루프 3회 녹색 →
-  출시 빌드의 `Managed/` DLL 목록이 하네스 없는 대조 빌드와 같음 → 제거 후 `git status` 깨끗. 절차 전체는 `tools/attach-test.ps1` 한 번(30–57 s).
+  출시 빌드의 `Managed/` DLL 목록이 하네스 없는 대조 빌드와 같음 → 제거 후 `git status` 깨끗. 절차 전체는 `tools/attach-test.ps1` 한 번(30–49 s).
   그리고 비공개 사내 모바일 게임 1개(URP, Addressables, 씬 22개, asmdef 35개, C# 4,400개, 부트 → 로그인 → 타이틀 → 로비): 설치 → 루프 3회 녹색 →
   제거 후 `git status` 깨끗(로비까지 도는 시나리오로 135 s). Fluid-Sim은 `HarnessInput`으로 구 Input Manager 입력(스페이스 일시정지, 마우스 궤도)까지.
 
@@ -128,17 +132,20 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
 ```powershell
 git clone https://github.com/geuneda/unitree C:\dev\unitree
 cd C:\dev\unitree\AgentHarness
-powershell -ExecutionPolicy Bypass -File tools/open.ps1               # 에디터를 열고 쓸 수 있을 때까지 대기 (첫 임포트 ~1.5분)
+powershell -ExecutionPolicy Bypass -File tools/open.ps1               # 에디터를 열고 쓸 수 있을 때까지 대기 (첫 임포트 ~1.5분, 재시작 ~14 s)
+#                                                                       -Headless: 창 없는 에디터 / -Interactive: 사람이 쓰는 에디터(대화상자가 사람을 기다림)
 powershell -ExecutionPolicy Bypass -File tools/uc.ps1 harness_setup   # 1회: 사용자별 설정(Debug 코드 최적화 등)
 powershell -ExecutionPolicy Bypass -File tools/loop.ps1               # 씬이 없으면 여기서 코드로 생성된다
 powershell -ExecutionPolicy Bypass -File tools/quit.ps1               # 끝낼 때: 정상 종료
 ```
 
 `open.ps1`은 에디터 로그를 프로젝트의 `Logs/Editor.log`에 따로 쓰게 합니다. `unity open`이나 Hub로 열면 모든 에디터가
-사용자 전역 `Editor.log` 하나를 서로 덮어써서, 에디터를 둘 이상 띄우면 로그가 뒤섞입니다.
+사용자 전역 `Editor.log` 하나를 서로 덮어써서, 에디터를 둘 이상 띄우면 로그가 뒤섞입니다. 에디터는 `-automated`로 뜹니다 — 에디터의 모달
+대화상자가 사람을 기다리며 메인 스레드를 막지 않고 기본값(취소)으로 바로 닫힙니다. 시작할 때 스크립트가 컴파일되지 않으면 창 에디터는 Safe Mode로
+들어가는데, `open.ps1`과 루프가 그 에러(file·line)를 로그에서 읽어 보고합니다(창 없는 에디터는 마지막으로 성공한 어셈블리로 떠서 루프가 에러를 보고).
 
 위 과정 전체(클론 → 열기 → 설정 → 루프 3회 → 종료 → 삭제)를 `tools/fresh-clone-test.ps1` 하나로 검증할 수 있습니다(이 머신에서 ~110 s).
-하네스 자체의 검증 매트릭스(에러 주입·핫 루프·동시 루프·worktree submit/land)는 `tools/selftest.ps1`이 한 번에 돌리고(~5분),
+하네스 자체의 검증 매트릭스(에러 주입·핫 루프·동시 루프·worktree 전용 에디터·worktree submit/land)는 `tools/selftest.ps1`이 한 번에 돌리고(~7분),
 `fresh-clone-test.ps1 -UnityVersion <버전> -SelfTest`는 그것을 다른 Unity 버전의 새 클론에서 돌립니다.
 
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)
@@ -190,7 +197,8 @@ powershell -ExecutionPolicy Bypass -File tools/land.ps1                       # 
   (에디터 트리가 이미 남의 모듈 때문에 빨간 경우용; `submit.errorModules`로 판단).
 - **도중에 죽어도 안전**: submit이 타임아웃·kill로 죽으면 저널이 남습니다. 다음에 락을 잡는 `loop`/`uc`/`submit`이 그 저널로
   자동으로 되돌리고 report에 `recoveredSubmit`을 남깁니다.
-- **실수 방지**: worktree에서 `loop.ps1`을 돌리면 거부됩니다(`stage=submit`). 에디터가 컴파일하는 건 worktree가 아니라 에디터 트리이기 때문입니다.
+- **실수 방지**: worktree에서 `loop.ps1`을 돌리면 거부됩니다(`stage=submit`). 에디터가 컴파일하는 건 worktree가 아니라 에디터 트리이기 때문입니다
+  (그 worktree에 에디터를 따로 띄웠으면 거기서 돕니다 — 아래 "루프를 나란히").
 - **한 모듈 = 한 에이전트**: submit은 모듈별로 마지막에 반영한 worktree를 기록합니다(`Library/Harness/submit/owners.json`).
   다른 살아 있는 worktree가 올린, 아직 병합되지 않은 변경이 에디터 트리에 있는 모듈은 `stage=submit`으로 거부합니다(`-Takeover`로 인수).
   에디터 트리 브랜치에 그 모듈을 건드린 커밋이 있는데 worktree에 없으면(미러링하면 병합된 작업을 되돌리게 되므로) `git merge master`를 먼저 하라고 거부합니다.
@@ -223,9 +231,27 @@ submit한 파일은 에디터 트리에 미커밋 사본으로 남아 있어서,
 | 병합 직후(루프 중) land 프로세스를 kill | 다음 `loop.ps1`이 `recoveredLand`로 되돌리고 녹색, HEAD·`git status` 그대로 |
 | 충돌 / `.meta` 미커밋 / worktree에 미커밋 파일 / 남의 미병합 submit / 에디터 트리 직접 수정 | 각각 0.8–2 s 만에 `stage=land`로 거부, 아무것도 건드리지 않음 |
 
+### 루프를 나란히: worktree 전용 에디터 (`open.ps1 -Own`)
+
+에디터가 하나면 루프가 줄을 섭니다(같은 에디터에 루프 2개면 두 번째가 ~4.6 s 대기). Unity는 한 프로젝트 폴더를 에디터 하나만 열 수 있어서,
+worktree를 프로젝트 사본으로 만들어 자기 에디터를 줍니다.
+
+```powershell
+cd ..\wt-foo\AgentHarness
+powershell -ExecutionPolicy Bypass -File tools/open.ps1 -Own    # 에디터 트리 Library/의 사본 + 창 없는 에디터 (~30 s)
+powershell -ExecutionPolicy Bypass -File tools/loop.ps1         # 이 worktree의 전체 상태로, 에디터 트리의 루프와 동시에 (~2.4 s)
+powershell -ExecutionPolicy Bypass -File tools/quit.ps1         # worktree를 지우기 전에
+```
+
+- `Library/` 사본(샘플 1.9 GB·2.7만 파일, ~11 s)은 에디터 트리의 락을 잡고 그 에디터가 idle일 때 뜨고, 에디터 트리의 Pipeline 연결 정보·submit/land 저널은
+  복사하지 않습니다. 처음 열 때 스크립트만 다시 컴파일합니다(에셋은 다시 임포트하지 않음).
+- 그 뒤 이 worktree의 `loop`·`uc`·`quit`·`compile-check`은 자기 에디터를, `submit`·`land`는 여전히 에디터 트리를 씁니다.
+- 측정: 에디터 트리(창)와 worktree 전용 에디터(창 없음)의 루프를 동시에 → 둘 다 락 대기 0, 같은 fingerprint·이벤트, 전용 에디터의 첫 샷도 기준 이미지와 `same`.
+- 비용: 에디터 하나당 메모리 ~2 GB, `Library/` 크기만큼 디스크. 창 없는 에디터는 유휴일 때 1코어의 ~8%만 씁니다(그냥 두면 Unity의 batchmode 루프가 1.2코어를 씀).
+
 ### 한계
 
-- 루프 자체는 여전히 한 번에 하나씩 돕니다(G5-1).
+- worktree 전용 에디터는 worktree마다 하나라 에이전트 수만큼 메모리·디스크가 듭니다(에디터 몇 개를 나눠 쓰는 풀은 없음).
 - `Contracts/`는 여전히 "추가만" 규칙으로 버팁니다(G5-4).
 - land는 git 병합이라 브랜치의 중간 커밋(깨진 커밋 포함)도 이력에 그대로 들어갑니다. 최종 결과만 루프로 검증합니다.
 
@@ -239,7 +265,8 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
     Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioInput · ScenarioRunner ·
                                            HarnessCapture(+CaptureCameras · CaptureUi · ContactSheet) · ClipPlayer(Playables 클립 재생) · PanelClock · UI/ ·
                                            Procedural/(MeshBuilder · Noise · Sdf · Spline · Scatter · TextureBaker)
-    Editor/                                harness_* 에디터 커맨드(핫 루프 harness_hot 포함), BuildContext(머티리얼·파티클·애니메이션·GPU 베이크·데칼 헬퍼) / IBuildStep,
+    Editor/                                harness_* 에디터 커맨드(핫 루프 harness_hot 포함), 에디터 모드(창 없는 에디터의 유휴 CPU 억제),
+                                           BuildContext(머티리얼·파티클·애니메이션·GPU 베이크·데칼 헬퍼) / IBuildStep,
                                            SettingsContext / ISettingsStep, 출시 빌드 필터
     UI/ · Shaders/                         UI 킷 테마(HarnessKit.uss) · GPU 베이크 include(HarnessBake.hlsl, HarnessNoise.hlsl)
     Tools~/                                loop · submit · land · uc · compile-check · open · quit · install · uninstall · attach-test ·
@@ -254,7 +281,8 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
 
 `AgentHarness/CLAUDE.md`에 루프 사용법, report.json 해석, 규칙(YAML 직접 수정 금지, 텍스트 우선 형태, 모듈 폴더 밖 수정 금지,
 에디터 조작은 순서대로), 모듈·빌더 템플릿(`[CodeReload] Tick` 포함 — 본문만 고치면 `loop.ps1 -Hot`), 머티리얼·파티클·애니메이션·UI 킷·GPU 베이크·절차적 메시 헬퍼, 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
-병렬 에이전트는 위의 worktree + `submit.ps1` + `land.ps1` 흐름을 씁니다(G5-2, G5-5). 남은 병렬 과제는 루프 직렬화(G5-1)와 `Contracts` 공유 지점(G5-4)입니다.
+병렬 에이전트는 위의 worktree + `submit.ps1` + `land.ps1` 흐름을 쓰고(G5-2, G5-5), 루프를 나란히 돌리려면 worktree마다 `open.ps1 -Own`(G5-1)입니다.
+남은 병렬 과제는 `Contracts` 공유 지점(G5-4)입니다.
 
 ## 라이선스
 

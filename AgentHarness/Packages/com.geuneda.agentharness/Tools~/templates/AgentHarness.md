@@ -12,6 +12,11 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1   # 한 바퀴: HarnessO
 powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 잡고 정상 종료
 ```
 
+- `open.ps1`은 에디터를 `-automated`로 연다: 에디터의 모달 대화상자(`EditorUtility.DisplayDialog`)가 사람을 기다리지 않고 기본값(취소)으로 바로 닫힌다.
+  사람이 그 에디터에서 작업하면 `-Interactive`. `-Headless`는 창 없는 에디터(`-batchmode`, GPU로 렌더): Game 뷰가 없어 `"screen"` 캡처는 안 되고
+  `fps`에 렌더가 빠지지만(`render` 없음), 한 바퀴가 ~1.3 s 빠르고 스크립트가 컴파일되지 않아도 마지막으로 성공한 어셈블리로 떠서 루프가 에러를 보고한다.
+  report의 `editor`(`mode`: `window`/`headless`, `automated`)가 어느 에디터였는지다.
+
 - 종료코드 0 = 녹색. `report.json`의 `ok`/`stage`(editor|compile|build|shader|play|runtime|lint|shots)와
   `compileErrors`/`runtimeErrors`(file·line·module)를 본다. `editorErrors`는 Unity·패키지 내부 에러라 실패로 치지 않는다.
   `knownErrors`(설정의 `knownErrors` 정규식에 맞은 에러)와 `teardownErrors`(시나리오가 끝난 뒤 플레이 모드를 나가며 난 에러, 예: 끝나지 않은 부트의 취소)도
@@ -79,7 +84,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   `void M(string type, string key, Vector2 value)`에 `[AgentHarnessInput]`을 붙이면 하네스가 시나리오 입력을 넘긴다(`play.inputHooks`).
   `type`이 `"begin"`이면 그때부터 실제 입력을 무시하고, `"end"`면 되돌린다. 하네스를 올린 뒤 install을 `-InputShim`으로 다시 돌리면 고치지 않은
   옛 `HarnessInput.cs`가 새 버전으로 바뀐다(고친 사본은 경고만).
-- 캡처 `preset`: `"auto"`(샷이 없으면 메인 카메라) · `"main"` · `"screen"`(Game 뷰 그대로, Game 뷰 탭이 보여야 함) · 샷 이름(설정 `shots`) ·
+- 캡처 `preset`: `"auto"`(샷이 없으면 메인 카메라) · `"main"` · `"screen"`(Game 뷰 그대로, Game 뷰 탭이 보여야 함 — 창 없는 에디터에서는 에러) · 샷 이름(설정 `shots`) ·
   `"camera": "<카메라 이름>"` · `"pos"` + `"lookAt"`/`"rot"` + `"fov"`(그 자리에서, 메인 카메라 설정으로).
 - `"screen"` 말고는 오프스크린으로 **Game 뷰가 합치는 카메라들을 같은 순서로** 렌더한다: 화면에 그리는 Base 카메라를 depth 순으로(viewport·clear
   그대로, 미니맵·분할 화면), 각 카메라의 URP 카메라 스택까지, 메인 카메라 자리에 캡처 포즈의 카메라. 포즈가 메인 카메라와 다르면 메인 카메라를 그 포즈로
@@ -117,6 +122,9 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
 4. 여러 에이전트가 동시에 일하면 `ProjectSettings/AgentHarness.json`의 `modules`에 모듈 폴더를 등록하고, 각자 git worktree에서
    `tools/submit.ps1 -Module <이름>` → 커밋 → `tools/land.ps1`. 에러의 `module`도 이 등록으로 채워진다. asmdef 없는 폴더도 된다
    (submit의 사전 컴파일 검사가 그 폴더가 들어가는 `Assembly-CSharp`을 검사한다).
+   루프를 서로 기다리지 않으려면 worktree에서 `tools/open.ps1 -Own`: 그 worktree에 에디터 트리 `Library/`의 사본을 두고 창 없는 에디터를 따로 띄운다
+   → 그 worktree의 `loop.ps1`·`uc.ps1`·`quit.ps1`은 그 에디터를 쓰고 동시에 돈다(submit·land는 여전히 에디터 트리로). 비용: 에디터 하나당 메모리
+   ~2 GB, `Library/` 크기만큼 디스크, 처음 열 때 스크립트 전체 재컴파일. 끝나면 그 worktree에서 `quit.ps1` 뒤 worktree를 지운다.
 5. 시나리오가 게임의 서버·계정·결제를 건드릴 수 있다. 개발용 대화상자에서 서버를 고르는 게임이면 시나리오가 테스트 서버를 명시적으로 누르게 하고,
    구매 팝업 같은 것은 누르지 않는다. PlayerPrefs는 같은 프로젝트의 다른 체크아웃과 공유된다.
 
@@ -141,9 +149,11 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
 
 ## 문제 해결
 
-- `open.ps1`의 `dialog`: 에디터가 모달 대화상자(Safe Mode, 이용 약관 등)에 막혀 있다 → 사람에게 답을 부탁하고 `open.ps1`을 다시 부른다(그 에디터를 기다린다).
+- `open.ps1`의 `dialog`: 에디터가 시작 전 대화상자(이용 약관, 패키지 에러 등)에 막혀 있다 → 사람에게 답을 부탁하고 `open.ps1`을 다시 부른다(그 에디터를 기다린다).
   `deprecatedPackages`가 함께 나오면 Unity가 열 때마다 묻는 지원 종료 패키지다 → `Packages/manifest.json`에서 빼거나 바꾼다.
-- `stage=editor`: 에디터가 없거나 응답이 없다 → `tools/open.ps1`. 시작 시 컴파일 에러면 Safe Mode다(`Logs/Editor.log`의 `error CS`).
+- `open.ps1`·루프의 `safeMode` + `compileErrors`: 시작할 때 스크립트가 컴파일되지 않아 창 있는 에디터가 Safe Mode로 들어갔다(`-automated`라 묻지 않는다,
+  하네스와 연결되지 않는다) → 에러를 고치고 `tools/quit.ps1 -Force` → `tools/open.ps1`. 또는 `open.ps1 -Headless`(그래도 떠서 루프가 에러를 보고한다).
+- `stage=editor`: 에디터가 없거나 응답이 없다 → `tools/open.ps1`.
 - `stage=shots`(`blank`): 화면이 비었다. `hint`와 `cameras`를 본다(메인 카메라가 텍스처에 그리는 게임이면 화면에 그리는 카메라를 `"camera"`로). 편집 모드(`-NoPlay`)에서는 플레이 중에만
   그리는 게임이 검게 나온다. 카메라가 런타임에 생기는 게임이면 메인 카메라가 없다고 나온다.
 - `stage=play` + `waitScene/waitTarget ... after Ns`: 그 씬·요소가 제한 시간 안에 나오지 않았다. 에러 메시지의 로드된 씬 목록과 `Logs/Editor.log`를 본다

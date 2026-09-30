@@ -13,10 +13,10 @@ Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **
 | # | Three.js 환경의 성질 | Unity 기본 상태 | 이 하네스가 복원하는 방법 |
 |---|---|---|---|
 | 1 | 모든 게 텍스트(JS 코드) | 씬/프리팹이 GUID로 얽힌 YAML, GUI 중심 도구 | 씬은 `IBuildStep` 코드가 생성, 렌더 파이프라인 설정은 `ISettingsStep` 코드, HLSL·UXML/USS·코드로 만든 머티리얼/Volume/라이팅/파티클/애니메이션 클립 |
-| 2 | 수정→새로고침이 초 단위 | 컴파일 + 도메인 리로드 | Domain Reload 끔, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 본문만 바꾸면 컴파일 없이 적용하는 핫 루프(`loop.ps1 -Hot`) |
+| 2 | 수정→새로고침이 초 단위 | 컴파일 + 도메인 리로드, GUI 에디터와 모달 대화상자 | Domain Reload 끔, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 본문만 바꾸면 컴파일 없이 적용하는 핫 루프(`loop.ps1 -Hot`), 대화상자에 멈추지 않는 `-automated` 에디터·창 없는 에디터(`open.ps1 -Headless`) |
 | 3 | 스크린샷·콘솔·FPS를 눈/기계로 확인 | 에이전트가 화면을 못 봄 | `harness_capture/play`가 PNG + 이미지 통계, `harness_console/stats`가 JSON |
 | 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/SDF/스플라인/스캐터), GPU 텍스처 베이크(`ctx.BakeTexture`, C#과 같은 HLSL 노이즈), URP Volume·데칼을 코드로, 파티클·키프레임 애니메이션을 코드로(`ctx.Particles`, `ctx.AnimationClip` + Playables `ClipPlayer`) |
-| 5 | 레지스트리 구조라 병렬 작업이 쉬움 | 에디터 하나를 공유 | `GameRoot.Register` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 git worktree + `submit.ps1`/`land.ps1` 트랜잭션 |
+| 5 | 레지스트리 구조라 병렬 작업이 쉬움 | 에디터 하나를 공유 | `GameRoot.Register` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 git worktree + `submit.ps1`/`land.ps1` 트랜잭션, worktree마다 따로 도는 에디터(`open.ps1 -Own`) |
 
 모든 설계 결정의 기준: **"Three.js 환경의 어떤 성질을 복원하는가"**. URP·물리·엔진 기능을 쓰니 결과는 그 이상을 노린다.
 
@@ -34,12 +34,22 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1
 powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 잡고 정상 종료, 프로세스가 끝날 때까지 대기
 ```
 
-`open.ps1`은 에디터 로그를 `Logs/Editor.log`(직전 것은 `Editor-prev.log`)에 따로 쓰게 하고, 첫 응답 뒤 Debug 재컴파일까지 끝나
-3초간 idle일 때 돌아온다(재시작 ~30s, 새 클론 첫 임포트는 수 분). `unity open`이나 Hub로 열면 `-logFile`이 없어 여러 에디터가
-사용자 전역 `Editor.log` 하나를 서로 덮어쓴다(아래 "함정"). 실패하면 JSON의 `error`, `dialog`(모달 다이얼로그 — 사람이 답해야 함), `logTail`을 본다.
-Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이용 약관, Safe Mode, 패키지 에러)는 로그가 60 s 멈추고 에디터 창 제목이
-진행 창이 아니면 `dialog.title`로 보고한다. 에디터는 그대로 두니 사람이 답한 뒤 `open.ps1`을 다시 부르면 그 에디터를 기다린다
+`open.ps1`은 에디터 로그를 `Logs/Editor.log`(직전 것은 `Editor-prev.log`)에 따로 쓰게 하고, 응답한 뒤 2초간 idle일 때 돌아온다
+(재시작 ~14 s, 새 클론 첫 임포트는 수 분). `unity open`이나 Hub로 열면 `-logFile`이 없어 여러 에디터가 사용자 전역 `Editor.log` 하나를
+서로 덮어쓴다(아래 "함정"). 에디터는 이렇게 뜬다(W7, G2-2 — 아래 "에디터 모드"):
+- **`-automated`**(기본): `EditorUtility.DisplayDialog*`가 사람을 기다리지 않고 기본값(취소)을 바로 돌려준다 → 에디터의 모달 대화상자가 메인 스레드를
+  막지 않는다. 창 배치도 종료 때 저장하지 않는다. 사람이 그 에디터에서 작업하면 `-Interactive`(대화상자가 사람을 기다림).
+- **`-debugCodeOptimization`**(항상): 처음부터 Debug 코드 최적화 → 정확한 예외 줄과 결정적 fingerprint를 위한 재컴파일(~10 s)이 없다.
+- **`-Headless`**: 창 없는 에디터(`-batchmode`, `-quit` 없음, GPU로 렌더). 한 바퀴가 ~1.3 s 빠르고, 스크립트가 컴파일되지 않아도 마지막으로 성공한
+  어셈블리로 뜬다(`-ignoreCompilerErrors`) → 루프가 에러를 보고한다. Game 뷰가 없어서 `"screen"` 캡처는 에러, `fps`에 렌더가 없다.
+- **`-Own`**(에이전트 worktree에서): 그 worktree만의 에디터(기본 창 없음, `-Window`면 창). 아래 "병렬 에이전트".
+
+실패하면 JSON의 `error`, `dialog`(모달 다이얼로그 — 사람이 답해야 함), `safeMode`+`compileErrors`, `logTail`을 본다.
+Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이용 약관, 패키지 에러, `-Interactive`의 "Enter Safe Mode?")는 로그가 60 s 멈추고
+에디터 창 제목이 진행 창이 아니면 `dialog.title`로 보고한다. 에디터는 그대로 두니 사람이 답한 뒤 `open.ps1`을 다시 부르면 그 에디터를 기다린다
 (`open.ps1`이 띄운 pid는 `Logs/harness-editor.json`에 남아서, 락 파일이 생기기 전에도 두 번째 에디터를 띄우지 않는다).
+**시작할 때 스크립트가 컴파일되지 않으면** 창 있는 `-automated` 에디터는 묻지 않고 Safe Mode로 들어간다(Pipeline 서버 없음) → `open.ps1`과 루프가
+`safeMode: true`와 로그에서 읽은 `compileErrors`(file·line·module)를 준다. 고친 뒤 `quit.ps1 -Force` → `open.ps1`(또는 `-Headless`로 연다).
 다른 설치 버전으로 열기: `open.ps1 -UnityVersion <버전>`(아래 "Unity 버전").
 
 `tools/loop.ps1` = recompile → (C# 컴파일 에러면 즉시 중단) → lint → `harness_build` → `harness_shaders` → `harness_play`(기본 3컷)
@@ -70,7 +80,9 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
   "editorErrors": [{"type","msg","count","stack"}],   // Unity/패키지 내부 에러(Assets/ 흔적 없음). 실패 사유는 아니지만 읽어볼 것
   "knownErrors": [{"type","msg","file","line","count"}],   // 설정 knownErrors 정규식에 맞은 에러(프로젝트가 원래 내는 것). 실패 아님
   "teardownErrors": [{"type","msg","file","line","module","count"}],   // 시나리오가 끝난 뒤 플레이 모드를 나가며 난 에러. 실패 아님, 읽어볼 것
-  "fps": {"avg","min","p95ms","p99ms","hitches","cpuMainAvgMs","samples","editorFocused"},
+  "editor": {"pid","mode":"window"|"headless","automated","own"},   // 루프를 돌린 에디터(own = worktree 전용 에디터, open.ps1 -Own)
+  "safeMode": true,                        // stage=editor: 창 있는 에디터가 Safe Mode(시작 때 컴파일 실패) — compileErrors는 그 로그에서
+  "fps": {"avg","min","p95ms","p99ms","hitches","cpuMainAvgMs","samples","editorFocused","note"},   // note: headless면 렌더 없는 프레임(창 에디터와 비교 불가)
   "shots": ["C:/.../HarnessOut/latest/shot0_closeup.png", ...],
   "durationSec": 3.5, "unityVersion": "6000.3.11f1",   // 루프를 돌린 에디터 버전
   "timings": {"lockWaitSec","editorWaitSec","hotSec","compileSec","snapshotSec","buildSec","reloadSec","playSec","hotPlaySec","collectSec","goldenSec"},
@@ -88,7 +100,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
            "activeScene", "scenes":[{"name","mode","t","wallSec"}],      // 로드된 씬(Start = 처음부터 있던 씬, t = 시나리오 시계)
            "waits":[{"type","target","t","waitedSec","frames"}], "clicks":[{"target","t","x","y","via"}],
            "uiClock":{"mode":"frames"|"real","panels","scope","error"}},   // UI Toolkit 패널이 프레임 시계로 돌았는지(아래 "시나리오")
-  "render": {"batches","setPassCalls","drawCalls","triangles","vertices"},
+  "render": {"batches","setPassCalls","drawCalls","triangles","vertices"},   // headless면 null(Game 뷰가 그리지 않음)
   "shotStats": [{"name","preset","t","width","height","meanLuma","stdLuma","blank","dark","magenta","magentaRatio",
                  "cameras":["Stage/Main Camera","Stage/Main Camera/Weapon (overlay)","Minimap"],   // 그린 카메라(아래부터)
                  "ui":["ugui:<캔버스 경로>","uitk:<PanelSettings>"],   // 샷의 UI(아래부터), 합성 실패는 "uiError"
@@ -109,9 +121,11 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 }
 ```
 
-측정된 한 바퀴 시간(이 머신, W6c — ROADMAP "기준선"): 코드 변경 없음 **~3.8s**, 셰이더만 수정 **~4s**(도메인 리로드 없음), 모듈 C# 1줄 수정 **~9.6s**
-(컴파일 ~0.4s + 도메인 리로드 ~2.5s + 리로드 뒤 에디터 자체 작업 ~0.9s + 리로드 직후 빌드 ~1.2s + 플레이 ~2.9s), **`-Hot`(본문만) ~3.4s**
-(도메인 리로드 뒤 첫 핫 루프는 +0.7s), 컴파일 에러 보고 **~1.1s**. 도메인 리로드는 에디터를 오래 띄워 둘수록 늘었다(2.5 → 3.5s, 아래 "함정").
+측정된 한 바퀴 시간(이 머신, W7 — ROADMAP "기준선"), 창 에디터 / **창 없는 에디터(`-Headless`)**: 코드 변경 없음 ~3.9s / **~2.4s**,
+셰이더만 수정 ~4.1s / **~2.6s**(도메인 리로드 없음), 모듈 C# 1줄 수정 ~9.5s / **~7.0s**(창: 컴파일 ~0.4s + 도메인 리로드 ~2.7s + 리로드 뒤 에디터 자체
+작업 ~0.9s + 리로드 직후 빌드 ~1.2s + 플레이 ~2.8s; 창 없음: 리로드 ~2.1s, 리로드 뒤 작업 없음, 플레이 ~1.6s), **`-Hot`(본문만) ~3.3s / ~2.1s**
+(도메인 리로드 뒤 첫 핫 루프는 +0.9s), 컴파일 에러 보고 **~1.1s**. 창 없는 에디터는 플레이 동안 Game 뷰가 그리지 않아 빠르다(캡처만 그림).
+도메인 리로드는 에디터를 오래 띄워 둘수록 늘었다(2.5 → 3.5s, 아래 "함정").
 
 ## 규칙 (반드시 지킬 것)
 
@@ -124,10 +138,11 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
    (Playables — AnimatorController 에셋 없음, 아래 "파티클·애니메이션"). 그 밖의 GUI 에셋(Timeline 등)이 필요하면 코드로 생성한다.
 3. **자기 모듈 폴더 밖 수정 금지.** 작업 범위는 `Assets/Game/<Module>/` 하나. 모듈 간 공유 이벤트 타입만
    `Assets/Game/Contracts/`에 **추가**(기존 타입 수정 금지). 하네스 패키지(`Packages/com.geuneda.agentharness/`)와 `tools/`는 하네스 작업일 때만 고친다.
-4. **에디터 조작은 한 번에 하나씩.** 에디터는 하나다. `tools/loop.ps1`과 `tools/uc.ps1`은 프로젝트별 시스템 뮤텍스를 잡으므로
-   병렬 에이전트는 자동으로 줄을 선다(`timings.lockWaitSec`). recompile/build/play/capture를 `unity command`로 직접 호출해
+4. **에디터 하나에 대한 조작은 한 번에 하나씩.** `tools/loop.ps1`과 `tools/uc.ps1`은 프로젝트별 시스템 뮤텍스를 잡으므로
+   같은 에디터를 쓰는 에이전트는 자동으로 줄을 선다(`timings.lockWaitSec`). recompile/build/play/capture를 `unity command`로 직접 호출해
    락을 우회하지 말 것. **병렬 에이전트는 각자 git worktree에서 코드를 쓰고 `tools/submit.ps1 -Module <M>`으로 에디터에 넣고,
-   커밋한 뒤 `tools/land.ps1`로 병합한다** (아래 "병렬 에이전트"). 여럿이 에디터 트리를 직접 고치면 한 명의 컴파일 에러가 모두의 루프를 막는다.
+   커밋한 뒤 `tools/land.ps1`로 병합한다** (아래 "병렬 에이전트"). 줄을 서지 않으려면 worktree에 에디터를 따로 띄운다(`tools/open.ps1 -Own`).
+   여럿이 에디터 트리를 직접 고치면 한 명의 컴파일 에러가 모두의 루프를 막는다.
    에디터 트리에서 `git merge`/`git stash`를 직접 하지 말 것 — land가 락 안에서 한다.
 5. **Domain Reload가 꺼져 있다.** 플레이 사이에 static이 유지된다. 가변 static(필드·자동 프로퍼티·이벤트, static readonly 컬렉션 포함)이 있는
    타입은 `[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)] static void ResetStatics()`에서 초기화한다.
@@ -147,7 +162,8 @@ Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json:
                                (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
   Runtime/Procedural/          MeshBuilder(+Sdf: FromSdf, +Spline: Tube, +Scatter: Rock·Icosphere), Noise(Perlin/fBm/Ridged/Worley/Rng), Sdf, Spline,
                                Scatter(Poisson), TextureBaker, PMath, AmbientProbe(큐브맵 → 앰비언트 SH)
-  Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교, HarnessHot: 핫 루프) 와 BuildContext(+.Materials: LitMaterial,
+  Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교, HarnessHot: 핫 루프, HarnessHeadless: 에디터 모드·창 없는
+                               에디터의 유휴 CPU 억제) 와 BuildContext(+.Materials: LitMaterial,
                                +.Particles: Particles·ParticleMaterial, +.Animation: AnimationClip·Animate, +.Bake: BakeTexture·FloatTexture,
                                +.Decals: Decal·DecalMaterial)/IBuildStep,
                                SettingsContext/ISettingsStep(렌더 설정), HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
@@ -164,7 +180,7 @@ tools/loop.ps1                 원커맨드 루프          tools/uc.ps1        
 tools/submit.ps1               worktree의 모듈 → 에디터 트리, 트랜잭션 루프(실패 시 되돌림)
 tools/land.ps1                 worktree 브랜치 → 에디터 트리 브랜치로 병합, 트랜잭션 루프(실패 시 되돌림)
 tools/compile-check.ps1        에디터 없는 컴파일 검사  tools/Harness.psm1    HTTP 클라이언트·락·루프·submit/land 저널·git
-tools/open.ps1 / quit.ps1      에디터 열기(프로젝트별 로그, 준비 대기) / 정상 종료(락)
+tools/open.ps1 / quit.ps1      에디터 열기(프로젝트별 로그, -automated, 준비 대기; -Headless 창 없음, -Own worktree 전용) / 정상 종료(락)
 tools/fresh-clone-test.ps1     새 클론 검증: 짧은 경로에 클론 → open → harness_setup → 루프 N회 → quit → 삭제
 tools/attach-test.ps1          기존 프로젝트 붙이기 검증: install → open → 루프 N회 → 출시 빌드 → quit → uninstall → git status
 tools/selftest.ps1             검증 매트릭스 1–8 자동 실행(에러 주입·동시 루프·worktree submit/land)
@@ -471,7 +487,7 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
   `scope`. 6.1+는 런타임 패널마다(`BaseVisualElementPanel.TimeSinceStartupFunc`), 패널별 시계가 없는 6.0은 모든 패널이 공유하는 시계(`Panel.TimeSinceStartup`)를
   바꿔서 `scope` = `every panel`(시나리오 동안 에디터 창의 UI도 그 시계를 따른다). 둘 다 없는 버전이면 `real` + `error`(실패 아님).
 - 캡처 `preset`: 샷 이름(씬의 ShotPreset 또는 설정 `shots`) · `"auto"`(이름순 다음 샷, 없으면 메인 카메라) · `"main"`(메인 카메라 그대로) ·
-  `"screen"`(Game 뷰 그대로, 해상도는 Game 뷰 크기 = 사용자 레이아웃, Game 뷰 탭이 보여야 함).
+  `"screen"`(Game 뷰 그대로, 해상도는 Game 뷰 크기 = 사용자 레이아웃, Game 뷰 탭이 보여야 함; 창 없는 에디터에서는 그 샷의 `error`).
   `"camera": "<이름>"`이면 그 카메라로, `"pos": [x,y,z]` + `"lookAt": [x,y,z]`(또는 `"rot"` 오일러) + `"fov"`면 그 자리에서 찍는다(설정은 메인 카메라).
 - `"screen"` 말고는 오프스크린으로 **Game 뷰가 합치는 카메라들을** 한 RT에 렌더한다(G3-7, `Runtime/CaptureCameras.cs`, `shotStats[].cameras` = 그린 순서):
   - 템플릿이 메인 카메라면(`"camera"` 없음) 화면에 그리는 Base 카메라 전부를 depth 순으로(viewport·clear 그대로 — 미니맵·분할 화면), 각 카메라의 URP 카메라
@@ -573,7 +589,8 @@ worktree로 되복사(**커밋할 것**), 아니면 **백업으로 되돌리고 
   남의 모듈일 때(에디터 트리가 이미 빨간 상태)만 쓴다.
 - submit이 도중에 죽어도(타임아웃·kill) 다음에 락을 잡는 loop/uc/submit이 저널(`Library/Harness/submit/pending.json`)로
   되돌린다 → 그 report에 `recoveredSubmit`.
-- worktree에서 `loop.ps1`은 거부된다(`stage=submit`): 에디터가 컴파일하는 건 worktree가 아니라 에디터 트리다.
+- worktree에서 `loop.ps1`은 거부된다(`stage=submit`): 에디터가 컴파일하는 건 worktree가 아니라 에디터 트리다. 그 worktree에 에디터를
+  따로 띄웠으면(`open.ps1 -Own`, 아래) 거기서 돈다.
   `uc.ps1`은 worktree에서도 에디터 트리의 에디터에 붙는다(JSON 안의 상대 경로는 에디터 트리 기준).
 - 시나리오는 worktree의 파일을 절대 경로로 넘기므로 worktree에서 고친 `tools/scenarios/*.json`이 그대로 쓰인다.
 - **한 모듈 = 한 에이전트**(강제): submit은 모듈별로 마지막에 반영한 worktree를 `Library/Harness/submit/owners.json`에 기록한다.
@@ -585,6 +602,30 @@ worktree로 되복사(**커밋할 것**), 아니면 **백업으로 되돌리고 
   submit/land/compile-check/에러의 `module`이 모두 이것을 쓴다.
 - 에디터 트리 찾기: `Library/`가 없는 체크아웃이면 `git worktree list`의 메인 worktree에서 같은 하위 경로.
   git worktree가 아닌 복사본이면 `$env:AGENTHARNESS_EDITOR_ROOT`에 에디터 트리 경로를 준다.
+
+### worktree 전용 에디터 (open.ps1 -Own, W7: G5-1·G1-2)
+
+에디터가 하나면 루프가 줄을 선다(에이전트 N명이면 대기가 선형으로 는다). Unity는 한 프로젝트 폴더를 에디터 하나만 열 수 있으므로, 루프를 나란히
+돌리려면 에이전트 worktree가 프로젝트 사본이 되어 자기 에디터를 가진다:
+
+```powershell
+cd ..\wt-foo\AgentHarness
+powershell -ExecutionPolicy Bypass -File tools/open.ps1 -Own      # 에디터 트리 Library/의 사본 + 창 없는 에디터 (~30 s)
+powershell -ExecutionPolicy Bypass -File tools/loop.ps1           # 이 worktree의 전체 상태로, 에디터 트리의 루프와 동시에 (~2.4 s)
+powershell -ExecutionPolicy Bypass -File tools/submit.ps1 -Module Foo   # 여전히 에디터 트리로(트랜잭션). land.ps1도 같다
+powershell -ExecutionPolicy Bypass -File tools/quit.ps1           # 이 worktree의 에디터를 닫는다 (worktree를 지우기 전에)
+```
+- `Library/`가 없는 worktree면 에디터 트리의 `Library/`를 복사해 둔다(에디터 트리의 락을 잡고 그 에디터가 idle일 때; 샘플 1.9 GB·2.7만 파일 ~11 s).
+  복사하지 않는 것: Pipeline 디스크립터(복사하면 이 worktree의 도구가 에디터 트리의 에디터에 붙는다), `Library/Harness`(submit/land 저널·소유 기록),
+  락·pid 파일. 임시 폴더에 복사한 뒤 이름을 바꾸므로 반쯤 된 `Library/`는 생기지 않는다.
+- 그 뒤로 이 worktree는 `Library/`가 있는 프로젝트라 `loop.ps1`·`uc.ps1`·`quit.ps1`·`compile-check.ps1`이 자기 에디터를 쓰고(락도 따로),
+  `submit.ps1`·`land.ps1`만 에디터 트리로 간다(메인 worktree). report의 `editor.own`이 참이다.
+- 처음 열 때 스크립트를 전부 다시 컴파일한다(경로가 바뀌어서 ~17 s; 에셋은 다시 임포트하지 않는다), 첫 루프는 빌드 캐시 없이 전체 빌드(~10 s).
+- 사본 `Library/`는 에디터 트리의 Unity 버전 것이라 그 버전으로 연다: 에디터 트리를 `-UnityVersion`으로 열어 `ProjectVersion.txt`가 커밋된 것과 다르면
+  worktree의 `ProjectVersion.txt`도 그 버전으로 바꾼다(다른 버전으로 열면 Unity가 사본을 업그레이드하고 fingerprint가 달라졌다 — 6.0 새 클론에서 겪음).
+- 비용: 에디터 하나당 메모리 ~2 GB(+ 임포트 워커), `Library/` 크기만큼 디스크. 같은 머신의 에디터 여럿이 한 라이선스(같은 사용자 로그인)로 떴다.
+  창 없는 에디터는 유휴일 때 CPU를 거의 쓰지 않는다(`HarnessHeadless`: 1코어의 ~8%).
+- 창이 필요하면 `-Own -Window`. worktree를 지우기 전에 `quit.ps1`(에디터가 파일을 잡고 있으면 `git worktree remove`가 실패한다).
 
 ### land.ps1 (병합)
 
@@ -645,13 +686,13 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
   `-Keep`은 녹색이어도 클론과 에디터를 남긴다(비교·디버깅용).
 - `-UnityVersion <설치된 버전>`: 클론의 `ProjectVersion.txt`를 그 버전으로 바꿔서 연다(P-1; 이때 `git status` 변경은 보고만 한다).
 - `-SelfTest`: 루프 뒤 클론에서 `tools/selftest.ps1`(매트릭스 1–8, 루프의 fingerprint를 기대값으로)까지 돌린다 → `selftest.json`,
-  report의 `selftest`(`stage=selftest`). worktree는 클론 옆(`ah-fresh-st-a/-b`)에 생겼다가 지워진다. 전체 ~5분.
+  report의 `selftest`(`stage=selftest`). worktree는 클론 옆(`ah-fresh-st-a/-b/-o`)에 생겼다가 지워진다. 전체 ~9분.
 - 언제: `tools/`, `ProjectSettings/`, `Packages/`, `.gitignore`, 에디터 시작 경로(`[InitializeOnLoad]`)를 바꿨을 때와 공개 전.
 
 ## 하네스 자기 검증 (tools/selftest.ps1)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~5분
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~7분
 powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 345ba0d7
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
@@ -674,14 +715,18 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   핫 본문의 예외는 전체 루프가 주입한 줄로 보고) ·
   4 HLSL 에러(재임포트 없는 다음 루프에서도) + 되돌린 상태를 기준 이미지로 → 셰이더 한 줄(스펙큘러 절반) → golden `changed`(rect·diff PNG), 루프는 녹색 +
   파이프라인이 못 그리는 머티리얼(받침대를 `Standard`로 → 샷 `magenta`, `hint`에 `Smoke/Pedestal`, golden `changed`, 루프는 녹색 → 되돌리면 `same`) + 빌더 메시 변경(아치 두께 2배, G3-11 →
-  첫 루프가 벌써 새 메시: golden `changed`이고 다음 루프와 같음 → 되돌리면 `same`) · 5 리셋 없는 static(lint) · 6 루프 2개 동시 · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
+  첫 루프가 벌써 새 메시: golden `changed`이고 다음 루프와 같음 → 되돌리면 `same`) · 5 리셋 없는 static(lint) · 6 루프 2개 동시(한쪽이 락 대기) +
+  worktree 전용 에디터(W7: 커밋된 코드의 worktree `<저장소>-st-o`에 컴파일 에러를 넣고 `open.ps1 -Own` → 창 없는·automated 에디터가 `Library` 사본으로 그래도
+  뜨고 루프가 그 줄을 보고 → 고치면 에디터 트리 루프와 동시에 녹색, 둘 다 대기 없음, fingerprint·events 같음, `render` 없음·`fps.note`, 첫 샷들이 같은 때
+  에디터 트리 루프의 샷과 허용치 안에서 같음(커밋된 기준 이미지도 `changed` 0) → `quit.ps1`) · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
   다른 worktree의 새 모듈·계약은 락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부) ·
   8 land(fast-forward + 그 사이 submit 락 대기, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
   병합 직후 kill → `recoveredLand`). 에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
 - 주입 위치는 샘플 모듈의 표식 줄: `SmokeModule.cs`의 `m_Time += dt;`(컴파일, 64행)·`EventBus.Publish(new SpinnerLap(laps));`(런타임, 71행),
   `SmokeIridescent.shader`의 `Frag` 첫 줄(87행). 핫 루프는 `Tick`의 `Mathf.Sin(m_Time * 1.6f) * 0.3f`(흔들림 폭)와 `float m_Time;`(필드 추가).
   이 줄들을 바꾸면 `selftest.ps1`의 표식도 바꾼다.
-- 7–8은 커밋된 `tools/`·하네스 패키지·`Assets/Game/`·설정 파일을 쓰는 worktree 두 개를 저장소 옆(`<저장소>-st-a/-b`)에 만들고, `selftest/*` 브랜치·
+- 6–8은 커밋된 `tools/`·하네스 패키지·`Assets/Game/`·설정 파일을 쓴다. 6은 detached worktree(`<저장소>-st-o`, 전용 에디터; 끝나면 닫고 지운다),
+  7–8은 worktree 두 개를 저장소 옆(`<저장소>-st-a/-b`)에 만들고, `selftest/*` 브랜치·
   테스트 커밋(land의 병합 포함)을 만든 뒤 에디터 트리 브랜치를 시작 커밋으로 되돌린다(detached HEAD면 임시 브랜치를 썼다가 되돌린다).
   → 하네스를 고친 중이면 **임시 커밋 후** 돌린다. 도중에 에디터 트리 파일을 고치지 말 것(`git status`를 비교한다).
 - 첫 빨간 항목에서 멈추고, 바꾼 파일·worktree·브랜치·커밋을 되돌린 뒤 마지막 루프(`final`)로 녹색과 `git status` 원상을 확인한다.
@@ -693,13 +738,15 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-09-30 W6c, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W6c에서 스모크 씬에 GPU 베이크 지형·소품이 더해져 새 값):
+- 검증한 버전(2026-09-30 W7, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W6c에서 스모크 씬에 GPU 베이크 지형·소품이 더해져 새 값):
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
-  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `c8561a2d…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크 포함), 샷 67.8/60.8/48.5(6.3과 같음) |
-  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `345ba0d7…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크 포함), 커밋된 기준 이미지와 같음 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `7cda8899…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크 포함), 샷 67.9/60.8/48.5(W4 전에는 첫 플레이 뒤 검었다 — ROADMAP P-4) |
+  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `c8561a2d…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크·`-automated`·창 없는 전용 에디터 포함), 샷 67.8/60.8/48.5(6.3과 같음) |
+  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `345ba0d7…` | 64 / 71 / 87 | 1–9 녹색(같음), 커밋된 기준 이미지와 같음 |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `7cda8899…` | 64 / 71 / 87 | 1–9 녹색(같음), 샷 67.9/60.8/48.5(W4 전에는 첫 플레이 뒤 검었다 — ROADMAP P-4) |
+
+  `-automated`·`-debugCodeOptimization`·`-batchmode -ignoreCompilerErrors`와 창 없는 에디터의 렌더(O-11 우회 포함)는 세 버전에서 같게 동작했다.
 
   fingerprint는 버전마다 다르다(URP가 만드는 머티리얼·에셋 직렬화가 다르다). 같은 버전 안에서만 매번 같아야 한다.
 - 다른 버전으로 열면 Unity가 다시 쓰는 파일(커밋하지 않는다): `Packages/packages-lock.json`, `Assets/Settings/UniversalRenderPipelineGlobalSettings.asset`,
@@ -889,6 +936,24 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - **도메인 리로드 직후 에디터는 첫 두 update 틱 사이에 ~0.9 s를 네이티브 작업에 쓴다**(창 다시 그리기로 보인다; `update`·`delayCall` 콜백 중 20 ms 넘는 것은
   없었다). 그 사이 온 메인 스레드 명령은 모두 기다린다 → 리로드 뒤 첫 명령이 ~0.9 s(W5 전에는 빌드가 "JIT 워밍업"으로 ~2 s였던 것의 절반). 2 s 쉬었다 보내면 즉시.
 - **도메인 리로드는 에디터를 오래 띄워 둘수록 느려졌다**(같은 코드로 새로 연 에디터 2.5 s → 루프·실험 ~1시간 뒤 3.5 s, `FinalizeReload` 쪽). 시간을 잴 때는 새로 연다.
+- **창 없는 에디터(`-batchmode`, `-quit` 없음)는 세션에서 처음 그리는 일부 오브젝트를 쓰레기 값으로 그렸다**(W7): 새로 연 뒤 첫 캡처에서 매듭이 노랑·흰색,
+  선돌이 검정이었다(매번 다른 색; 같은 머티리얼의 아치는 정상 → 머티리얼이 아니라 그 메시의 첫 그리기). 두 번째로 그리면 같은 프레임 안에서도 정상이었고,
+  하늘만 보는 작은 렌더로 미리 그려도 소용없었다(그 오브젝트를 그려야 함). `-force-gfx-mt`로도 같았다. 창 에디터는 Game·Scene 뷰가 먼저 그려서 드러나지 않는다
+  → `HarnessCapture.Render`가 `Application.isBatchMode`면 카메라들을 한 번 버리고 다시 그린다(캡처 한 장 +수 ms).
+- **창 없는 에디터의 메인 루프는 쉬지 않는다**: 유휴일 때 `EditorApplication.update`가 초당 ~6만 번(1코어의 120%). 틱마다 `Thread.Sleep(1)`을 넣었더니
+  초당 63틱이었다 — Windows 타이머 기본 해상도(15.6 ms) 때문이고, 그동안 메인 스레드 명령이 틱을 기다려 ping이 17 → 32 ms. → `HarnessHeadless`가 이 프로세스의
+  타이머를 1 ms로(`timeBeginPeriod(1)`) 두고 할 일 없는 틱(플레이·컴파일·임포트 아님)만 1 ms 잔다: 유휴 CPU ~8%, ping ~8 ms.
+- 창 없는 에디터는 Game 뷰가 없다: `UnityStats`(batches·SetPass)가 0, 플레이 중 아무것도 그리지 않아 fps가 창 에디터와 비교되지 않는다, `"screen"` 캡처 불가.
+  디더링 순번이 달라 창 에디터의 기준 이미지와 픽셀까지 같지는 않다(`meanDiff` ~0.47, 최대 2 — 허용치 안이라 `same`; 창 없는 에디터끼리는 픽셀까지 같다).
+- **`-automated`면 `EditorUtility.DisplayDialog`는 곧바로 `false`(취소), `DisplayDialogComplex`는 1(취소)을 돌려주고 로그에 아무것도 남기지 않는다**.
+  Pipeline이 대화상자를 보는 `EditorDialogEvents`는 6.7부터라 6.0–6.6에서는 자동으로 닫힌 대화상자를 알 길이 없다(에디터 작업이 "취소"로 끝났으면 의심).
+  `InternalEditorUtility.isHumanControllingUs`가 거짓이 되어 창 배치를 종료 때 저장하지 않고, 검색 인덱스 모니터(`SearchMonitor`)도 끈다.
+- **시작할 때 스크립트가 컴파일되지 않으면**: 창 있는 `-automated` 에디터는 묻지 않고 Safe Mode(창 제목 `... - SAFE MODE - ...`, Pipeline 서버 없음, 백그라운드에서
+  파일을 고쳐도 나오지 않음), `-batchmode`는 "Scripts have compiler errors."로 종료(코드 1). `-batchmode -ignoreCompilerErrors`는 마지막으로 성공한 어셈블리로
+  뜬다(창 에디터에는 효과 없음). 그 컴파일은 하네스 코드가 올라오기 전이라 에러가 `compile.json`에 없고, 바뀐 게 없으면 `recompile`이 다시 컴파일하지 않는다
+  (`failed`) → `HarnessConsole`이 세션에 한 번 `RequestScriptCompilation()`으로 다시 컴파일해 에러를 받는다.
+- **다른 프로젝트 폴더로 복사한 `Library/`는 쓸 수 있다**(에셋을 다시 임포트하지 않음, 스크립트는 경로가 바뀌어 전부 다시 컴파일 ~17 s). 복사하면 안 되는 것:
+  `Library/Pipeline/.unity-pipeline-port`(원래 에디터의 pid·포트 — 도구가 원래 에디터에 붙는다), `ilpp.pid`, LMDB 락 파일, 하네스 저널.
 - Mono의 `RuntimeHelpers.PrepareMethod`는 아무것도 컴파일하지 않는다(612개 메서드 5 ms). `RuntimeMethodHandle.GetFunctionPointer()`는 JIT한다(55 ms).
   하지만 JIT가 `beforefieldinit` 타입의 static 초기화를 그 스레드에서 돌릴 수 있어 Unity API를 부르는 초기화가 백그라운드에서 실패하면 그 타입이 도메인 끝까지
   망가진다 → 하네스 코드를 백그라운드에서 미리 JIT하지 않는다(얻는 것 ~75 ms). Roslyn처럼 Unity API가 없는 코드만 데운다.
@@ -915,7 +980,8 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `345ba0d7…`).
   `CompilationPipeline.codeOptimization`은 에디터 세션 동안만 유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다
   → `HarnessCodeOptimization`([InitializeOnLoad])이 도메인이 로드될 때마다 이 프로젝트만 Debug로 되돌린다(재컴파일 1회; 그래서 이 프로젝트에선
-  Release가 유지되지 않는다). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다.
+  Release가 유지되지 않는다). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다. `open.ps1`은 명령줄 `-debugCodeOptimization`으로 열어서
+  처음부터 Debug다(W7: 재시작 때의 그 재컴파일 + 리로드 ~10 s가 없다).
 - fingerprint는 에셋의 하위 객체를 정렬해서 해시한다. `LoadAllAssetsAtPath`는 하위 객체를 로컬 fileID 순서로 주는데, 그 순서는 에셋의 이력에 따라
   다르다(새로 만든 URP `.mat`은 숨은 `AssetVersion`이 머티리얼 앞, 오래된 것은 뒤). 정렬 전에는 새 클론이 같은 코드로 다른 fingerprint를 냈다.
 - 에디터를 막 열면 `unity status`가 ready여도 Pipeline 서버가 잠시 **503 Server Busy**를 준다. 루프 시작 ping은 연결 끊김·401과 함께
@@ -940,9 +1006,13 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 
 ## 문제 해결
 
-- `stage=editor`: 에디터가 없거나 응답 없음 → `tools/open.ps1`(열려 있으면 준비될 때까지 기다리기만 한다). 열려 있는데 연결이 안 되면
-  Safe Mode(시작 시 컴파일 에러)일 수 있다 → `unity pipeline list`, `Logs/Editor.log`에서 `error CS` 확인 후 소스 수정 → `quit.ps1 -Force` → `open.ps1`.
-  `open.ps1`의 `dialog`나 `editor_status`의 `blocked_by_dialog`는 모달 다이얼로그다 → 사람에게 닫아 달라고 한다.
+- `stage=editor`: 에디터가 없거나 응답 없음 → `tools/open.ps1`(열려 있으면 준비될 때까지 기다리기만 한다). `safeMode: true`면 시작할 때 컴파일되지 않은
+  스크립트 때문에 Safe Mode다 → `compileErrors`(에디터 로그에서 읽음)를 고치고 `quit.ps1 -Force` → `open.ps1`(또는 `open.ps1 -Headless`: 그래도 뜬다).
+  `open.ps1`이 띄우지 않은 에디터면 `Logs/Editor.log`나 사용자 전역 로그의 `error CS`를 본다.
+  `open.ps1`의 `dialog`나 `editor_status`의 `blocked_by_dialog`는 모달 다이얼로그다 → 사람에게 닫아 달라고 한다(`-automated` 에디터는 `DisplayDialog`로
+  막히지 않는다; 이용 약관처럼 에디터가 뜨기 전의 창은 여전히 사람 몫).
+- worktree에서 `loop.ps1`이 `stage=editor`이고 `own`을 말하면: 그 worktree에 `Library/`가 있어 자기 에디터를 쓰는데 떠 있지 않다 → `open.ps1 -Own`
+  (에디터 트리를 다시 쓰려면 `quit.ps1` 뒤 그 worktree의 `Library/`를 지운다).
 - 플레이가 끝나지 않음: 시나리오 타임아웃(duration+70s) 후 자동 종료. 수동: `tools/uc.ps1 editor_stop`.
 - 빌드 fingerprint가 매번 바뀜: 빌더가 비결정적(시드 없는 랜덤, 시간, Dictionary 순회 순서 등)이거나 Code Optimization이 Release다
   (`build.warnings`에 경고). 덤프가 바뀌면 직전 덤프가 `Library/Harness/fingerprint.prev.txt`로 남으니 `fingerprint.txt`와 diff한다.

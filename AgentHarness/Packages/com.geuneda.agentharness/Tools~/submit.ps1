@@ -40,6 +40,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Harness.psm1') -Force
+Use-HarnessIntegrationRoot   # the Editor tree, also from a worktree with its own Editor (open.ps1 -Own)
 $clock = [Diagnostics.Stopwatch]::StartNew()
 $work = Get-HarnessWorkRoot
 $root = Get-HarnessProjectRoot
@@ -99,7 +100,7 @@ function Get-CreatedDirs([string[]]$dirs) {
 
 # ---- 0. Arguments ------------------------------------------------------------------------------------
 if (-not (Test-HarnessWorktree)) {
-    Complete-Submit (New-FailReport 'submit' "submit.ps1 runs from an agent worktree (a checkout without Library/, e.g. 'git worktree add'). This is the Editor tree itself ($root): edit here and run tools/loop.ps1.")
+    Complete-Submit (New-FailReport 'submit' "submit.ps1 runs from an agent worktree ('git worktree add'). This is the Editor tree itself ($root): edit here and run tools/loop.ps1.")
 }
 if ($Module.Count -eq 0) { Complete-Submit (New-FailReport 'submit' '-Module is required') }
 foreach ($m in $Module) {

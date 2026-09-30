@@ -9,7 +9,7 @@
   powershell -ExecutionPolicy Bypass -File tools/quit.ps1 -Force     # kill it if it has not exited after -TimeoutSec
 
   Prints one JSON object. Exit code 0 = no Editor is serving this project any more (also when none was running).
-  From an agent worktree this closes the Editor tree's Editor.
+  From an agent worktree this closes the Editor tree's Editor, or the worktree's own Editor (open.ps1 -Own).
 #>
 param(
     [int]$TimeoutSec = 30,
@@ -35,7 +35,11 @@ if (-not $editor) {
         $result.pid = $started.Id
         if (-not $Force) {
             $result['windows'] = @(Get-HarnessWindowTitles $started.Id)
-            $result['error'] = "The Editor open.ps1 started (pid $($started.Id), windows: $($result.windows -join ' | ')) has no Pipeline server yet (a startup dialog, importing, or Safe Mode). Answer/close it by hand, or -Force to kill it."
+            $result['error'] = if (Test-HarnessSafeMode $started.Id) {
+                "The Editor open.ps1 started (pid $($started.Id)) is in Safe Mode (its scripts did not compile) and has no Pipeline server to ask: -Force kills it (nothing to save in Safe Mode)."
+            } else {
+                "The Editor open.ps1 started (pid $($started.Id), windows: $($result.windows -join ' | ')) has no Pipeline server yet (a startup dialog, importing, or Safe Mode). Answer/close it by hand, or -Force to kill it."
+            }
             Finish 1
         }
         Stop-Process -Id $started.Id -Force

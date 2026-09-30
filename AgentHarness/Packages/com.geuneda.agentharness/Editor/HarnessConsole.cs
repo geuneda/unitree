@@ -93,6 +93,28 @@ namespace Harness.Editor
                 }
                 WriteCompile();
             };
+            EditorApplication.update += RecompileUnseenFailure;
+        }
+
+        /// <summary>
+        /// The Editor started with scripts that do not compile, on the last good assemblies (a headless Editor gets
+        /// -ignoreCompilerErrors; a person may press Ignore in the Safe Mode dialog). That compile ran before this code was
+        /// loaded, so its errors are nowhere a loop can read them, and "recompile" with nothing changed does not compile
+        /// again. Once per session: compile again, so the errors land in compile.json (the loop then reports file and line).
+        /// </summary>
+        static void RecompileUnseenFailure()
+        {
+            EditorApplication.update -= RecompileUnseenFailure;
+            if (!EditorUtility.scriptCompilationFailed || SessionState.GetBool("Harness.RecompiledUnseenFailure", false)) return;
+            // Errors recorded by this Editor process are the current ones; a file from an earlier session is not.
+            var last = ReadCompile();
+            var seenHere = DateTime.TryParse(last.startedAt, null, System.Globalization.DateTimeStyles.RoundtripKind, out var started)
+                && started.ToUniversalTime() >= System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
+            if (seenHere)
+                foreach (var m in last.messages)
+                    if (m.type == "Error") return;
+            SessionState.SetBool("Harness.RecompiledUnseenFailure", true);
+            CompilationPipeline.RequestScriptCompilation();
         }
 
         public static int Mark { get { lock (s_Lock) return s_Seq; } }
@@ -365,6 +387,9 @@ namespace Harness.Editor
                 unityVersion = Application.unityVersion,
                 setup = HarnessPaths.Config.setup,
                 domainReloadOnPlay = !HarnessSetup.DomainReloadDisabled(),
+                editorMode = HarnessHeadless.Mode,   // window | headless (-batchmode: no Game view)
+                automated = HarnessHeadless.Automated,
+                pid = System.Diagnostics.Process.GetCurrentProcess().Id,
             };
         }
     }

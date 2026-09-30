@@ -3,18 +3,33 @@
   Open this project's Editor and wait until the harness answers. Use it instead of 'unity open':
   - the Editor writes its own log, <project>/Logs/Editor.log (the previous one becomes Editor-prev.log). Editors started
     without -logFile all append to one user-wide Editor.log, which grew to 1.4 GB with two Editors open (O-7).
-  - it returns when harness_ping answers and the Editor is idle, i.e. after the first import and the Debug recompile.
+  - it starts the Editor with -automated (W7, G2-2): EditorUtility.DisplayDialog* return their default (cancel) at once
+    instead of blocking the Editor until a person answers, and the window layout is not saved on exit. -Interactive leaves
+    it out (a person works in that Editor). And with -debugCodeOptimization: Debug from the start, no extra recompile.
+  - it returns when harness_ping answers and the Editor is idle, i.e. after the first import.
   If an Editor already has the project open, it only waits for it (its log is wherever that Editor was told).
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools/open.ps1
+  powershell -ExecutionPolicy Bypass -File tools/open.ps1 -Headless    # no window: -batchmode, renders with the GPU
+  powershell -ExecutionPolicy Bypass -File tools/open.ps1 -Own         # in an agent worktree: its own (headless) Editor
   powershell -ExecutionPolicy Bypass -File tools/open.ps1 -NoWait      # start it and return
   powershell -ExecutionPolicy Bypass -File tools/open.ps1 -UnityVersion <installed 6.x>   # open in another Editor version
 
   Prints one JSON object. Exit code 0 = ready. On failure: "error", "dialog" when a modal dialog blocks the Editor
-  (a person has to answer it), and "logTail" (end of the Editor log). From an agent worktree this opens the Editor tree.
-  Dialogs before the harness can answer (software terms of a newly installed version, Safe Mode, package errors) are
+  (a person has to answer it), "safeMode" + "compileErrors" when a windowed Editor started in Safe Mode (the scripts do
+  not compile; -automated enters it without asking: fix them, quit.ps1 -Force, open.ps1 again), and "logTail" (end of the
+  Editor log). From an agent worktree this opens the Editor tree, unless -Own.
+  Dialogs before the harness can answer (software terms of a newly installed version, package errors) are
   seen from outside: the log stops growing while the Editor window shows the dialog's title (-DialogSec).
+  -Headless: -batchmode without -quit. No window and no Game view (a "screen" capture is refused, fps has no rendering
+  in it); a loop is ~1.3 s faster (play mode renders nothing between captures). When the scripts do not compile it starts
+  anyway on the last good assemblies (-ignoreCompilerErrors) and the loop reports the errors.
+  -Own (G5-1, G1-2): in an agent worktree, an Editor of its own. Its Library/ starts as a copy of the Editor tree's (taken
+  under the Editor lock while that Editor is idle); then loop.ps1, uc.ps1 and quit.ps1 there drive this Editor, in
+  parallel with the Editor tree's. submit.ps1 and land.ps1 still integrate into the Editor tree. Headless unless -Window.
+  It opens with the Editor tree's Unity version (whose Library it copied), writing it to the worktree's ProjectVersion.txt
+  when that says another one.
   -UnityVersion first writes that version to ProjectSettings/ProjectVersion.txt (what Unity itself does once you confirm
   its "open in another version" dialog; without it that dialog blocks the start), so the change shows in git status.
 #>
@@ -22,14 +37,16 @@ param(
     [int]$TimeoutSec = 900,   # a fresh clone imports for minutes
     [switch]$NoWait,
     [string]$UnityVersion,    # default: ProjectSettings/ProjectVersion.txt
-    [int]$DialogSec = 60      # before the Pipeline server is up: log silent this long + a dialog title = blocked
+    [int]$DialogSec = 60,     # before the Pipeline server is up: log silent this long + a dialog title = blocked
+    [switch]$Headless,        # -batchmode: no window
+    [switch]$Interactive,     # without -automated: dialogs wait for a person
+    [switch]$Own,             # agent worktree: an Editor of its own (headless unless -Window)
+    [switch]$Window           # with -Own: a windowed Editor
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Harness.psm1') -Force
-$root = Get-HarnessProjectRoot
-$log = Join-Path $root 'Logs/Editor.log'
 $clock = [Diagnostics.Stopwatch]::StartNew()
-$result = [ordered]@{ ok = $false; project = $root.Replace('\', '/'); pid = $null; version = $null; launched = $false; logFile = $null; openSec = 0 }
+$result = [ordered]@{ ok = $false; project = (Get-HarnessProjectRoot).Replace('\', '/'); pid = $null; version = $null; launched = $false; logFile = $null; openSec = 0 }
 
 # "[Package Manager] <name> is deprecated: ..." lines of the Editor log (the Package Manager registers packages early on).
 function Get-DeprecatedPackages([string]$Path) {
@@ -59,6 +76,42 @@ function Finish([int]$Code) {
     exit $Code
 }
 
+if ($Own) {
+    # An Editor of this agent worktree's own (W7): a copy of the Editor tree's Library/ makes it one more Editor project.
+    $work = Get-HarnessWorkRoot
+    $tree = Get-HarnessIntegrationRoot
+    if (Test-HarnessSamePath $tree $work) {
+        $result['error'] = "-Own gives an agent worktree (git worktree add) an Editor of its own; this is the Editor tree itself ($work): open.ps1 without -Own"
+        Finish 1
+    }
+    if (-not $Window) { $Headless = [switch]$true }
+    $result['own'] = $true
+    # The copied Library belongs to the Editor tree's Unity version (it may have been opened with -UnityVersion, which the
+    # worktree's committed ProjectVersion.txt does not say): open this Editor with that version too.
+    $treeVersion = Get-HarnessProjectVersion $tree
+    if (-not $UnityVersion -and $treeVersion -and $treeVersion -ne (Get-HarnessProjectVersion $work)) { $UnityVersion = $treeVersion }
+    if (-not (Test-Path -LiteralPath (Join-Path $work 'Library'))) {
+        $from = Join-Path $tree 'Library'
+        if (Test-Path -LiteralPath $from) {
+            # Under the Editor tree's lock, with its Editor idle: no loop or import writes the asset database while it is copied.
+            Set-HarnessEditorRoot $tree
+            $lockWait = Enter-HarnessLock
+            try {
+                if (Get-HarnessEditorProcess) { [void](Wait-HarnessIdle -TimeoutSec 120) }
+                $result['seeded'] = Copy-HarnessLibrary -From $from -To (Join-Path $work 'Library')
+                $result.seeded['lockWaitSec'] = $lockWait
+            } finally { Exit-HarnessLock }
+        } else {
+            [void][IO.Directory]::CreateDirectory((Join-Path $work 'Library'))
+            $result['seeded'] = [ordered]@{ note = "the Editor tree ($tree) has no Library/ yet: this Editor imports the project from scratch" }
+        }
+    }
+    Set-HarnessEditorRoot $work
+    $result.project = $work.Replace('\', '/')
+}
+$root = Get-HarnessProjectRoot
+$log = Join-Path $root 'Logs/Editor.log'
+
 $editor = Get-HarnessEditorProcess
 $started = Get-HarnessLaunchedEditor   # an earlier open.ps1's Editor, maybe still before its lock file (a dialog)
 if ($editor -or $started -or (Test-HarnessProjectOpen)) {
@@ -83,17 +136,19 @@ if ($editor -or $started -or (Test-HarnessProjectOpen)) {
     $logDir = Split-Path -Parent $log
     New-Item -ItemType Directory -Force $logDir | Out-Null
     if (Test-Path -LiteralPath $log) { Move-Item -LiteralPath $log -Destination (Join-Path $logDir 'Editor-prev.log') -Force }
-    $argLine = (@('-projectPath', $root, '-logFile', $log) | ForEach-Object { ConvertTo-HarnessArg $_ }) -join ' '
+    $argLine = (@(Get-HarnessEditorArguments -Root $root -Log $log -Headless:$Headless -Interactive:$Interactive) | ForEach-Object { ConvertTo-HarnessArg $_ }) -join ' '
     $p = Start-Process -FilePath $exe -ArgumentList $argLine -PassThru
     Save-HarnessLaunchedEditor $p
     $result.pid = $p.Id
     $result.launched = $true
     $result.logFile = $log.Replace('\', '/')
+    $result['mode'] = if ($Headless) { 'headless' } else { 'window' }
+    $result['automated'] = -not $Interactive
 }
 if ($NoWait) { $result.ok = $true; Finish 0 }
 
-# Ready = harness_ping answers and the Editor stays idle for 3 s (a fresh session recompiles once for Debug code
-# optimization right after the first answer).
+# Ready = harness_ping answers and the Editor stays idle for 2 s (an Editor opened elsewhere without
+# -debugCodeOptimization recompiles once for Debug right after the first answer).
 $idleSince = $null
 $dialogSince = $null
 $logLength = -1
@@ -118,10 +173,19 @@ while ($true) {
             $dialogSince = $null
             if (-not $ping.result.isCompiling -and -not $ping.result.isUpdating) {
                 if ($null -eq $idleSince) { $idleSince = $clock.Elapsed.TotalSeconds }
-                elseif ($clock.Elapsed.TotalSeconds - $idleSince -ge 3) {
+                elseif ($clock.Elapsed.TotalSeconds - $idleSince -ge 2) {
                     $result.ok = $true
                     $result['compileFailed'] = [bool]$ping.result.compileFailed
                     $result['domainReloads'] = [int]$ping.result.domainReloads
+                    if ($ping.result.PSObject.Properties.Name -contains 'editorMode') {
+                        $mode = [string]$ping.result.editorMode
+                        if ($result.alreadyOpen -and (($Headless -and $mode -ne 'headless') -or ($Window -and $mode -ne 'window'))) {
+                            $result['note'] = "an Editor was already open ($mode); quit.ps1 first to start it the other way"
+                        }
+                        $result['mode'] = $mode
+                        $result['automated'] = [bool]$ping.result.automated
+                    }
+                    if ($result.compileFailed) { $result['note'] = 'the scripts do not compile: it runs the last good assemblies; loop.ps1 reports the errors' }
                     break
                 }
             } else { $idleSince = $null }
@@ -138,9 +202,17 @@ while ($true) {
                 $result['lastError'] = $ping.error   # e.g. harness_ping unknown: Harness.Editor did not compile
             }
         }
+    } elseif ($result.pid -and (Test-HarnessSafeMode $result.pid)) {
+        # A windowed Editor whose scripts did not compile at startup: -automated enters Safe Mode without asking, and Safe
+        # Mode runs no Pipeline server. Its log has the errors.
+        $result['safeMode'] = $true
+        if ($result.logFile) { $result['compileErrors'] = @(Get-HarnessLogCompileErrors $log) }
+        $result['error'] = 'The Editor started in Safe Mode: the scripts do not compile (compileErrors). Fix them, then tools/quit.ps1 -Force and tools/open.ps1 again; or open.ps1 -Headless, which starts on the last good assemblies so that loop.ps1 reports the errors.'
+        break
     } elseif ($result.pid -and $result.logFile) {
         # No Pipeline server yet, so no harness_ping to ask. A dialog shown this early stops the log, and the Editor
-        # process then has a window with the dialog's title ("Unity Editor Software Terms", "Enter Safe Mode?", ...).
+        # process then has a window with the dialog's title ("Unity Editor Software Terms", "Enter Safe Mode?" of an
+        # -Interactive Editor, ...).
         $len = if (Test-Path -LiteralPath $log) { (Get-Item -LiteralPath $log).Length } else { 0 }
         if ($len -ne $logLength) { $logLength = $len; $logSince = $clock.Elapsed.TotalSeconds }
         elseif ($clock.Elapsed.TotalSeconds - $logSince -ge $DialogSec) {

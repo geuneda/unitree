@@ -36,7 +36,7 @@ namespace Harness.Editor
         /// </summary>
         static HarnessHot()
         {
-            if (AssetDatabase.IsAssetImportWorkerProcess() || Application.isBatchMode) return;
+            if (AssetDatabase.IsAssetImportWorkerProcess() || (Application.isBatchMode && !HarnessHeadless.IsHeadless)) return;
             if (TypeCache.GetMethodsWithAttribute<CodeReloadAttribute>().Count == 0) return;
             System.Threading.ThreadPool.QueueUserWorkItem(_ =>
             {

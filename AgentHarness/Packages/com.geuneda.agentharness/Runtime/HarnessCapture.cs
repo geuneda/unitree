@@ -166,6 +166,11 @@ namespace Harness
                     }
                 }
 
+                // A headless Editor (-batchmode) drew some objects wrong the first time they were drawn in the session: the
+                // knot white or yellow, the standing stones black (their vertex data, not the material: the arch shares the
+                // stones' material and was right). Drawn a second time they were right, also in the same frame. Nothing else
+                // draws there before a capture (no Game or Scene view), so it draws once to throw away (W7).
+                if (Application.isBatchMode) cameras.Render(rt);
                 cameras.Render(rt);
                 cameras.Restore();
 #if UNITY_EDITOR

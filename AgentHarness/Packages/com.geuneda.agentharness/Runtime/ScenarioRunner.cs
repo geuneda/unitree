@@ -494,6 +494,11 @@ namespace Harness
                     m_Shots.Add(new ShotResult { name = screenLabel, preset = "screen", path = screenPath, t = st, error = "\"frames\" (a sequence) is not supported with preset \"screen\": use \"main\" or a shot name" });
                     return;
                 }
+                if (Application.isBatchMode)
+                {
+                    m_Shots.Add(new ShotResult { name = screenLabel, preset = "screen", path = screenPath, t = st, error = "preset \"screen\" needs a Game view: this Editor is headless (-batchmode, tools/open.ps1 -Headless or -Own). Use \"auto\", \"main\" or a shot name, or an Editor with a window" });
+                    return;
+                }
                 StartCoroutine(CaptureScreen(screenLabel, screenPath, st, c.golden));
                 return;
             }

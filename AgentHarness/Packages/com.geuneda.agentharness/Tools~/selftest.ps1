@@ -44,7 +44,11 @@
     A builder's mesh changed (the arch twice as thick, G3-11) -> the first loop already draws it (golden changed, the same
     pixels as the next loop); reverted -> same
   5 mutable static without a reset -> stage=lint (static-reset); removed -> green
-  6 two loops at once -> both green, one of them waited for the lock
+  6 two loops at once -> both green, one of them waited for the lock. An Editor of its own (W7): a worktree next to the
+    repository (<repository>-st-o, the committed code) with a compile error opens its own Editor (open.ps1 -Own: a copy
+    of the Library, headless, automated) that starts anyway; its loop reports the injected line; fixed, it loops at the
+    same time as the Editor tree's: neither waits, same fingerprint and events, no render stats, its first shots the same
+    as the Editor tree's shots of that loop (and no committed golden image changed); quit.ps1 there closes it
   7 worktrees + submit.ps1: the compile-check gate refuses a broken module without touching the Editor tree; a forced
     broken submit is reverted while another worktree's new module + contract waits for the lock and is kept; a runtime
     error submit is reverted; a submit killed after its sync is rolled back by the next loop; a changed contract is
@@ -52,7 +56,7 @@
   8 land.ps1: fast-forward land while another worktree's submit waits for the lock; already landed; refusals
     (uncommitted, missing .meta, conflict, a foreign edit in the Editor tree); a compile error land is undone; a land
     killed after its merge is undone by the next loop; the last land is kept
-  Stops at the first red item (-KeepGoing: runs the rest too). Every item puts back what it changed. 7-8 need tools/, the harness package and
+  Stops at the first red item (-KeepGoing: runs the rest too). Every item puts back what it changed. 6-8 need tools/, the harness package and
   Assets/Game/ committed (the worktrees run the committed code); they create temporary worktrees next to the
   repository, branches selftest/*, and commits, and reset the Editor tree's branch to where it was. A final loop
   checks that the Editor tree is green again with the git status it had.
@@ -110,7 +114,7 @@ $HotFieldAdded = 'float m_Time; float m_SelftestField;'   # outside the method b
 
 $report = [ordered]@{ ok = $false; stage = ''; project = $root.Replace('\', '/'); projectVersion = (Get-HarnessProjectVersion); unityVersion = $null
     items = @(); fingerprint = $null; events = $null; lines = [ordered]@{}; shots = @() }
-$state = @{ item = $null; itemClock = $null; saved = [ordered]@{}; tools = New-Object System.Collections.ArrayList; wt = $null }
+$state = @{ item = $null; itemClock = $null; saved = [ordered]@{}; tools = New-Object System.Collections.ArrayList; wt = $null; own = $null }
 
 # ---- results ------------------------------------------------------------------------------------------------------
 function Start-Item([int]$N, [string]$Name) {
@@ -1579,7 +1583,7 @@ function Invoke-Item5 {
 }
 
 function Invoke-Item6 {
-    Start-Item 6 'two loops at once'
+    Start-Item 6 'two loops at once; a worktree with an Editor of its own'
     $da = Get-OutDir '6-loopA'; $db = Get-OutDir '6-loopB'
     $a = Start-Tool $root 'loop.ps1' @('-Out', $da)
     Start-Sleep -Milliseconds 300
@@ -1590,19 +1594,102 @@ function Invoke-Item6 {
     Test-Check 'second loop green' ([bool]$rb.ok) (Get-Summary $rb)
     $waits = @([double]$ra.timings.lockWaitSec, [double]$rb.timings.lockWaitSec)
     Test-Check 'one waited for the lock' (($waits | Measure-Object -Maximum).Maximum -gt 0) ($waits -join ' / ')
+
+    # W7 (G5-1, G1-2, G2-2): an agent worktree gets an Editor of its own (open.ps1 -Own: a copy of this Library/, headless).
+    # Its scripts start broken: the Editor starts anyway (-ignoreCompilerErrors) and the loop reports the injected line.
+    # Fixed, it loops at the same time as this Editor: neither waits, same fingerprint and events, and its shots - the first
+    # ones of a headless session, which drew some objects wrong before the capture drew twice - are the golden images.
+    New-SelftestOwnEditor
+    $own = $state.own.root
+    $line = Edit-Line (Get-Abs $own $SmokeCs) $CompileMarker $CompileBroken
+    $o = Invoke-ToolJson $own 'open.ps1' @('-Own')
+    Test-Check 'open.ps1 -Own: its own headless, automated Editor on a copy of the Library' ($o.ok -and $o.own -and $o.mode -eq 'headless' -and $o.automated -and [int]$o.seeded.files -gt 1000 -and (Test-HarnessSamePath $o.project $own)) ($o | ConvertTo-Json -Compress -Depth 4)
+    Test-Check 'it started although the scripts do not compile' ([bool]$o.compileFailed) "compileFailed=$($o.compileFailed)"
+    $r = Invoke-Tool $own 'loop.ps1' '6-own-compile'
+    $e = Get-FirstError $r
+    Test-Check "its loop: stage=compile at ${SmokeCs}:$line (Smoke)" ($r.stage -eq 'compile' -and $e.file -eq $SmokeCs -and [int]$e.line -eq $line -and $e.module -eq 'Smoke') "$(Get-Summary $r) at $($e.file):$($e.line) [$($e.module)]"
+    Test-Check 'the report names the Editor (headless, own)' ($r.editor.mode -eq 'headless' -and $r.editor.own) ($r.editor | ConvertTo-Json -Compress)
+    Invoke-Git $own @('checkout', '--', $SmokeCs)
+    $dm = Get-OutDir '6-main'; $do = Get-OutDir '6-own'
+    $tm = Start-Tool $root 'loop.ps1' @('-Out', $dm)
+    $to = Start-Tool $own 'loop.ps1' @('-Out', $do)
+    $rm = Read-ToolReport $dm (Wait-Tool $tm)
+    $ro = Read-ToolReport $do (Wait-Tool $to)
+    Test-Check 'at the same time: this Editor green' ([bool]$rm.ok) (Get-Summary $rm)
+    Test-Check 'at the same time: its own Editor green' ([bool]$ro.ok) (Get-Summary $ro)
+    $waits = @([double]$rm.timings.lockWaitSec, [double]$ro.timings.lockWaitSec)
+    Test-Check 'neither waited for a lock' (($waits | Measure-Object -Maximum).Maximum -lt 0.5) ($waits -join ' / ')
+    Test-Check 'same fingerprint and events' ($ro.build.fingerprint -eq $rm.build.fingerprint -and (Get-Events $ro) -eq (Get-Events $rm)) "$($rm.build.fingerprint) $(Get-Events $rm) / $($ro.build.fingerprint) $(Get-Events $ro)"
+    Test-Check 'no headless render stats, fps marked' ($null -eq $ro.render -and $ro.fps.note) "render=$($ro.render | ConvertTo-Json -Compress) note=$($ro.fps.note)"
+    $changed = @($ro.shotStats | Where-Object { $_.golden -and $_.golden.status -ne 'same' -and $_.golden.status -ne 'missing' })
+    Test-Check 'its first shots: no golden image changed' ($changed.Count -eq 0) (Get-GoldenDetail $ro)
+    # Every Unity version, with or without committed goldens: its first shots against this Editor's shots of the same loop.
+    $gr = Join-Path $outAbs '6-golden'
+    $toItems = { param($r) ConvertTo-Json -InputObject @($r.shots | ForEach-Object { [ordered]@{ path = $_; name = [IO.Path]::GetFileNameWithoutExtension($_) } }) -Depth 5 -Compress }
+    [void](Invoke-GoldenCommand @{ shots = (& $toItems $rm); golden = $gr; key = 'own'; update = $true })
+    $cmp = Invoke-GoldenCommand @{ shots = (& $toItems $ro); golden = $gr; key = 'own'; out = (Join-Path $outAbs '6-golden-out') }
+    $bad = @($cmp.results | Where-Object { $_.status -ne 'same' } | ForEach-Object { "$($_.name):$($_.status) mean=$($_.meanDiff) max=$($_.maxDiff) $($_.diff)" })
+    Test-Check "its first shots: the same as this Editor's (within the golden tolerance)" (@($cmp.results).Count -eq @($rm.shots).Count -and $bad.Count -eq 0) "$(@($cmp.results | ForEach-Object { "$($_.name):$($_.status) mean=$($_.meanDiff)" }) -join ' | ') $($bad -join ' | ')"
+    $q = Invoke-ToolJson $own 'quit.ps1'
+    Test-Check 'quit.ps1 there closes its Editor' ($q.ok -and $q.method -eq 'harness_quit') ($q | ConvertTo-Json -Compress)
     Complete-Item
+}
+
+# A tool that prints its JSON on stdout (open.ps1, quit.ps1).
+function Invoke-ToolJson([string]$Project, [string]$Name, [string[]]$Arguments = @(), [int]$TimeoutSec = 900) {
+    $t = Start-Tool $Project $Name $Arguments
+    $r = Wait-Tool $t $TimeoutSec
+    $text = if ($t.out.Wait(5000)) { $t.out.Result } else { '' }
+    try { $text | ConvertFrom-Json } catch { [pscustomobject]@{ ok = $false; error = "no JSON (exit $($r.code)): $($r.err) $text" } }
+}
+
+# The worktrees run the committed tools, harness and modules. Other uncommitted files (e.g. ProjectSettings/, Packages/
+# and the URP settings assets rewritten by another Unity version) stay as they are: submit and land never touch them.
+function Assert-SelftestCommitted([string]$Top, [string]$Prefix, [string]$What) {
+    $scope = @('tools/', 'Packages/com.geuneda.agentharness/', 'Assets/Game/', 'ProjectSettings/AgentHarness.json') | ForEach-Object { if ($Prefix) { "$Prefix/$_" } else { $_ } }
+    $dirty = @((Get-HarnessGitStatus $Top).Keys | Where-Object { $p = $_; @($scope | Where-Object { $p.StartsWith($_) }).Count } | Sort-Object)
+    if ($dirty.Count) { throw "$What need tools/, Packages/com.geuneda.agentharness/, Assets/Game/ and ProjectSettings/AgentHarness.json committed (the worktrees run the committed code): $($dirty -join ', ')" }
+}
+
+# Item 6: a detached worktree next to the repository (<repository>-st-o) for an Editor of its own.
+function New-SelftestOwnEditor {
+    $top = (Invoke-HarnessGit $root @('rev-parse', '--show-toplevel') -Check).out.Trim()
+    $prefix = (Invoke-HarnessGit $root @('rev-parse', '--show-prefix') -Check).out.Trim().TrimEnd('/')
+    Assert-SelftestCommitted $top $prefix '6'
+    $dir = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $top) "$(Split-Path -Leaf $top)-st-o"))
+    if (Test-Path -LiteralPath $dir) {
+        $listed = (Invoke-HarnessGit $top @('worktree', 'list', '--porcelain') -Check).out -split "`n" | Where-Object { $_ -like 'worktree *' } | ForEach-Object { $_.Substring(9) }
+        if (-not @($listed | Where-Object { Test-HarnessSamePath $_ $dir }).Count) { throw "$dir exists and is not a worktree of $top; remove it" }
+        $state.own = @{ top = $top; dir = $dir; root = $(if ($prefix) { Join-Path $dir $prefix } else { $dir }) }
+        $notes = @(Remove-SelftestOwnEditor)
+        if ($notes.Count) { throw "could not remove the worktree an earlier selftest left: $($notes -join '; ')" }
+    }
+    Invoke-Git $top @('worktree', 'add', '--quiet', '--detach', $dir, 'HEAD')
+    $state.own = @{ top = $top; dir = $dir; root = $(if ($prefix) { Join-Path $dir $prefix } else { $dir }) }
+}
+
+function Remove-SelftestOwnEditor {
+    $o = $state.own
+    if (-not $o) { return @() }
+    $notes = @()
+    if (Test-Path -LiteralPath (Join-Path $o.root 'Library')) {
+        $q = Invoke-ToolJson $o.root 'quit.ps1' @('-Force')
+        if (-not $q.ok) { $notes += "quit its Editor: $($q.error)" }
+    }
+    $r = Invoke-HarnessGit $o.top @('worktree', 'remove', '--force', $o.dir)
+    if ($r.code -ne 0 -and (Test-Path -LiteralPath $o.dir)) {
+        try { Remove-Item -LiteralPath $o.dir -Recurse -Force } catch { $notes += "remove $($o.dir): $($_.Exception.Message)" }
+    }
+    [void](Invoke-HarnessGit $o.top @('worktree', 'prune'))
+    $state.own = $null
+    $notes
 }
 
 # ---- matrix 7-8: worktrees, submit, land -------------------------------------------------------------------------
 function New-SelftestWorktrees {
     $top = (Invoke-HarnessGit $root @('rev-parse', '--show-toplevel') -Check).out.Trim()
     $prefix = (Invoke-HarnessGit $root @('rev-parse', '--show-prefix') -Check).out.Trim().TrimEnd('/')
-    # The worktrees run the committed tools, harness and modules. Other uncommitted files (e.g. ProjectSettings/,
-    # Packages/ and the URP settings assets rewritten by another Unity version) stay as they are: submit and land never
-    # touch them.
-    $scope = @('tools/', 'Packages/com.geuneda.agentharness/', 'Assets/Game/', 'ProjectSettings/AgentHarness.json') | ForEach-Object { if ($prefix) { "$prefix/$_" } else { $_ } }
-    $dirty = @((Get-HarnessGitStatus $top).Keys | Where-Object { $p = $_; @($scope | Where-Object { $p.StartsWith($_) }).Count } | Sort-Object)
-    if ($dirty.Count) { throw "7-8 need tools/, Packages/com.geuneda.agentharness/, Assets/Game/ and ProjectSettings/AgentHarness.json committed (the worktrees run the committed code): $($dirty -join ', ')" }
+    Assert-SelftestCommitted $top $prefix '7-8'
     $branch = (Invoke-HarnessGit $top @('symbolic-ref', '-q', '--short', 'HEAD')).out.Trim()
     $tag = [guid]::NewGuid().ToString('N').Substring(0, 6)
     $wt = [ordered]@{ top = $top; branch = $branch; head0 = (Get-Head $top); base = @((Get-HarnessGitStatus $top).GetEnumerator() | ForEach-Object { "$($_.Value) $($_.Key)" })
@@ -1813,7 +1900,7 @@ function Invoke-Item8 {
 New-Item -ItemType Directory -Force $outAbs | Out-Null
 $failed = $null
 try {
-    if (Test-HarnessWorktree) { throw "run selftest.ps1 in the Editor tree ($root), not in an agent worktree" }
+    if ((Test-HarnessWorktree) -or (Test-HarnessOwnEditor)) { throw "run selftest.ps1 in the Editor tree ($(Get-HarnessIntegrationRoot)), not in an agent worktree" }
     $ping = Invoke-UnityCommand -Name 'harness_ping' -TimeoutSec 10
     if (-not $ping.success) { $report.stage = 'editor'; throw "Editor not reachable: $($ping.error). Open it with tools/open.ps1." }
     if ($ping.result.PSObject.Properties.Name -contains 'unityVersion') { $report.unityVersion = $ping.result.unityVersion }
@@ -1841,7 +1928,7 @@ try {
 } finally {
     foreach ($t in @($state.tools)) { Stop-Tool $t }
     Restore-EditorFiles
-    $notes = @(Remove-SelftestWorktrees)
+    $notes = @(Remove-SelftestWorktrees) + @(Remove-SelftestOwnEditor)
     if ($notes.Count) { $report['cleanupErrors'] = $notes }
 }
 
