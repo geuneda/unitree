@@ -1,0 +1,184 @@
+/*
+ * AgentHarness UI kit (G1-4): design tokens and component classes for UI Toolkit, imported by DefaultRuntimeTheme.tss,
+ * so every panel ctx.UIDocument makes has them. Use the classes in UXML (class="ah-panel ah-panel--accent") and the
+ * variables in your own USS (color: var(--ah-accent)). Override a variable for one subtree by setting it on an element:
+ *   .my-hud { --ah-accent: rgb(255, 160, 40); }
+ * Motion is plain USS transitions: while a scenario plays with a fixed time step the panels tell time by frames, so a
+ * capture in the middle of a transition is the same every run (ScenarioRunner, PanelClock).
+ */
+
+:root {
+    --ah-bg: rgba(6, 9, 20, 0.62);
+    --ah-bg-strong: rgba(6, 9, 20, 0.88);
+    --ah-line: rgba(255, 255, 255, 0.14);
+    --ah-fg: rgb(255, 255, 255);
+    --ah-muted: rgb(170, 180, 200);
+    --ah-accent: rgb(40, 220, 255);
+    --ah-accent-soft: rgb(150, 215, 255);
+    --ah-accent-2: rgb(255, 120, 210);
+    --ah-good: rgb(90, 230, 140);
+    --ah-warn: rgb(255, 196, 70);
+    --ah-bad: rgb(255, 90, 90);
+    --ah-radius: 10px;
+    --ah-radius-pill: 18px;
+    --ah-space-s: 4px;
+    --ah-space: 8px;
+    --ah-space-l: 16px;
+    --ah-font-s: 13px;
+    --ah-font: 18px;
+    --ah-font-l: 30px;
+    --ah-fade: 0.25s;
+}
+
+/* Surfaces */
+.ah-panel {
+    background-color: var(--ah-bg);
+    border-radius: var(--ah-radius);
+    padding: 14px 22px 14px 18px;
+}
+
+.ah-panel--accent {
+    border-left-width: 4px;
+    border-left-color: var(--ah-accent);
+}
+
+.ah-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Text */
+.ah-title {
+    font-size: var(--ah-font-s);
+    color: var(--ah-accent-soft);
+    -unity-font-style: bold;
+    letter-spacing: 3px;
+    margin-bottom: 6px;
+}
+
+.ah-key {
+    font-size: var(--ah-font);
+    color: var(--ah-muted);
+    letter-spacing: 2px;
+}
+
+.ah-value {
+    font-size: var(--ah-font-l);
+    color: var(--ah-fg);
+    -unity-font-style: bold;
+}
+
+.ah-hint {
+    font-size: var(--ah-font-s);
+    color: var(--ah-accent-2);
+    letter-spacing: 1px;
+}
+
+/* Button: <ui:Button class="ah-button" text="PLAY" /> (ah-button--ghost: outline only) */
+.ah-button {
+    background-color: var(--ah-accent);
+    color: rgb(6, 9, 20);
+    font-size: var(--ah-font);
+    -unity-font-style: bold;
+    letter-spacing: 2px;
+    border-width: 0;
+    border-radius: var(--ah-radius-pill);
+    padding: 8px 22px;
+    margin: 0;
+    transition-property: background-color, scale;
+    transition-duration: 0.12s;
+}
+
+.ah-button:hover {
+    background-color: var(--ah-accent-soft);
+}
+
+.ah-button:active {
+    scale: 0.96 0.96;
+}
+
+.ah-button:disabled {
+    opacity: 0.4;
+}
+
+.ah-button--ghost {
+    background-color: rgba(0, 0, 0, 0);
+    color: var(--ah-accent);
+    border-width: 2px;
+    border-color: var(--ah-accent);
+}
+
+.ah-button--ghost:hover {
+    background-color: var(--ah-bg-strong);
+}
+
+/* Gauge: <Harness.UI.Gauge value="0.4" /> (a bar filled to value / max) */
+.ah-gauge {
+    height: 10px;
+    background-color: var(--ah-line);
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.ah-gauge__fill {
+    height: 100%;
+    background-color: var(--ah-accent);
+    border-radius: 5px;
+}
+
+.ah-gauge--good .ah-gauge__fill {
+    background-color: var(--ah-good);
+}
+
+.ah-gauge--warn .ah-gauge__fill {
+    background-color: var(--ah-warn);
+}
+
+.ah-gauge--bad .ah-gauge__fill {
+    background-color: var(--ah-bad);
+}
+
+/* Toasts: <Harness.UI.ToastStack /> + stack.Show("text", seconds, "good"); fade and slide in, fade out, removed */
+.ah-toast-stack {
+    position: absolute;
+    top: 28px;
+    left: 0;
+    right: 0;
+    align-items: center;
+}
+
+.ah-toast {
+    background-color: var(--ah-bg-strong);
+    color: var(--ah-fg);
+    font-size: var(--ah-font);
+    -unity-font-style: bold;
+    letter-spacing: 1px;
+    padding: 10px 24px;
+    margin-top: var(--ah-space);
+    border-radius: var(--ah-radius-pill);
+    border-width: 2px;
+    border-color: var(--ah-accent);
+    opacity: 0;
+    translate: 0 -16px;
+    transition-property: opacity, translate;
+    transition-duration: var(--ah-fade);
+    transition-timing-function: ease-out;
+}
+
+.ah-toast--shown {
+    opacity: 1;
+    translate: 0 0;
+}
+
+.ah-toast--good {
+    border-color: var(--ah-good);
+}
+
+.ah-toast--warn {
+    border-color: var(--ah-warn);
+}
+
+.ah-toast--bad {
+    border-color: var(--ah-bad);
+}

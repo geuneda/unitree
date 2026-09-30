@@ -86,7 +86,8 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
            "inputBackends":["inputSystem"|"hook"], "inputHooks":["HarnessInput.OnScenarioInput"],   // 입력이 들어간 곳
            "isolatedDevices":[{"name":"Keyboard","presses":0}],   // 시나리오 동안 끈 실제 장치와 막은 키·버튼 누름 수
            "activeScene", "scenes":[{"name","mode","t","wallSec"}],      // 로드된 씬(Start = 처음부터 있던 씬, t = 시나리오 시계)
-           "waits":[{"type","target","t","waitedSec","frames"}], "clicks":[{"target","t","x","y","via"}]},
+           "waits":[{"type","target","t","waitedSec","frames"}], "clicks":[{"target","t","x","y","via"}],
+           "uiClock":{"mode":"frames"|"real","panels","scope","error"}},   // UI Toolkit 패널이 프레임 시계로 돌았는지(아래 "시나리오")
   "render": {"batches","setPassCalls","drawCalls","triangles","vertices"},
   "shotStats": [{"name","preset","t","width","height","meanLuma","stdLuma","blank","dark","magenta","magentaRatio",
                  "cameras":["Stage/Main Camera","Stage/Main Camera/Weapon (overlay)","Minimap"],   // 그린 카메라(아래부터)
@@ -118,7 +119,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
    `Assets/Scenes/Main.unity`와 `Assets/Generated/`는 빌드 산출물이며 gitignore 되어 있다(고쳐도 다음 빌드에 덮어써진다).
    렌더 파이프라인(URP·Renderer 에셋, Renderer Feature, 품질 레벨별 파이프라인)은 같은 폴더의 `ISettingsStep` 코드가 만든다(아래 "렌더 설정").
    그 밖의 프로젝트 설정도 YAML이 아니라 에디터 API(`harness_setup` 등)로 바꾼다.
-2. **텍스트로 쓸 수 있는 형태만.** 셰이더 = 손으로 쓴 HLSL `.shader`(Shader Graph 금지), UI = UI Toolkit UXML/USS(uGUI 프리팹 금지),
+2. **텍스트로 쓸 수 있는 형태만.** 셰이더 = 손으로 쓴 HLSL `.shader`(Shader Graph 금지), UI = UI Toolkit UXML/USS(uGUI 프리팹 금지; 모양은 UI 킷 클래스·변수, 아래 "UI 킷"),
    머티리얼·파티클·Volume·라이팅·PanelSettings = 빌더 코드(`BuildContext`)로 생성. 애니메이션은 `ctx.AnimationClip`(키를 코드로) + `ctx.Animate`
    (Playables — AnimatorController 에셋 없음, 아래 "파티클·애니메이션"). 그 밖의 GUI 에셋(Timeline 등)이 필요하면 코드로 생성한다.
 3. **자기 모듈 폴더 밖 수정 금지.** 작업 범위는 `Assets/Game/<Module>/` 하나. 모듈 간 공유 이벤트 타입만
@@ -141,13 +142,14 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json: com.unity.pipeline 의존)
   Runtime/                     런타임 계약: GameRoot, IGameModule, EventBus, HarnessProbe, HarnessConfig, ShotPreset(+ShotPose), ScriptedInput,
                                ScenarioInput(KeyNames, InputHookReplay), ScenarioRunner, HarnessCapture(+CaptureCameras: 화면의 카메라들,
-                               CaptureUi: 스크린 공간 UI 합성, ContactSheet: 연속 캡처 시트), ClipPlayer(Playables 클립 재생, ClipEvent)
+                               CaptureUi: 스크린 공간 UI 합성, ContactSheet: 연속 캡처 시트), ClipPlayer(Playables 클립 재생, ClipEvent),
+                               PanelClock(시나리오 동안 UI Toolkit 시간 = 프레임), UI/(Gauge, ToastStack: UI 킷 컨트롤)
                                (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
   Runtime/Procedural/          MeshBuilder, Noise(Perlin/fBm/Ridged/Worley/Rng), TextureBaker, PMath, AmbientProbe(큐브맵 → 앰비언트 SH)
   Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교, HarnessHot: 핫 루프) 와 BuildContext(+.Materials: LitMaterial,
                                +.Particles: Particles·ParticleMaterial, +.Animation: AnimationClip·Animate)/IBuildStep,
                                SettingsContext/ISettingsStep(렌더 설정), HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
-  UI/                          DefaultRuntimeTheme.tss (UI Toolkit 기본 테마, 텍스트)
+  UI/                          DefaultRuntimeTheme.tss (UI Toolkit 기본 테마) + HarnessKit.uss (UI 킷: 디자인 변수·컴포넌트 클래스, 텍스트)
   Tools~/                      도구 본체(.ps1, Harness.psm1) + templates/ (진입점, 기본 시나리오, 기존 프로젝트용 안내서, HarnessInput.cs)
 ProjectSettings/AgentHarness.json   하네스 설정: setup 모드, 모듈 루트/폴더, contracts, 생성물 경로, 빌드·플레이 씬
 Assets/Game/Contracts/         모듈 간 이벤트 타입 (Game.Contracts, 추가만)
@@ -290,6 +292,42 @@ var player = ctx.Animate(halo, orbit);   // Animator(컨트롤러 없음, 루트
 - 출시 빌드: `ClipPlayer`는 `Harness.Runtime`에 있어 `GameRoot`처럼 `AGENTHARNESS_RUNTIME`이 필요하다. 타임라인(TimelineAsset) 헬퍼는 없다 — 여러 오브젝트의
   순서는 클립 + `ClipEvent` + 모듈 코드로.
 
+### UI 킷 (G1-4)
+
+`ctx.UIDocument`가 만드는 패널의 테마(`Packages/com.geuneda.agentharness/UI/DefaultRuntimeTheme.tss`)가 `HarnessKit.uss`를 가져온다 → 모든 HUD에서
+킷의 변수와 클래스를 쓸 수 있다. 샘플: `Assets/Game/Smoke/UI/SmokeHud.uxml`(+ `SmokeHudData.cs`, `SmokeModule.cs`).
+```xml
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:ah="Harness.UI">
+    <ui:VisualElement class="ah-panel ah-panel--accent">                    <!-- 반투명 판 + 왼쪽 강조선 -->
+        <ui:Label class="ah-title" text="SCORE" />
+        <ui:VisualElement class="ah-row"><ui:Label class="ah-key" text="HP" /><ui:Label class="ah-value" text="0">
+            <Bindings><ui:DataBinding property="text" data-source-path="Hp" binding-mode="ToTarget" /></Bindings></ui:Label></ui:VisualElement>
+        <ah:Gauge class="ah-gauge--good">                                     <!-- value / max 만큼 찬 막대 -->
+            <Bindings><ui:DataBinding property="value" data-source-path="HpRatio" binding-mode="ToTarget" /></Bindings></ah:Gauge>
+    </ui:VisualElement>
+    <ah:ToastStack name="toasts" />                                           <!-- 화면 위쪽 가운데 -->
+    <ui:Button name="play" class="ah-button" text="PLAY" />                   <!-- ah-button--ghost: 테두리만 -->
+</ui:UXML>
+```
+```csharp
+public sealed class HudData { [CreateProperty] public int Hp { get; set; } [CreateProperty] public float HpRatio { get; set; } }   // using Unity.Properties;
+root.dataSource = m_Hud;                                   // Init: 바인딩은 매 프레임 이 객체를 읽는다 → 모듈은 값만 바꾼다
+root.Q<ToastStack>("toasts").Show("LEVEL UP", 1.5f, "good");   // using Harness.UI; 페이드·슬라이드 인 → 유지 → 페이드 아웃 → 제거
+root.Q<Button>("play").clicked += OnPlay;                  // 시나리오: {"type": "click", "target": "play"}
+```
+- 변수(`:root`): `--ah-bg`, `--ah-bg-strong`, `--ah-line`, `--ah-fg`, `--ah-muted`, `--ah-accent`, `--ah-accent-soft`, `--ah-accent-2`, `--ah-good`/`--ah-warn`/`--ah-bad`,
+  `--ah-radius`, `--ah-radius-pill`, `--ah-space-s`/`--ah-space`/`--ah-space-l`, `--ah-font-s`/`--ah-font`/`--ah-font-l`, `--ah-fade`. 한 서브트리만 바꾸려면
+  그 요소에서 다시 정의한다(`.my-hud { --ah-accent: rgb(255, 160, 40); }`).
+- 클래스: `ah-panel`(+`--accent`), `ah-row`, `ah-title`, `ah-key`, `ah-value`, `ah-hint`, `ah-button`(+`--ghost`, hover·active·disabled 상태 포함),
+  `ah-gauge`(+`--good/--warn/--bad`), `ah-toast-stack`, `ah-toast`(+`--good/--warn/--bad`). 자기 USS에는 배치만 두고 모양은 킷 클래스로.
+- 컨트롤(`Harness.UI`, `Harness.Runtime`): `Gauge`(`value`, `max`, 둘 다 UXML 속성·바인딩 가능), `ToastStack.Show(text, seconds, kind)`.
+- 데이터 바인딩(Unity 6 런타임 바인딩): UXML의 `<Bindings><ui:DataBinding property="…" data-source-path="…" /></Bindings>` + 조상 요소의 `dataSource` +
+  `[CreateProperty]` 속성. int → 라벨 text 같은 기본 변환은 된다. 모듈 코드가 라벨을 찾아 `text`를 넣을 필요가 없다.
+- 움직임은 USS transition 그대로 쓴다 — 시나리오 동안 UI 시간이 프레임을 따르므로 transition 도중의 캡처도 매번 같다(위 "시나리오", G3-10).
+- 한글·일본어·중국어는 기본 테마 폰트에 없지만 에디터가 OS 폰트로 대신 그린다(이 머신에서 확인). 플레이어·다른 OS에서는 그 OS에 있는 폰트에 달렸다 —
+  출시할 게임은 폰트 에셋을 따로 정한다.
+- 출시 빌드: 킷 컨트롤은 `Harness.Runtime`이라 `GameRoot`처럼 `AGENTHARNESS_RUNTIME`이 필요하다(USS 클래스만 쓰면 필요 없다 — 테마는 에셋).
+
 ### 렌더 설정 (ISettingsStep, G1-1)
 
 ```csharp
@@ -382,6 +420,11 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
   `play.isolatedDevices[].presses`(마우스 이동, 플레이 진입·포커스 때 장치가 보내는 상태(sync)는 막되 세지 않는다). 원래 꺼져 있던 장치(TouchSimulation이
   끈 마우스 등)는 건드리지 않는다. 구 Input Manager를 `Input.`으로 직접 읽는 코드는 막을 수 없다 — `HarnessInput`을 거쳐야 한다.
 - 캡처는 그 프레임의 모든 `LateUpdate` 뒤에 찍는다(LateUpdate에서 카메라를 움직이거나 `Graphics.DrawMesh*`로 그리는 게임도 그대로 찍힌다).
+- **UI Toolkit의 시간도 프레임을 따른다**(G3-10): USS transition·`schedule.Execute` 타이머·캐럿은 원래 실시간으로 돌아서 고정 시간 간격이어도 transition 도중의
+  캡처가 매번 달랐다. `fixedDeltaTime`이 있는 시나리오 동안 런타임 패널은 러너가 매 프레임 `fixedDeltaTime`씩 미는 시계로 시간을 잰다(`Runtime/PanelClock.cs`,
+  그 패널의 원래 시간에서 이어짐, `timeScale`과 무관 — `Time.unscaledTime`은 캡처 간격이 있어도 실시간이라 못 쓴다). `play.uiClock`: `mode` `frames`, 따른 패널 수,
+  `scope`. 6.1+는 런타임 패널마다(`BaseVisualElementPanel.TimeSinceStartupFunc`), 패널별 시계가 없는 6.0은 모든 패널이 공유하는 시계(`Panel.TimeSinceStartup`)를
+  바꿔서 `scope` = `every panel`(시나리오 동안 에디터 창의 UI도 그 시계를 따른다). 둘 다 없는 버전이면 `real` + `error`(실패 아님).
 - 캡처 `preset`: 샷 이름(씬의 ShotPreset 또는 설정 `shots`) · `"auto"`(이름순 다음 샷, 없으면 메인 카메라) · `"main"`(메인 카메라 그대로) ·
   `"screen"`(Game 뷰 그대로, 해상도는 Game 뷰 크기 = 사용자 레이아웃, Game 뷰 탭이 보여야 함).
   `"camera": "<이름>"`이면 그 카메라로, `"pos": [x,y,z]` + `"lookAt": [x,y,z]`(또는 `"rot"` 오일러) + `"fov"`면 그 자리에서 찍는다(설정은 메인 카메라).
@@ -578,7 +621,8 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   없고 가장 밝은 텍셀이 태양 방향(2° 안); 앰비언트 = 라이팅 데이터의 큐브맵 SH; `AmbientProbe` 균일 환경 → Flat과 같음·쓰레기 텍셀 거부; 머티리얼 경고 3종과
   `LitMaterial`의 이미션·알파 클립) + 콘텐츠 헬퍼(G1-3: 빌드된 불씨의 고정 시드·`AlwaysSimulate`, Halo의 `ClipPlayer`; 픽스처 클립의 경로·컴포넌트·머티리얼 속성·
   Transform 속성 오타 → 경고 한 줄씩, 선형 회전 샘플, 파티클 두 번 시뮬레이션이 같음, 가산 `ParticleMaterial`; 플레이 중 런타임 클립을 받은 `ClipPlayer`의
-  끝까지 재생·이벤트 `ClipEvent:RiseEnd`·크로스페이드) + `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 + 핫 루프(G2-1: `[CodeReload] Tick` 본문 수정 →
+  끝까지 재생·이벤트 `ClipEvent:RiseEnd`·크로스페이드) + UI 킷(G1-4: 루프의 `play.uiClock`이 `frames`; 빌드된 HUD의 Gauge·ToastStack·킷 버튼, 테마 변수 해석,
+  토스트 클래스; 플레이 중 라벨·게이지가 모듈 데이터 객체를 따름(바인딩), REVERSE 버튼을 이름으로 클릭, 페이드 중 토스트 캡처가 두 번 픽셀까지 같음) + `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 + 핫 루프(G2-1: `[CodeReload] Tick` 본문 수정 →
   `-Hot`이 컴파일·빌드·도메인 리로드 없이 반영, events 같음, golden `changed` → 되돌리면 교체 해제·`same` → 필드 추가는 전체 루프(사유에 그 줄) →
   핫 본문의 예외는 전체 루프가 주입한 줄로 보고) ·
   4 HLSL 에러(재임포트 없는 다음 루프에서도) + 되돌린 상태를 기준 이미지로 → 셰이더 한 줄(스펙큘러 절반) → golden `changed`(rect·diff PNG), 루프는 녹색 +
@@ -586,7 +630,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   다른 worktree의 새 모듈·계약은 락 대기 후 유지, 런타임 에러 되돌림, sync 직후 kill → `recoveredSubmit`, 계약 수정 거부) ·
   8 land(fast-forward + 그 사이 submit 락 대기, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
   병합 직후 kill → `recoveredLand`). 에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
-- 주입 위치는 샘플 모듈의 표식 줄: `SmokeModule.cs`의 `m_Time += dt;`(컴파일, 63행)·`EventBus.Publish(new SpinnerLap(laps));`(런타임, 70행),
+- 주입 위치는 샘플 모듈의 표식 줄: `SmokeModule.cs`의 `m_Time += dt;`(컴파일, 64행)·`EventBus.Publish(new SpinnerLap(laps));`(런타임, 71행),
   `SmokeIridescent.shader`의 `Frag` 첫 줄(87행). 핫 루프는 `Tick`의 `Mathf.Sin(m_Time * 1.6f) * 0.3f`(흔들림 폭)와 `float m_Time;`(필드 추가).
   이 줄들을 바꾸면 `selftest.ps1`의 표식도 바꾼다.
 - 7–8은 커밋된 `tools/`·하네스 패키지·`Assets/Game/`·설정 파일을 쓰는 worktree 두 개를 저장소 옆(`<저장소>-st-a/-b`)에 만들고, `selftest/*` 브랜치·
@@ -605,9 +649,9 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
-  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `4ffb4440…` | 63 / 70 / 87 | 1–9 녹색(핫 루프·파티클·클립 포함), 샷 62.7/55.9/45.7(6.3과 같음) |
-  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `1c6fa406…` | 63 / 70 / 87 | 1–9 녹색(핫 루프·파티클·클립 포함), 커밋된 기준 이미지와 같음 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `5ab10290…` | 63 / 70 / 87 | 1–9 녹색(핫 루프·파티클·클립 포함), 샷 62.8/56.0/45.8(W4 전에는 첫 플레이 뒤 검었다 — ROADMAP P-4) |
+  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `4ffb4440…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·파티클·클립 포함), 샷 62.7/55.9/45.7(6.3과 같음) |
+  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `1c6fa406…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·파티클·클립 포함), 커밋된 기준 이미지와 같음 |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `5ab10290…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·파티클·클립 포함), 샷 62.8/56.0/45.8(W4 전에는 첫 플레이 뒤 검었다 — ROADMAP P-4) |
 
   fingerprint는 버전마다 다르다(URP가 만드는 머티리얼·에셋 직렬화가 다르다). 같은 버전 안에서만 매번 같아야 한다.
 - 다른 버전으로 열면 Unity가 다시 쓰는 파일(커밋하지 않는다): `Packages/packages-lock.json`, `Assets/Settings/UniversalRenderPipelineGlobalSettings.asset`,
@@ -723,6 +767,14 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   (경로·컴포넌트·Transform 속성 오타는 null). 셰이더에 있는 이름은 렌더러의 `GetAnimatableBindings`로만 안다. 또 HDR 색은 그 목록에 `.x/.y/.z/.w`로 나오는데
   `.r` 키와 `.x` 키는 뜻이 다르다(`.r` 0.75 → 감마에서 선형으로 0.52 = `SetColor`, `.x` 0.75 → 그대로).
 - 파티클 색(`startColor`, Color over Lifetime)은 입자마다 8비트로 저장된다 — HDR 시작 색은 1로 잘린다. 블룸이 걸리는 발광은 머티리얼의 `_BaseColor`(HDR)로 준다.
+- **UI Toolkit의 transition·타이머는 실시간이다**: 고정 시간 간격(`Time.captureDeltaTime`)은 게임 시간만 바꾼다. 1초 opacity transition을 같은 게임 시간에
+  재니 실행마다 0.73/0.79/0.79(그 사이 실시간 0.136–0.166 s). `Time.unscaledTime`도 캡처 간격과 상관없이 실시간이다(그걸로 바꿔도 0.745/0.779/0.786) → 러너가
+  직접 미는 프레임 시계(`PanelClock`)로 바꾸자 0.450/0.450/0.450. 6.0에는 패널별 시간 함수가 없고(DLL 메타데이터로 확인) 정적 `Panel.TimeSinceStartup`(ms)만 있다.
+  또 6.0은 편집 모드에서 런타임 패널의 데이터 바인딩을 갱신하지 않는다(패널 `Update()`를 불러도 그대로) — 플레이 중에는 된다.
+- **새 `[UxmlElement]` 컨트롤과 그걸 쓰는 UXML을 한 번에 만들면** 루프의 `AssetDatabase.Refresh`가 스크립트를 컴파일하기 전에 UXML을 먼저 임포트해서
+  `editorErrors`에 `Element 'X' is missing a UxmlElementAttribute ...`가 한 번 나온다. 컴파일 뒤 Unity가 다시 임포트해 플레이·캡처는 정상이었다(다음 루프엔 없음).
+- UI Toolkit 레이아웃은 패널의 물리 픽셀 격자로 반올림된다. 작은 Game 뷰(366x305 → 배율 0.24, 1 px = 4.2 단위)에서는 폭 200이 198.7, 25%가 23.5%로
+  배치됐다. 캡처는 캡처 크기로 다시 배치하므로 그 격자를 따른다(1280x720에서 게이지 0.749 → 0.762). 편집 모드에서 UI 크기를 재는 검사는 허용치를 둔다.
 - `Playable.SetTime`을 한 번만 불러 클립을 되감으면 그 사이의 애니메이션 이벤트가 다음 평가에서 발행된다(0.78 s → 0: 0.5 s 이벤트가 한 번 더). 같은 값으로
   두 번 부르면 안 나간다(`ClipPlayer.Play`). PlayableGraph의 애니메이션 이벤트는 `AnimationPlayableOutput`의 Animator가 붙은 오브젝트의 컴포넌트가 받는다.
 - Game 뷰 크기 목록(`PlayModeWindow.SetCustomRenderingResolution`이 여기에 추가한다)과 에디터 기본 레이아웃은 **사용자 전역**이다

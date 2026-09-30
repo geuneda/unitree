@@ -136,7 +136,13 @@ namespace Harness
             Array.Sort(m_Captures, (a, b) => a.t.CompareTo(b.t));
 
             HarnessCapture.DefaultSize(ref m_Scenario.width, ref m_Scenario.height);   // the Editor has set it already
-            if (m_Scenario.fixedDeltaTime > 0f) Time.captureDeltaTime = m_Scenario.fixedDeltaTime;
+            if (m_Scenario.fixedDeltaTime > 0f)
+            {
+                Time.captureDeltaTime = m_Scenario.fixedDeltaTime;
+                // UI Toolkit transitions and timers run on real time: make them follow the frames too (PanelClock).
+                m_Result.uiClock.error = PanelClock.Begin();
+                if (m_Result.uiClock.error == null) m_Result.uiClock.mode = "frames";
+            }
             // Keep playing while the Editor is in the background, for this session only (the project's Player setting
             // is not changed; an attached project may ship with Run In Background off).
             m_RunInBackground = Application.runInBackground;
@@ -154,6 +160,7 @@ namespace Harness
         void Update()
         {
             if (m_Finished) return;
+            PanelClock.Advance(m_Scenario.fixedDeltaTime);
 
             if (!m_Ready)
             {
@@ -797,6 +804,9 @@ namespace Harness
             m_Finished = true;
             // Time and input first, whatever fails below.
             Time.captureDeltaTime = 0f;
+            m_Result.uiClock.panels = PanelClock.Panels;
+            if (m_Result.uiClock.mode == "frames") m_Result.uiClock.scope = PanelClock.Scope;
+            PanelClock.End();
             Application.runInBackground = m_RunInBackground;
             foreach (var input in m_Inputs)
             {

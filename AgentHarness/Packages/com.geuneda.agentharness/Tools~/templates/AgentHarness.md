@@ -24,7 +24,9 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
   실패로 치지 않는다. 의도하지 않았는데 `changed`면 `diff` PNG(바뀐 픽셀 빨강)를 연다. 화면을 의도대로 바꿨고 샷이 맞으면
   `tools/loop.ps1 -UpdateGolden`으로 기준 이미지를 갱신해 커밋한다(아래 "기준 이미지").
 - `play`: `probeReady`, `frames`, `events`(하네스 모듈의 EventBus 발행 수), `scenes`(로드된 씬과 시각), `waits`, `clicks`, `inputBackends`,
-  `isolatedDevices`(시나리오 동안 끈 실제 장치와 막은 키·버튼 누름 수 — 사람이 그 사이 키보드를 만져도 결과가 같다).
+  `isolatedDevices`(시나리오 동안 끈 실제 장치와 막은 키·버튼 누름 수 — 사람이 그 사이 키보드를 만져도 결과가 같다),
+  `uiClock`(`mode: "frames"` = 시나리오 동안 UI Toolkit 패널의 USS transition·`schedule` 타이머가 실시간 대신 프레임 × `fixedDeltaTime`을 따랐다 →
+  UI 애니메이션 도중의 캡처도 매번 같다; `panels` = 따른 패널 수).
   `fps`는 에디터 플레이 모드 값이라 변경 전후 비교용.
 - `timings.playEnterSec`: 플레이 진입 시간. 이 프로젝트가 Domain Reload를 켜 두었으면 여기에 리로드 시간이 들어간다.
 - 옵션: `-Scenario tools/scenarios/x.json`, `-NoPlay`(편집 모드 캡처만), `-Out HarnessOut/x`, `-UpdateGolden`(녹색일 때 샷을 기준 이미지로),

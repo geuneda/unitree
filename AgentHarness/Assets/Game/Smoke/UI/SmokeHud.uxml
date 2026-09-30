@@ -1,15 +1,32 @@
-<ui:UXML xmlns:ui="UnityEngine.UIElements" editor-extension-mode="False">
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:ah="Harness.UI" editor-extension-mode="False">
+    <!-- UI kit classes (ah-*) and controls (ah:Gauge, ah:ToastStack) come with the harness theme. Values bind to
+         SmokeHudData (SmokeModule sets it as the root's dataSource). -->
     <Style src="SmokeHud.uss" />
-    <ui:VisualElement name="hud" class="hud" picking-mode="Ignore">
-        <ui:Label name="title" class="hud__title" text="AGENT HARNESS / SMOKE" />
-        <ui:VisualElement class="hud__row">
-            <ui:Label class="hud__key" text="LAPS" />
-            <ui:Label name="laps" class="hud__value" text="0" />
+    <ui:VisualElement name="hud" class="ah-panel ah-panel--accent hud" picking-mode="Ignore">
+        <ui:Label name="title" class="ah-title" text="AGENT HARNESS / SMOKE" />
+        <ui:VisualElement class="ah-row">
+            <ui:Label class="ah-key" text="LAPS" />
+            <ui:Label name="laps" class="ah-value" text="0">
+                <Bindings>
+                    <ui:DataBinding property="text" data-source-path="Laps" binding-mode="ToTarget" />
+                </Bindings>
+            </ui:Label>
         </ui:VisualElement>
-        <ui:VisualElement class="hud__row">
-            <ui:Label class="hud__key" text="SPIN" />
-            <ui:Label name="dir" class="hud__value" text="CW" />
+        <ah:Gauge name="lap-progress" class="hud__gauge">
+            <Bindings>
+                <ui:DataBinding property="value" data-source-path="LapProgress" binding-mode="ToTarget" />
+            </Bindings>
+        </ah:Gauge>
+        <ui:VisualElement class="ah-row">
+            <ui:Label class="ah-key" text="SPIN" />
+            <ui:Label name="dir" class="ah-value" text="CW">
+                <Bindings>
+                    <ui:DataBinding property="text" data-source-path="Spin" binding-mode="ToTarget" />
+                </Bindings>
+            </ui:Label>
         </ui:VisualElement>
-        <ui:Label class="hud__hint" text="SPACE  reverse" />
+        <ui:Label class="ah-hint" text="SPACE  reverse" />
     </ui:VisualElement>
+    <ah:ToastStack name="toasts" />
+    <ui:Button name="reverse" class="ah-button ah-button--ghost hud__reverse" text="REVERSE" />
 </ui:UXML>

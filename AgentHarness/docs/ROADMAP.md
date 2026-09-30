@@ -27,7 +27,7 @@
 | W3 | 시각 회귀와 움직임 | G3-4, G3-3, G3-7 | L | W1, W2 | 완료 (2026-09-30) |
 | W4 | 렌더 설정을 코드로 | G1-1, P-4, G4-3, G4-2 | L | W3 | 완료 (2026-09-30) |
 | W5 | 루프 속도 | G2-3, G2-1 | L | — | 완료 (2026-09-30) |
-| W6 | 콘텐츠 헬퍼(a/b/c로 나눠 진행) | G1-3, G1-4, G4-1, G4-4 | L | W3, W4 (W6b는 W2) | W6a 완료 (2026-09-30), W6b·W6c 대기 |
+| W6 | 콘텐츠 헬퍼(a/b/c로 나눠 진행) | G1-3, G1-4, G4-1, G4-4 (+G3-10) | L | W3, W4 (W6b는 W2) | W6a·W6b 완료 (2026-09-30), W6c 대기 |
 | W7 | 에디터 밖·여러 에디터 | G2-2, G2-4, G1-2, G5-1 | L | — | 대기 |
 | W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 | L | W1 | 대기 |
 | W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 대기 |
@@ -95,7 +95,9 @@
   `ctx.AnimationClip`(키를 코드로 → .anim), `ctx.Animate` + 런타임 `ClipPlayer`(Playables, AnimatorController 에셋 없음, 크로스페이드, 이벤트 →
   `play.events`의 `ClipEvent:<이름>`). 빌드 뒤 클립의 경로·컴포넌트·속성을 대상과 대조해 `build.warnings`. 스모크 씬에 매듭 주위를 도는 링 2개와
   받침대에서 피어오르는 불씨를 넣었고 연속 캡처로 움직임(motion 25–28)을 확인했다. 타임라인 헬퍼는 넣지 않았다(해결됨의 "남은 것").
-- W6b UI 킷: `UI/`에 공용 USS 변수·버튼·게이지·토스트, 폰트, 바인딩 예제. HUD가 `"auto"` 캡처에 찍혀야 확인할 수 있으므로 W2 뒤.
+- W6b UI 킷 — 완료 (2026-09-30, 아래 "해결됨"): 패키지 테마가 가져오는 `HarnessKit.uss`(디자인 변수 + 판·글자·버튼·게이지·토스트 클래스), 런타임 컨트롤
+  `Harness.UI.Gauge`·`ToastStack`(`[UxmlElement]`), Unity 6 데이터 바인딩 예제(스모크 HUD가 `SmokeHudData`에 바인딩). 하다가 UI Toolkit의 transition·타이머가
+  실시간이라 캡처가 흔들리는 것을 찾아(G3-10) 시나리오 동안 패널 시간을 프레임 시계로 바꿨다. 폰트: 한중일은 에디터가 OS 폰트로 그려 따로 넣지 않았다.
 - W6c 절차적 생성: GPU 베이크 경로(Blit/Compute → RT → PNG)를 먼저 두고, 그 위에 SDF·스플라인/튜브·스캐터·데칼·절차적 스카이.
   GPU 베이크 결과는 GPU·드라이버마다 다를 수 있다 → fingerprint에 무엇을 넣을지 정한다.
 - 공통: 셋 다 `Editor/Build/BuildContext.cs`에 헬퍼를 더한다. 따로 진행하려면 헬퍼별 파일(`partial class`)로 나눈다.
@@ -182,9 +184,7 @@
 
 - **G1-3 파티클·애니메이션·타임라인용 코드 헬퍼가 없다** → 2026-09-30 해결(W6a, 아래 "해결됨"). 타임라인은 넣지 않았다(클립 + `ClipEvent` + 모듈 코드로 대신).
 
-- [~] **G1-4 UI Toolkit 경로는 있지만 얇다**
-  - 현상: UXML/USS + `ctx.UIDocument()` + 기본 테마(.tss)는 동작한다. 재사용 컴포넌트, 폰트, 바인딩 예제가 없다.
-  - 방향: `Assets/Harness/UI/`에 공용 USS 변수·컴포넌트(버튼, 게이지, 토스트) 추가.
+- **G1-4 UI Toolkit 경로는 있지만 얇다** → 2026-09-30 해결(W6b, 아래 "해결됨").
 
 - [ ] **G1-5 렌더 파이프라인 밖의 프로젝트 설정은 여전히 YAML** (2026-09-30, W4에서 남은 것)
   - 현상: W4로 URP·Renderer 에셋과 품질 레벨별 파이프라인 배정은 `ISettingsStep` 코드가 됐다. 품질 레벨 자체(목록·이름·레벨별 그림자·LOD·vSync),
@@ -256,6 +256,8 @@
     Input System이 끈 장치는 두고, 포커스 복귀로 켜지면 그때 끈다 — W1 설계). 포커스 없이 켜져 있던 장치를 왜 못 껐는지, 포커스 복귀 경로가 맞게 도는지는 확인하지 않았다.
   - 지금: selftest가 포커스 없는 시도를 3번까지 다시 한다(`realInputTries`, `realInputStopTries`). 포커스가 계속 없으면 여전히 빨갛다.
   - 완료 기준: 에디터가 백그라운드인 채로도, 도중에 포커스가 돌아와도 실제 누름이 게임에 닿지 않고 `isolatedDevices`에 보고된다(selftest에서 포커스를 조작해 확인).
+
+- **G3-10 UI Toolkit의 transition·타이머가 실시간이라 UI가 움직이는 동안의 캡처가 매번 다르다** (2026-09-30, W6b에서 발견) → 같은 날 해결(W6b, 아래 "해결됨").
 
 ## 성질 4 — 에셋 없이도 완성도
 
@@ -362,6 +364,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
   - 현상: 패널을 지금 그리는 공개 API가 없어 `RuntimePanel.Update()`, `UIElementsRuntimeUtility.RepaintPanel/RenderPanel`을 리플렉션으로 부른다
     (`Runtime/CaptureUi.cs` `PanelApi`). 6000.0.84f1·6000.3.11f1·6000.6.3f1에서 동작. 이름·시그니처가 바뀌면 그 샷은 UI Toolkit 없이 찍히고 `uiError`.
   - 할 일(상시): 새 Unity 버전마다 매트릭스 9의 selftest 1번 HUD 검사로 확인. 공개 API가 생기면 교체.
+  - 2026-09-30(W6b): 시나리오 동안의 UI 시계(`Runtime/PanelClock.cs`, G3-10)도 내부 API(`BaseVisualElementPanel.TimeSinceStartupFunc`,
+    `UIElementsRuntimeUtility.GetSortedPlayerPanels`)에 기댄다. 없으면 `play.uiClock`이 `real` + `error`이고 selftest 1번의 UI 시계 검사가 빨갛다.
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
@@ -388,6 +392,9 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    경로·컴포넌트·머티리얼 속성·Transform 속성 오타가 각각 경고 한 줄(비슷한 이름 포함), 선형 회전이 1 s에 90°, 파티클이 같은 시드로 두 번 같은 입자,
    가산 `ParticleMaterial`; 플레이 중 런타임 클립 두 개를 받은 `ClipPlayer`가 끝까지 재생·유지(`IsDone`)·이벤트(`ClipEvent:RiseEnd=1`)·크로스페이드(중간 x=2),
    기본 루프의 `ClipEvent:HaloHalfTurn=1`
+   + UI 킷(G1-4)·UI 시계(G3-10): 루프 3회의 `play.uiClock`이 `frames`(패널 ≥ 1); 편집 모드에서 빌드된 HUD의 `Gauge`·`ToastStack`·킷 버튼, 테마 변수(`--ah-bg`,
+   `--ah-accent`) 해석, 토스트 클래스; 플레이 중 LAPS·SPIN 라벨과 게이지가 HUD의 `dataSource`(`SmokeHudData`) 값과 같음(바인딩), REVERSE 버튼을 이름으로
+   클릭(`uitk`) → 방향 전환, 토스트가 페이드 인·아웃하는 중의 캡처 2장이 두 번 돌려도 픽셀까지 같음
 2. C# 컴파일 에러 주입 → `stage=compile`, file/line/module 정확 → 원복 후 녹색
 3. 런타임 예외 주입 → `stage=runtime`, 정확한 줄 → 원복 후 녹색. 핫 루프(G2-1): `[CodeReload] Tick` 본문 수정 → `loop.ps1 -Hot`이 컴파일·빌드·도메인 리로드
    없이 반영(events 같음, golden `changed`) → 되돌리면 교체 해제·`same` → 필드 추가는 전체 루프(fallback에 그 줄) → 핫 본문의 예외는 전체 루프가 주입한 줄로 보고
@@ -421,6 +428,46 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G1-4 UI Toolkit 경로는 있지만 얇다** · **G3-10 UI Toolkit의 transition·타이머가 실시간이라 UI가 움직이는 동안의 캡처가 매번 다르다** (2026-09-30, W6b)
+  - 현상(전): UXML/USS + `ctx.UIDocument()` + 기본 테마만 있어서 HUD마다 색·크기·판 모양을 새로 썼고(스모크 HUD의 USS 44줄), 재사용 컨트롤·바인딩 예제가 없었다
+    (모듈이 라벨을 찾아 `text`를 넣음). 폰트는 확인해 보니 문제가 아니었다: 한글·일본어·중국어 라벨이 기본 테마로 그대로 찍혔다(에디터가 OS 폰트로 대신 그림).
+  - 방법(G1-4): 패키지 테마 `UI/DefaultRuntimeTheme.tss`가 `HarnessKit.uss`를 가져온다 → `ctx.UIDocument`의 모든 패널에서 쓸 수 있다.
+    - 변수(`:root`): 배경·선·글자·강조 2종·good/warn/bad 색, 반경, 간격, 글자 크기 3단, 페이드 시간. 서브트리에서 다시 정의하면 그 아래만 바뀐다.
+    - 클래스: `ah-panel`(`--accent`), `ah-row`, `ah-title`/`ah-key`/`ah-value`/`ah-hint`, `ah-button`(`--ghost`, hover·active·disabled), `ah-gauge`(`--good/--warn/--bad`),
+      `ah-toast-stack`/`ah-toast`(`--shown`, `--good/--warn/--bad`; opacity·translate transition).
+    - 컨트롤(`Runtime/UI/`, `Harness.UI`, Unity 6 `[UxmlElement]`): `Gauge`(`value`/`max`, UXML 속성·`[CreateProperty]`로 바인딩 가능; 채움과 나머지를 flex-grow로 나눔),
+      `ToastStack.Show(text, seconds, kind)`(첫 레이아웃 뒤 `--shown`을 붙여 transition, 패널 타이머로 페이드 아웃·제거).
+    - 샘플: 스모크 HUD를 킷으로 다시 씀 — 모양은 킷 클래스, `SmokeHud.uss`는 배치 3개만. 라벨·게이지는 `SmokeHudData`(`[CreateProperty]`)에 UXML
+      `<Bindings><ui:DataBinding …/></Bindings>`로 묶이고 모듈은 값만 바꾼다(int → 라벨 text 기본 변환). 한 바퀴 진행 게이지, 방향 전환 때 토스트
+      ("COUNTER-CLOCKWISE", 1.2 s), 클릭하면 방향을 바꾸는 REVERSE 버튼(`ah-button--ghost`).
+  - 발견(G3-10): 토스트를 페이드 중에 찍으려다 **USS transition·`schedule` 타이머가 실시간**임을 확인했다 — 1초 opacity transition을 같은 게임 시간(0.903 s)에 재니
+    실행마다 0.732/0.786/0.792(그 사이 실시간 0.136–0.166 s, fps 142–173). 고정 시간 간격은 게임 시간만 바꾸고, `Time.unscaledTime`도 캡처 간격과 상관없이
+    실시간이다(그걸로 바꿔도 0.745/0.779/0.786). 게임의 UI Toolkit 애니메이션이 캡처·기준 이미지를 흔드는 구멍이다(붙인 프로젝트 포함).
+  - 방법(G3-10, `Runtime/PanelClock.cs`): 패널마다 시간 함수(`BaseVisualElementPanel.TimeSinceStartupFunc`, 내부)가 있어서, `fixedDeltaTime`이 있는 시나리오
+    동안 러너가 매 프레임 `fixedDeltaTime`씩 미는 시계로 바꾼다 — 그 패널의 원래 시간에서 이어지고(되돌아가지 않음), `timeScale`과 무관(멈춘 게임의 메뉴도
+    움직임). 런타임 패널은 `UIElementsRuntimeUtility.GetSortedPlayerPanels()`로 매 프레임 찾아 새 패널도 걸고, 끝나면 원래 함수로 되돌린다. 결과
+    `play.uiClock`(`mode` `frames`/`real`, `panels`, `scope`, `error` — API가 없는 버전이면 `real` + 이유, 실패 아님). 같은 측정이 0.450/0.450/0.450.
+    6.0은 매트릭스 9에서 빨갰다: 패널별 `TimeSinceStartupFunc`가 6.1 이후 것이라(설치된 세 버전의 `UnityEngine.UIElementsModule.dll` 메타데이터로 확인) UI 시계가
+    `real`이었고 토스트 캡처가 달랐다(`meanDiff` 0.21) → 6.0에서는 모든 패널이 공유하는 정적 `Panel.TimeSinceStartup`(ms)을 같은 방식으로 바꾼다(`scope` =
+    `every panel`: 시나리오 동안 에디터 창 UI도 그 시계). 또 6.0은 편집 모드에서 런타임 패널의 바인딩을 갱신하지 않아 편집 모드 바인딩 검사가 0이었다(플레이
+    중에는 됨, 샷의 LAPS·SPIN) → selftest의 바인딩 검사를 플레이 중 값으로 옮겼다.
+  - 조사하며 확인한 것: 새 `[UxmlElement]` 컨트롤과 그 UXML을 한 번에 넣으면 루프의 `AssetDatabase.Refresh`가 컴파일 전에 UXML을 임포트해 `editorErrors`에
+    "missing a UxmlElementAttribute"가 한 번 나오지만, 컴파일 뒤 다시 임포트돼 그 루프의 플레이부터 정상이었다. UI Toolkit 레이아웃은 패널의 물리 픽셀로
+    반올림된다 — 이 머신의 Game 뷰(366x305, 배율 0.24, 1 px = 4.2 단위)에서는 25% 폭이 23.5%로 배치됐고(퍼센트·flex 모두), 캡처는 캡처 크기로 다시 배치해
+    1280x720 격자를 따른다(게이지 값 0.749 → 캡처에서 0.762).
+  - 검증(이 머신): 기본 루프 3회 픽셀까지 같음(루프 2·3 `same=3`), fingerprint 그대로 `1c6fa406…`(HUD는 생성 에셋이 아니라 fingerprint 밖, 기준 이미지가 본다),
+    `play.uiClock` `frames/1`, 루프 3.53–3.54 s(같은 에디터). 버튼 클릭 → 토스트 페이드 인(1.15 s)·아웃(2.36 s) 캡처가 fps가 달라도(141–155) 두 번·세 번
+    모두 maxDiff 0. 6.3 기준 이미지를 갱신했다(HUD에 게이지·버튼, horizon 샷에 토스트; 샷 62.9/56.1/45.9).
+    - selftest 1–8 녹색 325.1 s(`1c6fa406…`, 주입 줄 64/71/87 — `SmokeModule`이 바뀌어 한 줄씩 밀림, 1번 54.4 s에 UI 킷·시계 검사 6개).
+    - 9(최종 커밋): 새 클론 6000.3.11f1 녹색 407.3 s(`1c6fa406…` = 메인 트리, 첫 루프부터 기준 이미지 `same=3`, UI 시계 `runtime panels`), 6000.0.84f1 녹색
+      381.8 s(`4ffb4440…`, 샷 62.9/56.1/45.9 = 6.3, UI 시계 `every panel`), 6000.6.3f1 녹색 402.8 s(`5ab10290…`, 63.0/56.1/45.9) — 세 버전 모두 UI 킷·시계 검사 6개 녹색.
+      (첫 실행에서 6.0이 빨간 것은 위 "방법(G3-10)"의 6.0 항목.)
+    - 10: BagelGame 녹색 60.1 s(`619be553…` = W5, `uiClock` `frames/2` — 이 게임의 월드 공간 UI Toolkit 패널 2개가 프레임 시계를 따름, 출시 빌드 `Managed/` 132개·
+      `Harness.*` 0개), Fluid-Sim 녹색 31.3 s(`54880f05…`, 6.0이라 `every panel`, UI Toolkit 패널 0개, 103개·0개), 사내 프로젝트 A 녹색 98.1 s(`6664b723…`,
+      `brd-attach.json`, `frames/1`; 6.0 대체 경로를 넣기 전 실행 — 패널별 경로는 그대로다).
+  - 남은 것: 폰트 에셋 헬퍼는 없다 — 출시 플레이어·다른 OS의 한중일 글꼴은 그 OS에 달렸다. 킷은 HUD용 몇 가지뿐이다(슬라이더·토글·리스트·모달은 UI Toolkit
+    기본 컨트롤에 킷 변수로 모양을 입힌다). `PanelClock`은 내부 API라 새 Unity 버전마다 selftest 1번이 확인한다(O-9와 같은 상시 항목).
 
 - [x] **G1-3 파티클·애니메이션·타임라인용 코드 헬퍼가 없다** (2026-09-30, W6a)
   - 현상(전): `BuildContext`에는 메시·머티리얼·텍스처·Volume·UI·샷 헬퍼만 있었다. ParticleSystem은 모듈 구조체 수십 개를 하나씩 켜야 하고 기본값이

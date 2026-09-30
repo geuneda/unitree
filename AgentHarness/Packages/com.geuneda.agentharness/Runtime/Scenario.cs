@@ -159,6 +159,15 @@ namespace Harness
     }
 
     [Serializable]
+    public sealed class UiClock
+    {
+        public string mode = "real";   // "frames": runtime UI Toolkit panels told time by frames x fixedDeltaTime (PanelClock), "real": by the real clock
+        public int panels;             // runtime panels that followed the frame clock
+        public string scope;           // "runtime panels", or "every panel" (Unity 6.0 has one clock for all panels: Editor windows followed it too)
+        public string error;           // why not (no fixed time step: none; this Unity version lacks the internal API: the reason)
+    }
+
+    [Serializable]
     public sealed class PlayResult
     {
         public string id;
@@ -188,5 +197,6 @@ namespace Harness
         public ScenarioWait[] waits = Array.Empty<ScenarioWait>();
         public string activeScene;
         public NamedCount[] events = Array.Empty<NamedCount>();
+        public UiClock uiClock = new UiClock();
     }
 }

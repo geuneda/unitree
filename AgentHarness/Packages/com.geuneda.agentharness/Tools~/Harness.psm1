@@ -1055,6 +1055,7 @@ function Invoke-HarnessLoop {
         if ($has -contains 'inputHooks' -and @($playResult.inputHooks).Count) { $report.play['inputHooks'] = @($playResult.inputHooks) }
         if ($has -contains 'isolatedDevices' -and @($playResult.isolatedDevices).Count) { $report.play['isolatedDevices'] = @($playResult.isolatedDevices | ForEach-Object { [ordered]@{ name = $_.name; presses = $_.presses } }) }
         if ($has -contains 'activeScene') { $report.play['activeScene'] = $playResult.activeScene }
+        if ($has -contains 'uiClock' -and $playResult.uiClock) { $report.play['uiClock'] = [ordered]@{ mode = $playResult.uiClock.mode; panels = $playResult.uiClock.panels; scope = $playResult.uiClock.scope; error = $playResult.uiClock.error } }
         if ($has -contains 'scenes') { $report.play['scenes'] = @($playResult.scenes | ForEach-Object { [ordered]@{ name = $_.name; mode = $_.mode; t = [math]::Round($_.t, 3); wallSec = [math]::Round($_.wallSec, 2) } }) }
         if ($has -contains 'waits' -and @($playResult.waits).Count) { $report.play['waits'] = @($playResult.waits | ForEach-Object { [ordered]@{ type = $_.type; target = $_.target; t = [math]::Round($_.t, 3); waitedSec = [math]::Round($_.waitedSec, 2); frames = $_.frames } }) }
         if ($has -contains 'clicks' -and @($playResult.clicks).Count) { $report.play['clicks'] = @($playResult.clicks | ForEach-Object { [ordered]@{ target = $_.target; t = [math]::Round($_.t, 3); x = [math]::Round($_.x, 1); y = [math]::Round($_.y, 1); via = $_.via } }) }

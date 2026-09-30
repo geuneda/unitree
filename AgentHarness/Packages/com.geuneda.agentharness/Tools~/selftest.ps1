@@ -25,7 +25,10 @@
     the built embers have a fixed seed and always simulate, the halo plays through a ClipPlayer; a clip with a misspelled
     path, component, material property and Transform property gives one warning each; a linear turn samples right; particles
     simulate the same twice; an additive ParticleMaterial; in play mode a ClipPlayer plays runtime clips to their end, fires
-    their event into play.events and cross-fades
+    their event into play.events and cross-fades; UI kit (G1-4): the loops' UI Toolkit panels tell time by frames
+    (play.uiClock), the built HUD's Gauge / ToastStack / kit button, data binding to the module's data class, the theme
+    variables resolved, a toast's classes; in play mode the REVERSE button clicked by name, and a toast captured while
+    fading in and out the same pixel for pixel in two runs (USS transitions follow the frames, G3-10)
   2 C# compile error in Smoke -> stage=compile at the injected file/line, module Smoke; reverted -> green
   3 runtime exception in Smoke -> stage=runtime at the injected line; reverted -> green. Hot loop (G2-1): an edit of the
     [CodeReload] Tick body -> loop.ps1 -Hot reloads it (no compile, build or domain reload), same events, golden changed;
@@ -902,6 +905,98 @@ return "armed";
 $ClipsStateText = @'
 return UnityEditor.SessionState.GetString("AgentHarness.selftest.clips", "");
 '@
+
+# UI kit (G1-4), in edit mode on the built HUD: the kit's controls from UXML, the theme's variables (--ah-bg, --ah-accent)
+# resolved, a toast with the kit's classes (removed again). Data binding is checked in play mode ($KitArmText): Unity 6.0 does not
+# update bindings of a runtime panel in edit mode.
+$KitCheckText = @'
+var r = new System.Collections.Generic.Dictionary<string, object>();
+var go = UnityEngine.GameObject.Find("Smoke/HUD");
+var doc = go == null ? null : go.GetComponent<UnityEngine.UIElements.UIDocument>();
+var root = doc == null ? null : doc.rootVisualElement;
+if (root == null || root.panel == null) { r["error"] = "no HUD panel in edit mode"; return r; }
+var any = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+System.Action update = () => root.panel.GetType().GetMethod("Update", any, null, System.Type.EmptyTypes, null).Invoke(root.panel, null);
+var hud = UnityEngine.UIElements.UQueryExtensions.Q(root, "hud");
+var gauge = UnityEngine.UIElements.UQueryExtensions.Q<Harness.UI.Gauge>(root, "lap-progress");
+var toasts = UnityEngine.UIElements.UQueryExtensions.Q<Harness.UI.ToastStack>(root, "toasts");
+var button = UnityEngine.UIElements.UQueryExtensions.Q<UnityEngine.UIElements.Button>(root, "reverse");
+r["controls"] = $"gauge={(gauge != null)} toasts={(toasts != null)} button={(button != null && button.ClassListContains("ah-button"))}";
+if (gauge == null || toasts == null) return r;
+try
+{
+    update();
+    var fill = UnityEngine.UIElements.UQueryExtensions.Q(gauge, "fill");
+    var bg = hud.resolvedStyle.backgroundColor;
+    var fc = fill.resolvedStyle.backgroundColor;
+    r["panelBg"] = $"{UnityEngine.Mathf.RoundToInt(bg.r * 255)},{UnityEngine.Mathf.RoundToInt(bg.g * 255)},{UnityEngine.Mathf.RoundToInt(bg.b * 255)},{bg.a:0.00}";
+    r["fillColor"] = $"{UnityEngine.Mathf.RoundToInt(fc.r * 255)},{UnityEngine.Mathf.RoundToInt(fc.g * 255)},{UnityEngine.Mathf.RoundToInt(fc.b * 255)}";
+    var toast = toasts.Show("SELFTEST", 1f, "good");
+    r["toast"] = string.Join(",", toast.GetClasses()) + " inStack=" + (toast.parent == toasts);
+    toast.RemoveFromHierarchy();
+}
+finally
+{
+    update();
+}
+return r;
+'@
+# Data binding in play mode: near the end of the UI kit scenario, the HUD's labels and gauge against the module's data object
+# (the root's dataSource, SmokeHudData) - into SessionState for $KitStateText. Disarms itself.
+$KitArmText = @'
+const string key = "AgentHarness.selftest.kit";
+UnityEditor.SessionState.SetString(key, "");
+var t0 = -1f;
+UnityEditor.EditorApplication.CallbackFunction tick = null;
+tick = () =>
+{
+    if (!UnityEngine.Application.isPlaying) return;
+    var go = UnityEngine.GameObject.Find("Smoke/HUD");
+    if (go == null) return;
+    if (t0 < 0f) t0 = UnityEngine.Time.time;
+    if (UnityEngine.Time.time - t0 < 2.2f) return;
+    var root = go.GetComponent<UnityEngine.UIElements.UIDocument>().rootVisualElement;
+    var data = root.dataSource;
+    var laps = UnityEngine.UIElements.UQueryExtensions.Q<UnityEngine.UIElements.Label>(root, "laps");
+    var dir = UnityEngine.UIElements.UQueryExtensions.Q<UnityEngine.UIElements.Label>(root, "dir");
+    var gauge = UnityEngine.UIElements.UQueryExtensions.Q<Harness.UI.Gauge>(root, "lap-progress");
+    var t = data == null ? null : data.GetType();
+    var r = new System.Collections.Generic.Dictionary<string, object>
+    {
+        { "source", t == null ? "none" : t.Name },
+        { "lapsText", laps == null ? null : laps.text }, { "dirText", dir == null ? null : dir.text }, { "gauge", gauge == null ? -1f : gauge.value },
+        { "laps", t == null ? null : t.GetProperty("Laps").GetValue(data) }, { "spin", t == null ? null : t.GetProperty("Spin").GetValue(data) },
+        { "progress", t == null ? null : t.GetProperty("LapProgress").GetValue(data) },
+    };
+    UnityEditor.SessionState.SetString(key, Newtonsoft.Json.JsonConvert.SerializeObject(r));
+    UnityEditor.EditorApplication.update -= tick;
+};
+System.Action<UnityEditor.PlayModeStateChange> onChange = null;
+onChange = c =>
+{
+    if (c == UnityEditor.PlayModeStateChange.ExitingPlayMode) { UnityEditor.EditorApplication.update -= tick; UnityEditor.EditorApplication.playModeStateChanged -= onChange; return; }
+    if (c == UnityEditor.PlayModeStateChange.EnteredPlayMode) UnityEditor.EditorApplication.update += tick;
+};
+UnityEditor.EditorApplication.playModeStateChanged += onChange;
+return "armed";
+'@
+$KitStateText = @'
+return UnityEditor.SessionState.GetString("AgentHarness.selftest.kit", "");
+'@
+# The kit in play mode: a click on the HUD's REVERSE button (a kit button, by name) reverses the spin and shows a toast;
+# one capture while it fades in, one while it fades out.
+$KitScenarioText = @'
+{
+    "name": "selftest-ui-kit",
+    "durationSec": 2.6,
+    "fixedDeltaTime": 0.0166667,
+    "events": [ { "t": 1.0, "type": "click", "target": "reverse" } ],
+    "captures": [
+        { "t": 1.15, "preset": "main", "name": "toast_in" },
+        { "t": 2.36, "preset": "main", "name": "toast_out" }
+    ]
+}
+'@
 $ClipsScenarioText = @'
 {
     "name": "selftest-clips",
@@ -1145,6 +1240,33 @@ function Invoke-Item1 {
     Test-Check 'clips (play): Play("Hold", 0.4) cross-fades (x halfway between 1 and 3) and ends on Hold (x = 3)' ($j -and [double]$j.fadeX -gt 1.2 -and [double]$j.fadeX -lt 2.8 -and [math]::Abs([double]$j.holdX - 3) -lt 1e-3 -and $j.holdCurrent -eq 'Hold') "$(if ($j) { "fade=$($j.fadeX) hold=$($j.holdX) current=$($j.holdCurrent)" })"
     Test-Check 'play: the embers in the air, the halo playing HaloOrbit, its event in the default loops (ClipEvent:HaloHalfTurn)' ($j -and [int]$j.embers -gt 0 -and "$($j.halo)" -like 'HaloOrbit@*' -and "$($evs[0])" -like '*ClipEvent:HaloHalfTurn=1*') "$(if ($j) { "embers=$($j.embers) halo=$($j.halo)" }) events=$($evs[0])"
     $state.item['content'] = [ordered]@{ particles = $k.particles; embers = $(if ($j) { $j.embers }); fade = $(if ($j) { $j.fadeX }); halo = $(if ($j) { $j.halo }) }
+
+    # UI kit (G1-4) and the UI clock: the default loops told UI Toolkit time by frames; the kit on the built HUD in edit mode;
+    # in play mode a toast captured mid-fade is the same pixel for pixel in two runs (USS transitions follow the frames).
+    $clocks = @($runs | ForEach-Object { if ($_.play.uiClock) { "$($_.play.uiClock.mode)/$($_.play.uiClock.panels)$(if ($_.play.uiClock.error) { " $($_.play.uiClock.error)" })" } else { 'none' } })
+    Test-Check 'UI clock: the loops'' UI Toolkit panels told time by frames (play.uiClock)' (@($clocks | Where-Object { $_ -notlike 'frames/*' -or $_ -like 'frames/0*' }).Count -eq 0) ($clocks -join ', ')
+    $kc = (Join-Path $outAbs 'kit-check.cs').Replace('\', '/')
+    Write-TextFile $kc $KitCheckText
+    $k = Invoke-Eval $kc
+    Test-Check 'UI kit: Gauge, ToastStack and a kit button from UXML' ($k.controls -eq 'gauge=True toasts=True button=True' -and -not $k.error) "$($k.controls) $($k.error)"
+    Test-Check 'UI kit: theme variables resolved (panel = --ah-bg, gauge fill = --ah-accent); a toast has the kit classes' ($k.panelBg -eq '6,9,20,0.62' -and $k.fillColor -eq '40,220,255' -and "$($k.toast)" -like '*ah-toast,ah-toast--good inStack=True') "bg=$($k.panelBg) fill=$($k.fillColor) toast=$($k.toast)"
+    $kitScenario = (Join-Path $outAbs 'ui-kit.json').Replace('\', '/')
+    Write-TextFile $kitScenario $KitScenarioText
+    $kitGold = Join-Path $outAbs 'golden-ui-kit'
+    if (Test-Path -LiteralPath $kitGold) { Remove-Item -LiteralPath $kitGold -Recurse -Force }
+    $kitArm = (Join-Path $outAbs 'kit-arm.cs').Replace('\', '/')
+    $kitState = (Join-Path $outAbs 'kit-state.cs').Replace('\', '/')
+    Write-TextFile $kitArm $KitArmText
+    Write-TextFile $kitState $KitStateText
+    $ka = Invoke-Tool $root 'loop.ps1' '1-ui-kit-1' @('-Scenario', $kitScenario, '-Golden', $kitGold, '-UpdateGolden')
+    [void](Invoke-Eval $kitArm)
+    $kb = Invoke-Tool $root 'loop.ps1' '1-ui-kit-2' @('-Scenario', $kitScenario, '-Golden', $kitGold)
+    $kd = $null; try { $kd = (Invoke-Eval $kitState) | ConvertFrom-Json } catch { }
+    Test-Check 'UI kit (play): data binding - the laps and spin labels and the gauge show the module''s data object' ($kd -and $kd.source -eq 'SmokeHudData' -and "$($kd.lapsText)" -eq "$($kd.laps)" -and $kd.dirText -eq $kd.spin -and $kd.spin -eq 'CCW' -and [math]::Abs([double]$kd.gauge - [double]$kd.progress) -lt 0.05) "$(if ($kd) { $kd | ConvertTo-Json -Compress })"
+    $kbClick = @($kb.play.clicks)
+    Test-Check 'UI kit (play): loops green; the REVERSE button clicked by name (uitk) reverses the spin' ([bool]$ka.ok -and [bool]$kb.ok -and $kbClick.Count -eq 1 -and $kbClick[0].via -eq 'uitk' -and (Get-EventCount $kb 'SpinDirectionChanged') -eq 1) "$(Get-Summary $ka) | $(Get-Summary $kb) clicks=$(@($kbClick | ForEach-Object { "$($_.target) $($_.via)" }) -join ',')"
+    Test-Check 'UI clock (play): the toast captured fading in and out is the same pixel for pixel in both runs' ((@(Get-Golden $kb) -join ',') -eq 'toast_in:same,toast_out:same' -and $kb.play.uiClock.mode -eq 'frames') "$((Get-Golden $kb) -join ',') uiClock=$($kb.play.uiClock.mode)/$($kb.play.uiClock.panels) $(Get-GoldenDetail $kb)"
+    $state.item['uiKit'] = [ordered]@{ clocks = $clocks; bound = $(if ($kd) { "laps=$($kd.lapsText) spin=$($kd.dirText) gauge=$($kd.gauge)" }); scope = $kb.play.uiClock.scope; shots = @($kb.shots) }
 
     $cc = Invoke-HarnessProcess $ps @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'tools/compile-check.ps1'), '-IncludeHarness') -Environment $childEnv -TimeoutSec 300
     $j = $null; try { $j = $cc.out | ConvertFrom-Json } catch { }
