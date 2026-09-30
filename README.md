@@ -23,7 +23,7 @@ URP 후처리 + 회전 오브젝트 + 코드로 만든 파티클·애니메이�
 
 | Three.js 환경의 성질 | 이 하네스의 복원 방법 |
 |---|---|
-| 1. 모든 게 텍스트 | 씬은 `IBuildStep` 빌더 코드가 생성(YAML 직접 수정 금지), URP·Renderer 에셋과 품질 레벨별 파이프라인은 `ISettingsStep` 코드가 생성. HLSL `.shader`, UI Toolkit UXML/USS(+ UI 킷: 디자인 변수·판·버튼·게이지·토스트, UXML 데이터 바인딩), 머티리얼·Volume·라이팅·파티클·애니메이션 클립도 코드 |
+| 1. 모든 게 텍스트 | 씬은 `IBuildStep` 빌더 코드가 생성(YAML 직접 수정 금지), URP·Renderer 에셋은 `ISettingsStep` 코드가 생성하고 품질 레벨·레이어·색 공간·Time·Physics 같은 ProjectSettings 값도 같은 코드가 소유(Project Settings 창이나 YAML로 바꾸면 다음 루프가 되돌리며 보고). HLSL `.shader`, UI Toolkit UXML/USS(+ UI 킷: 디자인 변수·판·버튼·게이지·토스트, UXML 데이터 바인딩), 머티리얼·Volume·라이팅·파티클·애니메이션 클립도 코드 |
 | 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 메서드 본문만 고쳤으면 컴파일 없이 바꿔 넣는 핫 루프(`loop.ps1 -Hot`), 모달 대화상자에 멈추지 않는 `-automated` 에디터와 창 없는 에디터(`open.ps1 -Headless`, 한 바퀴 ~2.4 s) |
 | 3. 눈으로 검증 | 캡처 PNG(화면의 카메라 스택·미니맵 + 스크린 공간 UI, 파이프라인의 HDR 그대로) + 이미지 통계, 연속 캡처 시트, 기준 이미지와의 diff 점수·바뀐 곳 PNG(시나리오 동안 UI Toolkit transition도 프레임 시계라 UI가 움직이는 중에도 픽셀까지 같음), 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로. 같은 시나리오를 개발 빌드 플레이어에서 돌려(`player.ps1`) 에디터 없는 프레임 시간과 게임이 그린 실제 화면을 에디터 샷과 비교 |
 | 4. 에셋 없이 완성도 | 절차적 메시(SDF → 서피스 네트, 스플라인 튜브, 바위)·포아송 스캐터·노이즈, GPU 텍스처 베이크(`ctx.BakeTexture`: HLSL이 C# 노이즈와 같은 무늬, 입력이 같으면 건너뜀), URP 데칼·디테일 맵, 코드로 만든 URP 후처리, 라이팅 베이크 없는 스카이 반사·앰비언트, 키워드를 알아서 맞추는 `LitMaterial`, 설정 한 벌로 만드는 결정적 파티클(`ctx.Particles`), 키를 코드로 쓰는 애니메이션 클립을 Playables로 재생(`ctx.AnimationClip` + `ClipPlayer`, 틀린 경로·속성은 빌드 경고) |
@@ -62,6 +62,8 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 | 모듈 C# 1줄 수정 | ~9.5 s (Unity 컴파일 ~0.4 s + 도메인 리로드 ~2.7 s + 리로드 뒤 에디터 자체 작업 ~0.9 s 포함) | ~7.0 s (리로드 ~2.1 s, 리로드 뒤 작업 없음) |
 | 같은 수정이 `[CodeReload] Tick` 본문 안이면 `loop.ps1 -Hot` | **~3.3 s** | **~2.1 s** |
 | C# 컴파일 에러 보고 | ~1.1 s | — |
+
+C# 수정 행은 W7 측정값입니다. 2026-09-30 이 머신에서는 도메인 리로드 뒤 Pipeline의 새 토큰이 ~14 s 늦게 보여 같은 루프가 ~24 s인 경우가 있었습니다(하네스 코드와 무관, ROADMAP O-12).
 
 창 없는 에디터는 GPU로 렌더하고 캡처·기준 이미지·이벤트가 창 에디터와 같습니다(디더링 한 단계 차이, 허용치 안). Game 뷰가 없어서 플레이 동안
 아무것도 그리지 않으니 빠르고, 대신 `"screen"` 캡처와 batches 같은 렌더 통계가 없습니다.
@@ -129,6 +131,7 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
   `CLAUDE.md`/`AGENTS.md`가 없을 때만 `CLAUDE.md`)뿐입니다. `Assets/`와 `ProjectSettings/*.asset`은 건드리지 않고, 어떤 파일도 지우지 않습니다.
   Unity가 새 의존성을 풀면서 `Packages/packages-lock.json`을 갱신합니다(uninstall이 설치 전 내용으로 되돌림).
 - **프로젝트 설정은 그대로**: `harness_setup`은 권장 사항(예: Domain Reload 끄기)만 보여 주고, `{"apply":"domainReload"}`처럼 명시할 때만 바꿉니다.
+  설정을 코드로 소유하는 설정 스텝(`ISettingsStep`)도 하네스 프로젝트(`"setup": "harness"`)에서만 돕니다.
   Domain Reload가 켜진 프로젝트에서도 루프가 돌고, 늘어난 시간은 `timings.playEnterSec`으로 보입니다(핫 루프 `-Hot`만은 Domain Reload를 꺼야 합니다).
 - **출시 빌드에는 하네스가 없습니다**: 하네스 런타임은 `UNITY_EDITOR || DEVELOPMENT_BUILD`에서만 컴파일되고, 하네스 때문에 들어온
   `com.unity.pipeline`의 런타임 DLL·Newtonsoft.Json(·설치가 추가한 Input System)은 출시 빌드에서 빠집니다. 개발 빌드에는 들어갑니다(`player.ps1`이 그
@@ -184,7 +187,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1               # 끝낼 �
 들어가는데, `open.ps1`과 루프가 그 에러(file·line)를 로그에서 읽어 보고합니다(창 없는 에디터는 마지막으로 성공한 어셈블리로 떠서 루프가 에러를 보고).
 
 위 과정 전체(클론 → 열기 → 설정 → 루프 3회 → 종료 → 삭제)를 `tools/fresh-clone-test.ps1` 하나로 검증할 수 있습니다(이 머신에서 ~110 s).
-하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·동시 루프·worktree 전용 에디터·worktree submit/land·계약 규칙)는 `tools/selftest.ps1`이 한 번에 돌리고(~9분),
+하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·동시 루프·worktree 전용 에디터·worktree submit/land·계약 규칙·프로젝트 설정 드리프트)는 `tools/selftest.ps1`이 한 번에 돌리고(~9–12분),
 `fresh-clone-test.ps1 -UnityVersion <버전> -SelfTest`는 그것을 다른 Unity 버전의 새 클론에서 돌립니다.
 
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)
@@ -211,7 +214,7 @@ git worktree add ..\wt-foo -b agent/foo          # 에디터가 연 체크아웃
 cd ..\wt-foo\AgentHarness                       # 이후 편집·명령은 모두 여기서. Assets/Game/Foo/ 만 고친다
 powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Foo   # 에디터 없이 ~0.5 s, 동시 실행 OK
 powershell -ExecutionPolicy Bypass -File tools/submit.ps1 -Module Foo         # 에디터 트리에서 루프 (트랜잭션)
-git add -A; git commit -m "Foo: ..."            # submit이 되복사한 .meta까지 커밋
+git add -A; git commit -m "Foo: ..."            # submit이 되복사한 .meta·ProjectSettings까지 커밋
 powershell -ExecutionPolicy Bypass -File tools/land.ps1                       # 이 브랜치를 에디터 트리 브랜치에 병합 (트랜잭션)
 ```
 
@@ -228,7 +231,7 @@ powershell -ExecutionPolicy Bypass -File tools/land.ps1                       # 
 | ① 사전 검사 | worktree, 락 없음 | worktree 소스를 에디터가 쓰는 컴파일러 설정(`Library/Bee/*.rsp`)과 DLL로 컴파일한다. 참조하는 `Game.Contracts`도 같이 컴파일해 연결하고, 계약이 바뀌었으면 그 계약을 쓰는 다른 모듈도 컴파일한다(새 이벤트 이름이 남의 코드를 모호하게 만드는 것까지). 에디터가 아직 모르는 새 모듈은 응답 파일을 합성한다 | `stage=compile`, 에디터 트리는 손대지 않음 (~1–1.4 s) |
 | ② 동기화 | 에디터 락 안 | 계약 검사 뒤 덮어쓰거나 지울 파일을 백업하고 저널(`Library/Harness/submit/pending.json`)을 쓴 뒤, `Assets/Game/<Module>/`를 그대로 미러링하고 `Contracts/`는 이 worktree가 바꾼 파일만 넣는다 | 올라간 계약 타입을 바꿈 / 이미 있는 이벤트 이름 / 다른 worktree가 올리고 아직 병합 안 한 계약 파일 → `stage=submit`으로 거부 (~1 s) |
 | ③ 루프 | 에디터 트리 | `loop.ps1`과 같은 루프 (컴파일 → 씬 빌드 → 플레이 → 콘솔·통계) | — |
-| ④ 판정 | 에디터 락 안 | 녹색이면 유지하고, Unity가 새로 만든 `.meta`를 worktree로 되복사한다(GUID를 커밋하도록) | 백업을 복원하고 다시 컴파일 → 에디터 트리는 submit 전 상태 |
+| ④ 판정 | 에디터 락 안 | 녹색이면 유지하고, Unity가 새로 만든 `.meta`와 모듈의 설정 스텝이 바꾼 ProjectSettings 파일(새 레이어 등)을 worktree로 되복사한다(모듈 코드와 함께 커밋하도록) | 백업(루프가 바꾼 ProjectSettings 포함)을 복원하고 다시 컴파일 → 에디터 트리는 submit 전 상태 |
 
 - **어느 에디터에 붙는가**: `Library/`가 없는 체크아웃은 `git worktree list`의 메인 worktree에서 같은 하위 경로를 에디터 트리로 씁니다
   (복사본이면 `AGENTHARNESS_EDITOR_ROOT`). 락과 에디터 HTTP 연결은 항상 에디터 트리 기준이라, 어느 worktree에서 실행해도 같은 줄에 섭니다.
@@ -277,6 +280,8 @@ submit한 파일은 에디터 트리에 미커밋 사본으로 남아 있어서,
 | 계약에 `Light`를 추가(다른 모듈이 `UnityEngine.Light`를 씀) | 사전 검사가 그 모듈(Stage)까지 컴파일해 CS0104로 거부(1.3 s). 예전에는 녹색으로 통과해 에디터 트리 루프에서 남의 모듈 에러로 되돌려졌다 |
 | 기존 프로젝트(BagelGame)에서 Game 모듈의 공개 속성 이름을 바꿈 | 사전 검사가 그 속성을 쓰는 UI 모듈까지 컴파일해 `BagelTrackerDriver.cs:22` CS1061로 거부(0.7 s; 예전 검사는 녹색) |
 | 자기 모듈 파일에 새 이벤트를 덧붙여 submit → 커밋 → land | 녹색(병합 커밋), 계약 파일 소유 해제, 에디터 트리 깨끗 |
+| 새 모듈의 설정 스텝이 레이어를 선언해 submit → 커밋 → land | submit이 에디터 트리에서 바뀐 `TagManager.asset`을 worktree로 되복사, 모듈과 함께 land돼 에디터 트리 깨끗 |
+| 설정 스텝(레이어)을 더한 코드에 런타임 에러 → submit | 되돌리면서 루프가 바꾼 `TagManager.asset`도 복원, 에디터에서도 그 레이어가 사라짐 |
 
 ### 루프를 나란히: worktree 전용 에디터 (`open.ps1 -Own`)
 
@@ -301,6 +306,8 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1         # worktree를 �
 - worktree 전용 에디터는 worktree마다 하나라 에이전트 수만큼 메모리·디스크가 듭니다(에디터 몇 개를 나눠 쓰는 풀은 없음).
 - 계약 규칙의 "발행 모듈"은 모듈 루트(`Assets/Game/<Module>`)의 asmdef 모듈만 봅니다(기존 프로젝트의 `modules[]` 폴더가 발행하는 이벤트는 파일 규칙에서 빠짐).
 - land는 git 병합이라 브랜치의 중간 커밋(깨진 커밋 포함)도 이력에 그대로 들어갑니다. 최종 결과만 루프로 검증합니다.
+- ProjectSettings는 파일 하나를 여러 모듈의 설정 스텝이 같이 씁니다. 두 worktree의 미병합 모듈이 같은 파일(예: 둘 다 레이어 추가)을 바꾸면 두 번째 submit은
+  되복사하지 않고(`settingsNotWrittenBack`) 알립니다 — `git merge master` 뒤 다시 submit하거나 `open.ps1 -Own` 에디터의 루프가 쓴 파일을 커밋합니다(ROADMAP G5-6).
 
 ## 구조
 
@@ -314,20 +321,20 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
                                            Procedural/(MeshBuilder · Noise · Sdf · Spline · Scatter · TextureBaker)
     Editor/                                harness_* 에디터 커맨드(핫 루프 harness_hot, 플레이어 빌드 계획·이미지 비교, 계약 검사 harness_contracts 포함), lint, 에디터 모드(창 없는 에디터의 유휴 CPU 억제),
                                            BuildContext(머티리얼·파티클·애니메이션·GPU 베이크·데칼 헬퍼) / IBuildStep,
-                                           SettingsContext / ISettingsStep, 출시 빌드 필터
+                                           SettingsContext / ISettingsStep(렌더 파이프라인 + ProjectSettings 값), 출시 빌드 필터
     UI/ · Shaders/                         UI 킷 테마(HarnessKit.uss) · GPU 베이크 include(HarnessBake.hlsl, HarnessNoise.hlsl)
     Tools~/                                loop · player · submit · land · uc · compile-check · open · quit · install · uninstall · attach-test ·
                                            fresh-clone-test · selftest (.ps1) + templates/ (Unity는 ~ 폴더를 임포트하지 않는다)
   ProjectSettings/AgentHarness.json        하네스 설정: 모듈 폴더, 플레이할 씬, setup 모드
   golden/<Unity 버전>/<시나리오>/           기준 이미지 (루프 샷과 비교, loop.ps1 -UpdateGolden이 씀)
-  Assets/Game/<Module>/                    모듈 런타임 코드 (+ Shaders/, UI/), Builders/ 에 씬 빌드 스텝·렌더 설정 스텝
+  Assets/Game/<Module>/                    모듈 런타임 코드 (+ Shaders/, UI/), Builders/ 에 씬 빌드 스텝·설정 스텝(렌더 파이프라인·품질 레벨·레이어·Player·Time·Physics)
   tools/*.ps1                              패키지 Tools~의 같은 이름 스크립트를 부르는 얇은 진입점 (모두 같은 파일) · scenarios/*.json
 ```
 
 ## 에이전트와 함께 쓰기
 
 `AgentHarness/CLAUDE.md`에 루프 사용법, report.json 해석, 규칙(YAML 직접 수정 금지, 텍스트 우선 형태, 모듈 폴더 밖 수정 금지,
-에디터 조작은 순서대로), 모듈·빌더 템플릿(`[CodeReload] Tick` 포함 — 본문만 고치면 `loop.ps1 -Hot`), 머티리얼·파티클·애니메이션·UI 킷·GPU 베이크·절차적 메시 헬퍼, 개발 빌드 플레이어 실행(`player.ps1` — 실제 성능·실제 화면), 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
+에디터 조작은 순서대로), 모듈·빌더 템플릿(`[CodeReload] Tick` 포함 — 본문만 고치면 `loop.ps1 -Hot`), 렌더·프로젝트 설정 스텝, 머티리얼·파티클·애니메이션·UI 킷·GPU 베이크·절차적 메시 헬퍼, 개발 빌드 플레이어 실행(`player.ps1` — 실제 성능·실제 화면), 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
 병렬 에이전트는 위의 worktree + `submit.ps1` + `land.ps1` 흐름을 쓰고(G5-2, G5-5), 루프를 나란히 돌리려면 worktree마다 `open.ps1 -Own`(G5-1)입니다.
 모듈 사이의 공유 이벤트는 모듈별 `<모듈>Events.cs`에 덧붙이기만 합니다(G5-4 — 이름·타입·소유를 submit/land가 지킴).
 

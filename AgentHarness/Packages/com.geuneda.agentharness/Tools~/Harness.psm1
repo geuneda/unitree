@@ -450,11 +450,15 @@ function Add-HarnessRecovery([System.Collections.IDictionary]$Report) {
 
 # Writes: @{ rel = 'Assets/Game/Foo/X.cs'; src = <absolute source file> }. Deletes: project-relative files.
 # CreatedDirs: project-relative folders that do not exist yet (removed with their Unity .meta on revert).
+# -Guard: files the submit does not write but its loop may (ProjectSettings the settings steps own, G1-5): backed up too,
+# so a reverted or interrupted submit puts them back.
 function Start-HarnessSubmit {
-    param([string]$RunId, [string]$WorkRoot, [string[]]$Modules, [object[]]$Writes = @(), [string[]]$Deletes = @(), [string[]]$CreatedDirs = @())
+    param([string]$RunId, [string]$WorkRoot, [string[]]$Modules, [object[]]$Writes = @(), [string[]]$Deletes = @(), [string[]]$CreatedDirs = @(), [string[]]$Guard = @())
     $backup = Join-Path $script:SubmitDir $RunId
     $entries = @()
-    foreach ($rel in @(@($Writes | ForEach-Object { $_.rel }) + @($Deletes))) {
+    $paths = @(@($Writes | ForEach-Object { $_.rel }) + @($Deletes))
+    $guarded = @($Guard | Where-Object { $paths -notcontains $_ })
+    foreach ($rel in @($paths + $guarded)) {
         $abs = [IO.Path]::Combine($script:ProjectRoot, $rel)
         $existed = [IO.File]::Exists($abs)
         if ($existed) {
@@ -462,7 +466,7 @@ function Start-HarnessSubmit {
             [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($b))
             [IO.File]::Copy($abs, $b, $true)
         }
-        $entries += [ordered]@{ path = $rel; existed = $existed }
+        $entries += [ordered]@{ path = $rel; existed = $existed; guard = $guarded -contains $rel }
     }
     $journal = [ordered]@{ runId = $RunId; workRoot = $WorkRoot; modules = @($Modules); pid = $PID; startedAt = (Get-Date).ToString('o')
         backup = $backup; entries = $entries; createdDirs = @($CreatedDirs) }
@@ -480,15 +484,22 @@ function Complete-HarnessSubmit {
     if (Test-Path -LiteralPath $Journal.backup) { Remove-Item -LiteralPath $Journal.backup -Recurse -Force }
 }
 
+# A journal entry of a -Guard file (in memory an ordered dictionary, read back from the journal file an object).
+function Test-HarnessGuardEntry($Entry) {
+    if ($Entry -is [System.Collections.IDictionary]) { return [bool]$Entry['guard'] }
+    ($Entry.PSObject.Properties.Name -contains 'guard') -and [bool]$Entry.guard
+}
+
 # Put every journaled file back as it was before the submit. Files the submit created are deleted together with the
-# .meta Unity generated for them; restored files get a fresh timestamp so the next refresh re-imports them.
+# .meta Unity generated for them; restored files get a fresh timestamp so the next refresh re-imports them. A guarded file
+# (-Guard) is only written when its content changed (a ProjectSettings file Unity sees change is loaded again).
 function Undo-HarnessSubmit {
     param([Parameter(Mandatory)]$Journal)
     $root = $script:ProjectRoot
     $restored = @{}
     foreach ($e in @($Journal.entries)) { if ($e.existed) { $restored[$e.path] = $true } }
     foreach ($e in @($Journal.entries)) {
-        if ($e.existed) { continue }
+        if ($e.existed -or (Test-HarnessGuardEntry $e)) { continue }
         foreach ($p in @($e.path, "$($e.path).meta")) {
             if ($restored.ContainsKey($p)) { continue }
             $abs = [IO.Path]::Combine($root, $p)
@@ -498,8 +509,11 @@ function Undo-HarnessSubmit {
     foreach ($e in @($Journal.entries)) {
         if (-not $e.existed) { continue }
         $abs = [IO.Path]::Combine($root, $e.path)
+        $b = [IO.Path]::Combine($Journal.backup, $e.path)
+        if ((Test-HarnessGuardEntry $e) -and [IO.File]::Exists($abs) -and
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($abs)) -eq [Convert]::ToBase64String([IO.File]::ReadAllBytes($b))) { continue }
         [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($abs))
-        [IO.File]::Copy([IO.Path]::Combine($Journal.backup, $e.path), $abs, $true)
+        [IO.File]::Copy($b, $abs, $true)
         [IO.File]::SetLastWriteTimeUtc($abs, [DateTime]::UtcNow)
     }
     foreach ($d in @(@($Journal.createdDirs) | Where-Object { $_ } | Sort-Object Length -Descending)) {

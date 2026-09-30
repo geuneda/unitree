@@ -36,9 +36,15 @@ namespace Game.Stage.Builders
                 ctx.SaveMesh(Rocks(seed, terrainSeed).ToMesh("Rocks"), "Rocks");
                 ctx.SaveMesh(Arch().ToMesh("Arch"), "Arch");
             }
-            ctx.MeshObject("Props/StandingStones", ctx.LoadAsset<Mesh>("StandingStones.asset"), stoneMat).isStatic = true;
-            ctx.MeshObject("Props/Rocks", ctx.LoadAsset<Mesh>("Rocks.asset"), rockMat).isStatic = true;
-            ctx.MeshObject("Props/Arch", ctx.LoadAsset<Mesh>("Arch.asset"), stoneMat).isStatic = true;
+            void Prop(string path, string mesh, Material mat)
+            {
+                var go = ctx.MeshObject(path, ctx.LoadAsset<Mesh>(mesh), mat);
+                go.layer = StageProjectSettingsStep.Props;
+                go.isStatic = true;
+            }
+            Prop("Props/StandingStones", "StandingStones.asset", stoneMat);
+            Prop("Props/Rocks", "Rocks.asset", rockMat);
+            Prop("Props/Arch", "Arch.asset", stoneMat);
 
             // Rune circle around the pedestal, projected down onto the plateau.
             var decal = ctx.Decal("Props/RuneCircle", ctx.DecalMaterial("Runes", runeTex), new Vector3(8f, 8f, 3f));

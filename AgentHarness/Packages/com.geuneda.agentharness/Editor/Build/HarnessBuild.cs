@@ -261,14 +261,16 @@ namespace Harness.Editor
         };
 
         /// <summary>
-        /// What the settings steps produced: their assets, what this run wrote or reassigned, and the active pipeline. When the
-        /// active pipeline changed, a domain reload was requested: wait until domainReloads passes the reported value.
+        /// What the settings steps produced: their assets, what this run wrote or reassigned, the active pipeline, and the
+        /// ProjectSettings values they own (project: how many, what this run changed, which of those were changed outside the code).
+        /// When the active pipeline changed, a domain reload was requested: wait until domainReloads passes the reported value.
         /// </summary>
         internal static object SettingsSummary(SettingsContext.RunResult r) => new
         {
             assets = r.ctx.Assets,
             written = r.ctx.Written,
             assigned = r.ctx.Assigned,
+            project = new { owned = r.ctx.ProjectOwned, changed = r.ctx.ProjectChanged, drift = r.ctx.ProjectDrift },
             pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline == null ? "none (Built-in)" : AssetDatabase.GetAssetPath(UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline),
             switched = r.switched,
             reloadRequested = r.switched != null,

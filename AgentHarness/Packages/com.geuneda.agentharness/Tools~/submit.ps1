@@ -12,8 +12,10 @@
      this worktree's own un-landed contracts may change or go). Every file it overwrites or deletes is backed up first,
      under a journal (Library/Harness/submit/pending.json).
   3. The normal loop (recompile, build, play, console) on the Editor tree.
-  4. Green -> keep, and copy the .meta files Unity generated back into the worktree (commit them).
-     Otherwise -> restore the backup and recompile, so the Editor tree is back where it was. -KeepOnFail keeps the
+  4. Green -> keep, and copy the .meta files Unity generated back into the worktree (commit them), and the ProjectSettings
+     files the loop's settings steps changed (G1-5: submit.settingsWrittenBack; only when both copies were the landed one
+     before - otherwise submit.settingsNotWrittenBack and settingsNote).
+     Otherwise -> restore the backup (ProjectSettings included) and recompile, so the Editor tree is back where it was. -KeepOnFail keeps the
      files for non-compile failures; a compile failure is always reverted. If the submit dies half-way, the next lock
      holder (loop.ps1 / uc.ps1 / submit.ps1) rolls it back from the journal.
   So one agent's broken code never stays in the Editor tree and never blocks another agent's loop.
@@ -311,8 +313,12 @@ try {
         $sub.contractsAdded = @()
         $report = New-FailReport 'submit' $refusal
     } else {
+        # ProjectSettings the settings steps may write during the loop (G1-5, harness projects): backed up with the submit (a
+        # reverted or interrupted one puts them back) and, when kept, written back to the worktree like the .meta files.
+        $guard = if ($cfg.setup -eq 'harness') { @(Get-RelFiles $root 'ProjectSettings' | Where-Object { $_.EndsWith('.asset') }) } else { @() }
+        $guardIds = Get-HarnessContentIds $root $guard
         if ($writes.Count + $deletes.Count -gt 0) {
-            $journal = Start-HarnessSubmit -RunId $runId -WorkRoot $work -Modules $Module -Writes $writes.ToArray() -Deletes @($deletes) -CreatedDirs @($created)
+            $journal = Start-HarnessSubmit -RunId $runId -WorkRoot $work -Modules $Module -Writes $writes.ToArray() -Deletes @($deletes) -CreatedDirs @($created) -Guard $guard
             foreach ($w in $writes) {
                 $dst = [IO.Path]::Combine($root, $w.rel)
                 [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($dst))
@@ -374,6 +380,22 @@ try {
                 }
             }
             $sub.metaWrittenBack = $back
+            # ProjectSettings the loop changed (a settings step of these modules owns a new value): into the worktree, to commit with
+            # the code - only when the Editor tree's copy was the landed one before the loop and the worktree's is too, i.e. the change
+            # is this submit's alone (not another worktree's un-landed settings, not landed ones this worktree lacks).
+            $after = Get-HarnessContentIds $root $guard
+            $changed = @($guard | Where-Object { $after[$_] -ne $guardIds[$_] })
+            if ($changed.Count -gt 0) {
+                $landedIds = Get-HarnessTreeFiles $root 'HEAD' 'ProjectSettings'
+                $workIds = Get-HarnessContentIds $work $changed
+                $sub['settingsWrittenBack'] = @($changed | Where-Object { $guardIds[$_] -eq $landedIds[$_] -and $workIds[$_] -eq $landedIds[$_] })
+                foreach ($f in $sub.settingsWrittenBack) { [IO.File]::Copy([IO.Path]::Combine($root, $f), [IO.Path]::Combine($work, $f), $true) }
+                $notBack = @($changed | Where-Object { $sub.settingsWrittenBack -notcontains $_ })
+                if ($notBack.Count -gt 0) {
+                    $sub['settingsNotWrittenBack'] = $notBack
+                    $sub['settingsNote'] = "the settings steps changed $($notBack -join ', ') in the Editor tree, which (or the worktree's copy) already differed from the landed one: not copied back (it would carry other un-landed or landed-since settings). Merge the Editor tree's branch into the worktree, or open an Editor of its own (open.ps1 -Own) and commit what its loop writes"
+                }
+            }
         } else {
             $sw = [Diagnostics.Stopwatch]::StartNew()
             Undo-HarnessSubmit $journal

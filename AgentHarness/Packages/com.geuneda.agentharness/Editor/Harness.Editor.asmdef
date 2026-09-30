@@ -43,6 +43,11 @@
             "name": "com.unity.modules.particlesystem",
             "expression": "0.0.0",
             "define": "AGENTHARNESS_PARTICLES"
+        },
+        {
+            "name": "com.unity.modules.physics",
+            "expression": "0.0.0",
+            "define": "AGENTHARNESS_PHYSICS"
         }
     ],
     "noEngineReferences": false

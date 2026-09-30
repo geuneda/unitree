@@ -17,7 +17,7 @@
 - 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태·워크플로우 절 갱신 → 새로 드러난 항목 추가 →
   **저장소 루트 `README.md`와 `AgentHarness/CLAUDE.md`(필요하면 `Tools~/templates/AgentHarness.md`)에 바뀐 기능·측정값 반영** → 커밋(메시지에 항목 ID).
   README·ROADMAP 갱신은 워크플로우마다 빠뜨리지 않는다(W2 커밋은 README를 건드리지 않았고, W4 뒤에도 README "요구 사항"에 6.6의 옛 상태가 남아 있었다).
-- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. 남은 W10–W12는 선행이 모두 끝나 순서를 바꿔도 된다.
+- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. 남은 W11–W12는 선행이 모두 끝나 순서를 바꿔도 된다.
 - 크기: S = 파일 1–2개 · M = 여러 파일 또는 새 커맨드 · L = 조사가 필요하거나 새 하위 시스템.
 
 | 순서 | 워크플로우 | 항목 | 크기 | 선행 | 상태 |
@@ -31,10 +31,10 @@
 | W7 | 에디터 밖·여러 에디터 | G2-2, G2-4, G1-2, G5-1 | L | — | 완료 (2026-09-30; G2-4는 Unity 쪽 리로드만 남음) |
 | W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 (+G3-12, G3-13) | L | W1 | 완료 (2026-09-30; G3-8은 사내 프로젝트 A 확인만 남음 — Android 타깃) |
 | W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 완료 (2026-09-30) |
-| W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 대기 |
+| W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 완료 (2026-09-30; 여러 worktree가 같은 ProjectSettings 파일을 바꾸는 경우는 G5-6) |
 | W11 | 백그라운드 에디터의 실제 입력 격리 | G3-9 | S | — | 대기 |
 | W12 | 핫 루프 넓히기 | G2-5 | M | W5 | 대기 |
-| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, P-4·G2-5 신고 | S | 새 버전이 나올 때 | — |
+| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, P-4·G2-5 신고 | S | 새 버전이 나올 때 | — |
 | 마지막 | macOS | P-3 | L | 실제 Mac | 대기 |
 
 ### W1 시나리오 입력 격리 (G3-6) — 완료 (2026-09-29, 아래 "해결됨")
@@ -132,11 +132,15 @@
 - 매트릭스 5(lint 규칙 4종), 7(같은 이름·남의 미병합 계약·올라간 타입 변경 거부, 역의존 게이트, 자기 계약 수정), 8(land 쪽 같은 이름·타입 변경 거부, 덧붙인
   이벤트의 submit → land → 소유 해제).
 
-### W10 렌더 밖의 프로젝트 설정도 코드로 (G1-5)
-- W4의 `ISettingsStep`/`SettingsContext`를 넓힌다: 품질 레벨 목록과 레벨별 값, Player Settings(색 공간·방향), Physics·Time, Tags/Layers.
-- 고치는 곳: `Editor/Build/SettingsContext.cs`(헬퍼), `Editor/HarnessSetup.cs`(harness 프로젝트에서 매번 적용·드리프트 보고), 샘플 `Assets/Game/Stage/Builders/`.
-- 주의: ProjectSettings는 생성물로 둘 수 없다(에디터 시작에 필요). attach 프로젝트는 W4처럼 건드리지 않는다.
-- 추가 검증: ProjectSettings YAML을 손으로 바꾼 뒤 루프 → 코드 값으로 돌아오고 보고됨. 새 클론 `git status` 깨끗(매트릭스 9).
+### W10 렌더 밖의 프로젝트 설정도 코드로 (G1-5) — 완료 (2026-09-30, 아래 "해결됨")
+- 결과: `SettingsContext`에 `QualityLevels`(레벨 목록·레벨별 값·플랫폼별 기본 레벨, 에디터가 쓰는 레벨 = 활성 플랫폼의 기본), `Player`, `Time`, `Physics`(충돌 매트릭스
+  포함), `Layer`, `Tag`, `ProjectSetting`(그 밖의 파일·경로). ProjectSettings는 생성물로 둘 수 없어서 **코드가 이름 붙인 값만 소유**한다: 매 빌드에 다르면 쓰고
+  (`build.settings.project.changed`), 찾은 값이 마지막 빌드가 남긴 값(`Library/Harness/project-settings.json`)과도 다르면 코드 밖에서 바뀐 것 → `drift` + 경고.
+  레이어·태그·품질 레벨 목록은 선언한 것이 전부. 샘플: 품질 레벨 2개와 색 공간(렌더 스텝), 레이어 Ground·Props(지형·소품이 씀)·창 크기·Time·중력(새 `StageProjectSettingsStep`).
+- 하다가 찾은 것: 에디터에서 품질 레벨을 클릭하면 그 뒤 루프가 모두 그 레벨의 파이프라인으로 돌았다(보고 없이) → 이제 드리프트. 병렬 흐름의 구멍 — 모듈의 설정 스텝이
+  바꾼 ProjectSettings는 에디터 트리에만 생겨 커밋되지 않았고, 빨간 submit이 되돌려도 남았다 → submit이 ProjectSettings를 백업(되돌리면 복원)하고 녹색이면 `.meta`처럼
+  worktree로 되복사(`settingsWrittenBack`). 여러 worktree가 같은 파일을 바꾸는 경우는 G5-6으로 남겼다.
+- 매트릭스 1(설정 스텝이 소유한 값, 손으로 고친 YAML·창에서 바꾼 값의 되돌림과 드리프트 6건), 7(새 모듈 레이어의 되복사, 빨간 submit의 복원), 8(되복사한 TagManager의 land).
 
 ### W11 백그라운드 에디터의 실제 입력 격리 (G3-9)
 - 재현부터: 루프 도중 다른 창을 눌러 에디터 포커스를 뺏고(`fps.editorFocused=false`) 실제 키보드에 스페이스를 넣는 selftest 1번 절차를 돌린다. 이어서 플레이
@@ -149,11 +153,11 @@
 - 핫 루프 동안 `fps`가 인터프리터 비용을 포함한다 → 인터프리터로 돈 메서드와 호출 수를 report에 넣어 전체 루프와 비교할 수 있게 한다.
 - 추가 검증: selftest 3번에 "Tick이 새 헬퍼 메서드를 부름 → 핫" 단계.
 
-### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, P-4·G2-5 신고)
+### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, P-4·G2-5 신고)
 - 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존)과 G2-5의 인터프리터 2건(`try/catch` 미지원,
   교체 본문이 던진 예외를 줄 없이 로그하고 원래 본문으로 이어 돌림), Unity에 P-4의 원인
   (`Camera.RenderToCubemap(Cubemap)`: 6.6은 CPU 픽셀을 안 채우고 6.3은 sRGB로 인코딩 — 빈 씬 + 스카이박스 + half 큐브맵 한 개로 재현), O-6 Unity Search 예외,
-  O-11(batchmode의 첫 메시 그리기 — 빈 프로젝트 재현부터). O-10: Unity 6.7이 나오면 `EditorDialogEvents`로 자동으로 닫힌 대화상자를 report에 싣는다.
+  O-11(batchmode의 첫 메시 그리기 — 빈 프로젝트 재현부터), O-12(도메인 리로드 뒤 새 토큰이 디스크립터에 늦게 적힘 — 먼저 원인 조사). O-10: Unity 6.7이 나오면 `EditorDialogEvents`로 자동으로 닫힌 대화상자를 report에 싣는다.
   W8: Unity에 증분 플레이어 빌드가 앞선 빌드의 `ScriptingAssemblies.json`을 쓰는 것(출시 빌드 → 다른 폴더로 개발 빌드, define 제약으로 어셈블리 집합이
   달라짐; 6.0 Fluid-Sim에서 재현 — 고쳐지면 `player.ps1`의 `CleanBuildCache` 재빌드를 걷어낸다), 플레이어 첫 씬 파티클의 로드 시점 한 스텝(의도인지 문의).
 - 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
@@ -200,13 +204,8 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 
 - **G1-4 UI Toolkit 경로는 있지만 얇다** → 2026-09-30 해결(W6b, 아래 "해결됨").
 
-- [ ] **G1-5 렌더 파이프라인 밖의 프로젝트 설정은 여전히 YAML** (2026-09-30, W4에서 남은 것)
-  - 현상: W4로 URP·Renderer 에셋과 품질 레벨별 파이프라인 배정은 `ISettingsStep` 코드가 됐다. 품질 레벨 자체(목록·이름·레벨별 그림자·LOD·vSync),
-    Player Settings(색 공간·해상도·방향), Physics·Time·Tags/Layers, URP 전역 설정(`UniversalRenderPipelineGlobalSettings`)은 여전히 커밋된 YAML이고,
-    하네스가 코드로 만지는 것은 `harness_setup`의 몇 가지(Domain Reload, runInBackground, 동기 셰이더 컴파일)뿐이다.
-  - 방향: `SettingsContext`에 품질 레벨·Player·Physics·Tags/Layers 헬퍼(에디터 API, 없으면 `SettingsContext.Set`처럼 SerializedObject). ProjectSettings는
-    Unity가 시작할 때 필요해서 생성물로 둘 수 없으니 "코드가 매번 같은 값으로 쓴다 + 코드와 다르면 경고" 쪽이다.
-  - 완료 기준: 샘플의 품질 레벨·레이어·색 공간이 코드에만 있고, ProjectSettings YAML을 손으로 바꾸면 다음 루프가 코드 값으로 되돌리며 보고한다.
+- **G1-5 렌더 파이프라인 밖의 프로젝트 설정은 여전히 YAML** → 2026-09-30 해결(W10, 아래 "해결됨"): 설정 스텝이 품질 레벨·Player·Time·Physics·레이어·태그 값을
+  소유하고, 창·YAML로 바꾼 값을 다음 루프가 되돌리며 `drift`로 보고한다. 코드가 이름 붙이지 않은 값과 URP 전역 설정 에셋은 여전히 커밋된 YAML.
 
 ## 성질 2 — 루프가 초 단위
 
@@ -315,6 +314,15 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 - **G5-4 `Assets/Game/Contracts`가 공유 지점이다** → 2026-09-30 해결(W9, 아래 "해결됨"): 발행 모듈별 파일·이름 한 번(lint), 타입 단위 add-only·이름 충돌·미병합
   계약 파일의 소유(submit·land).
 
+- [ ] **G5-6 ProjectSettings 파일은 여러 모듈의 설정 스텝이 같이 쓴다** (2026-09-30, W10에서 드러남)
+  - 현상: 설정 스텝의 값은 모듈 코드에 있지만 그 값이 적히는 YAML(`TagManager.asset`, `QualitySettings.asset`, …)은 파일 하나다. submit은 에디터 트리 사본과 worktree
+    사본이 둘 다 올라간 내용일 때만 루프가 바꾼 파일을 되복사하므로, 두 worktree의 미병합 모듈이 같은 파일을 바꾸면(둘 다 레이어 추가) 두 번째는 되복사되지 않고
+    (`settingsNotWrittenBack`) 에디터 트리에 미커밋 변경이 남는다. 그 파일을 다르게 바꾼 브랜치의 land는 `foreign`으로 거부되고, 줄 단위 YAML 병합도 충돌하기 쉽다.
+    빨간 land의 되돌림은 루프가 쓴 ProjectSettings를 되돌리지 않는다(다음 루프가 그때 코드의 값으로 다시 쓰고, 선언이 사라진 레이어는 비운다).
+  - 방향: land가 "하네스가 쓴" ProjectSettings(마지막 빌드가 남긴 내용과 같은 파일)를 다시 만들 수 있는 산출물로 보고 병합 뒤 루프의 결과로 맞추기, 또는 submit이
+    남의 미병합 설정이 섞인 파일 대신 이 worktree의 코드만으로 만든 파일을 되복사(worktree 전용 에디터 `-Own`이 있으면 그 루프가 쓴 것 — 지금은 안내만).
+  - 완료 기준: 두 worktree가 각자 레이어를 더한 모듈을 submit → 커밋 → land(순서 무관) → 에디터 트리 깨끗, 두 레이어 모두 커밋됨.
+
 ## 이식성 — `npm install three`처럼 어디에나 붙는다
 
 Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고, 버전 범위(semver)로 의존하며, OS를 가리지 않는다.
@@ -403,11 +411,20 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
     그리기다. 두 번째 그리기는 같은 프레임 안에서도 정상, 하늘만 보는 렌더로 미리 그려도 소용없음, `-force-gfx-mt`로도 같음(6.3 확인).
   - 지금: `HarnessCapture.Render`가 batchmode면 카메라들을 한 번 버리고 다시 그린다 → 매트릭스 6이 창 없는 에디터의 첫 샷들을 기준 이미지와 비교한다.
   - 할 일(상시): 빈 프로젝트로 재현해 Unity에 신고하고, 고쳐진 버전에서 두 번 그리기를 걷어낸다.
+- [ ] **O-12 도메인 리로드 뒤 Pipeline의 새 토큰이 ~14 s 늦게 보일 때가 있다** (2026-09-30, W10 측정 중에 드러남)
+  - 현상: 전체 루프(빌드·플레이) 사이에 모듈 C# 1줄을 고친 루프가 `compileSec` 18.6–19.6 s다(W7 기준선 ~4.7 s). Tundra 0.35 s·도메인 리로드 ~2.8 s는 그대로이고,
+    리로드 뒤 ~14–17 s 동안 모든 요청이 401("Editor token rotated by a domain reload")이다 — 디스크립터(`Library/Pipeline/.unity-pipeline-port`)의 토큰이 새 서버의
+    토큰보다 늦게 바뀐다(`WriteToProjectRoot failed` 로그는 없음). `/api/status`도 인증이 필요해서 그것으로 디스크립터를 다시 쓰게 할 수 없다.
+  - W10 탓이 아니다(같은 에디터에서 A/B): W9 코드(`cc2eeee`로 되돌림)의 전체 루프 사이 C# 수정 6/6회 18.8–19.6 s, W10 코드 6회 중 2회 18.6–19.0·2회 10.2·2회 5.0 s.
+    플레이 없이 `recompile`만 반복하면 W9·W10 코드 모두 12/12회 4.0–4.8 s. 그래서 selftest가 W9 때보다 길다(에디터 트리 520 → 743 s, 새 클론 6.6의 3번 78 → 148 s,
+    모든 버전에서). 새로 연 에디터에서도 재현됐고 W9 측정 때는 없었다 — 이 머신의 상태(다른 앱의 부하 등)와 어떻게 맞물리는지는 모른다.
+  - 할 일: Pipeline의 토큰(`SecurityTokenManager.GetOrCreateToken`)과 디스크립터 쓰기(`CreateInstanceDescriptor`, 요청마다의 `UpdateHeartBeat`) 시점을 조사해 신고.
+    하네스 쪽 우회는 토큰 없이 디스크립터를 다시 쓰게 하는 경로가 있어야 한다(없으면 신고만). 기준선의 "C# 1줄" 행은 이 현상이 없을 때의 값이다.
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
-**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~9분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
-(새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~9분), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
+**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~9분, O-12가 겹치면 ~12분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
+(새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~9분, O-12가 겹치면 ~13–15분), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
 
 1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark·magenta 샷 없음, 모든 샷 1280x720에
@@ -422,7 +439,9 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    + 실제 입력 격리(G3-6): 플레이 동안 실제 키보드 장치에 스페이스를 넣어도 `play.events` 그대로·`isolatedDevices` 누름 > 0, 실패한 플레이·중간에
    멈춘 플레이 뒤에도 실제 장치가 다시 켜짐)
    + 렌더 설정(W4): RP·Renderer 에셋이 생성물이고 루프 2·3은 다시 쓰지 않음, 지우면(그동안 Built-in) 루프 한 번으로 다시 생기고 fingerprint·픽셀·
-   `git status`가 같음(G1-1); 반사 큐브맵에 잘못된 텍셀이 없고 가장 밝은 텍셀이 태양 방향 2° 안(P-4); 앰비언트 = 생성된 라이팅 데이터의 큐브맵 SH,
+   `git status`가 같음(G1-1); 프로젝트 설정(G1-5): 설정 스텝이 소유한 값을 루프 2·3은 쓰지 않음, YAML을 손으로 고치고(Mobile 레벨 이름, PC `lodBias`, 레이어 9 이름·레이어 10
+   추가) 메모리에서 바꾼 값(PC vSync, 에디터의 레벨 → 파이프라인 전환)을 루프 한 번이 되돌리며 6개 모두 `drift`·경고, 파일과 에디터에 코드 값, fingerprint·픽셀·`git status`
+   같음(샘플 버전은 바이트까지, 다른 버전은 그 버전 형식으로 다시 쓴 두 파일을 커밋된 것으로 되돌림); 반사 큐브맵에 잘못된 텍셀이 없고 가장 밝은 텍셀이 태양 방향 2° 안(P-4); 앰비언트 = 생성된 라이팅 데이터의 큐브맵 SH,
    `AmbientProbe`가 균일 환경을 Flat 앰비언트와 같게·쓰레기 텍셀은 거부(G4-2); `ctx.Material`이 오타·옛 URP 이름·토글 없는 이미션을 경고,
    `ctx.LitMaterial`이 이미션·알파 클립을 켬(G4-3)
    + 콘텐츠 헬퍼(G1-3): 빌드된 불씨가 고정 시드·`AlwaysSimulate`, Halo가 컨트롤러 없는 `ClipPlayer`로 재생; 편집 모드 픽스처(따로 연 씬, 지움)에서
@@ -459,14 +478,16 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    계약(W9): B의 새 계약 파일은 B 소유(`contracts.json`)이고 게이트가 계약을 쓰는 Smoke·Stage도 컴파일(G5-3); 타입 해시가 주석·줄바꿈에는 같고 필드 타입에는
    다름; A가 올라간 `SpinnerLap`을 바꿈 → `stage=submit` + `contractChanged`; A가 B의 미병합 `ProbeEcho`와 같은 이름을 Smoke 파일에 덧붙임 →
    `contractConflicts`(상대가 미병합임을 보고), 에디터 트리 무변경; A가 B의 미병합 `ProbeEvents.cs`를 자기 내용으로 → `contractOwner` B;
-   A가 `Light`를 덧붙임 → 게이트가 `StageModule.cs`의 CS0104(모듈 Stage)로 `stage=compile`; B가 자기 미병합 계약에 필드를 더해 다시 submit → 녹색·`contractsUpdated`
+   A가 `Light`를 덧붙임 → 게이트가 `StageModule.cs`의 CS0104(모듈 Stage)로 `stage=compile`; B가 자기 미병합 계약에 필드를 더해 다시 submit → 녹색·`contractsUpdated`.
+   프로젝트 설정(W10): B의 새 모듈 설정 스텝이 레이어 20을 선언 → 에디터 트리 `TagManager.asset`이 바뀌고 `settingsWrittenBack`으로 B에 같은 파일; A의 런타임 에러 submit에
+   넣은 설정 스텝(레이어 21) → 되돌리며 TagManager 바이트 그대로, 에디터에서도 레이어 21 없음
 8. land(G5-5): 새 모듈을 submit → 커밋 → `land.ps1` 녹색(에디터 트리 `git status` 깨끗, stash 버림, 소유 해제), 그 사이 다른 worktree의
    submit은 락 대기 후 녹색. 컴파일 에러 커밋 land → `stage=compile` + `land.reverted` + `restore.ok`, HEAD·`git status` 동일.
    land를 병합 직후 kill → 다음 `loop.ps1`에 `recoveredLand`, 녹색, HEAD·`git status` 동일. `.meta` 미커밋·충돌 → `stage=land` 거부, 무변경.
    (selftest는 이미 병합됨·미커밋·에디터 트리 직접 수정 거부까지 보고, 끝나면 worktree·`selftest/*` 브랜치·테스트 커밋을 스스로 걷어낸다)
    계약(W9): 첫 land가 모듈과 함께 계약 파일 소유도 해제(`releasedContracts`); A의 브랜치가 올라간 `ProbeEcho`와 같은 이름을 선언 → `stage=land` +
    `contractConflicts`(landed), 올라간 타입을 바꿈 → `contractChanged`, 둘 다 HEAD·`git status` 무변경; A가 Smoke 파일에 새 이벤트를 덧붙여 submit(A 소유) →
-   커밋 → land(병합 커밋) 녹색, 소유 해제, 에디터 트리 깨끗
+   커밋 → land(병합 커밋) 녹색, 소유 해제, 에디터 트리 깨끗. 프로젝트 설정(W10): 되복사한 `TagManager.asset`이 모듈과 함께 land(에디터 트리의 미커밋 사본은 stash로 버려짐)
 9. 새 클론(O-8): `tools/`·`ProjectSettings/`·`Packages/`·`.gitignore`·에디터 시작 코드를 바꿨으면 임시 커밋 후
    `tools/fresh-clone-test.ps1 -SelfTest -ExpectFingerprint <1의 fingerprint>` 녹색(클론이 메인 트리와 같은 fingerprint), `shots/`를 Read로 확인.
    루프 요약의 `golden`: 샘플 버전(6000.3.11f1)은 커밋된 기준 이미지와 `same=3`(새 Library의 첫 임포트도 같은 픽셀), 다른 버전은 `missing`.
@@ -486,6 +507,56 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G1-5 렌더 파이프라인 밖의 프로젝트 설정은 여전히 YAML** (2026-09-30, W10)
+  - 현상(전): W4로 URP·Renderer 에셋과 품질 레벨별 파이프라인 배정은 코드가 됐지만 품질 레벨 목록·레벨별 값, Player(색 공간·창), Time, Physics, Tags/Layers는 커밋된
+    YAML이었고, 하네스가 코드로 만지는 것은 `harness_setup`의 몇 가지뿐이었다. Project Settings 창에서 바꾼 값은 조용히 남았다 — 예: 에디터의 품질 레벨을 Mobile로 누르면
+    (`QualitySettings.SetQualityLevel`, `m_CurrentQuality`가 저장됨) 그 뒤 루프가 모두 Mobile 파이프라인(렌더 스케일 0.8, SSAO 없음)으로 돌았고 아무 보고도 없었다.
+  - 조사: ProjectSettings는 에디터 시작에 필요해 W4처럼 생성물(gitignore)로 둘 수 없다. 6.3은 밖에서 고친 ProjectSettings YAML을 `AssetDatabase.Refresh`(루프의
+    recompile)에서 다시 읽는다(레이어·품질 값을 파일에서 바꾸고 Refresh → 메모리 값이 바뀜; 6.0·6.6도 — 매트릭스 9의 드리프트 검사) → 손으로 고친 YAML도 루프가 메모리에서 본다. `Time.fixedDeltaTime` 세터는
+    TimeManager를 dirty로 만들지 않는다(`Physics.gravity`는 만든다) → 하네스가 쓴 설정 오브젝트를 직접 dirty + `SaveAssets`. 6.3은 fixed timestep을 분수
+    (2822399/141120000 → 0.0199999921)로 들고 있어 0.02와 1e-6 허용치로 비교한다. 설정 오브젝트를 한 번 저장하면 6.3 형식으로 다시 쓰인다(TagManager
+    serializedVersion 2 → 3과 빈 렌더링 레이어 24줄 삭제, 옛 형식의 TimeManager·DynamicsManager도) — 값이 다를 때만 쓰므로 이번 커밋에서 바뀐 YAML은 레이어를 더한
+    TagManager와 창 설정을 바꾼 ProjectSettings(3줄)뿐이다. `UnityEngine.QualityLevel`(옛 enum)과 이름이 겹쳐 품질 레벨 값 묶음은 `QualityLevelValues`.
+  - 방법(`Editor/Build/SettingsContext.Project.cs`, `ProjectValues.cs`, `SettingsContext.Run`·`Fingerprint`, `HarnessBuild.SettingsSummary`, `HarnessSetup`):
+    - 설정 스텝이 이름 붙인 값만 소유: `ctx.Player(p => …)`·`ctx.Time`·`ctx.Physics`(값 묶음의 null = 그대로, 그 밖은 `Set("직렬화 이름", 값)`),
+      `ctx.QualityLevels(new QualityLevelValues("PC") { Pipeline, DefaultFor, ExcludedPlatforms, VSyncCount, LodBias, AnisotropicTextures, SkinWeights, … })`,
+      `ctx.Layer(i, "이름")`(인덱스 반환), `ctx.Tag`, `ctx.ProjectSetting(파일, 경로, 값)`. 공개 API가 있으면 API(색 공간 전환의 재임포트 같은 부수 효과), 없으면
+      SerializedObject. `Physics`는 `AGENTHARNESS_PHYSICS`(물리 모듈이 없는 프로젝트도 컴파일).
+    - 키마다 읽고 → 다르면 쓰고 → 다시 읽어 `changed`("키: 전 -> 후", 쓴 파일은 저장). 비교는 텍스트, 숫자는 1e-6 상대 허용치. 두 스텝이 같은 키를 다른 값으로 → 예외.
+      모든 스텝이 끝나면 각 키의 값을 `Library/Harness/project-settings.json`에 남기고, 다음 빌드가 찾은 값이 코드와도 그것과도 다르면 코드 밖의 변경 → `drift` +
+      `build.warnings`(어떻게 고칠지 포함). 스텝이 실패한 빌드는 남기지도 정리하지도 않는다(일부 선언만으로 레이어를 비우지 않게).
+    - 목록은 선언한 것이 전부: 레이어를 하나라도 선언하면 나머지 사용자 레이어를 비우고(스텝이 모두 끝난 뒤), 태그는 선언한 목록 그대로, 품질 레벨은 한 스텝이 목록 전체를
+      선언한다(이름으로 맞춰 순서 바꾸기, 없는 레벨은 앞 레벨의 복사로 추가 — Unity의 "Add Quality Level"도 복사한다, 나머지 삭제; 에디터의 레벨·플랫폼별 기본 레벨은 이름을
+      따라감). 에디터가 쓰는 레벨 = 활성 플랫폼의 기본 레벨(플랫폼을 바꿀 때 Unity가 하는 것). 활성 파이프라인이 바뀌면 W4의 리로드 경로(`settings.switched`).
+    - 오타는 스텝의 줄로 예외: 품질 레벨 필드(`quality level 'Mobile' has no field 'lodBiass' … (similar: lodBias, …)`), 알 수 없는 플랫폼(목록), 내장 레이어 번호,
+      이미 쓰인 레이어 이름·번호, 선언 안 된 레이어(`IgnoreCollision`), 없는 직렬화 경로(비슷한 이름).
+    - 보고: `build.settings.project` = `{owned, changed, drift}`, `harness_setup`의 `changed`("settings: project …")·`warnings`. fingerprint에 소유한 값(`--project--`).
+      attach 프로젝트는 W4처럼 설정 스텝을 돌리지 않는다.
+    - submit(`Tools~/submit.ps1`, `Start-HarnessSubmit -Guard`): harness 프로젝트면 `ProjectSettings/*.asset`을 저널에 함께 백업 → 빨간 submit·도중에 죽은 submit은
+      내용이 바뀐 파일만 복원(같은 파일은 건드리지 않음 — Unity가 바뀐 설정 파일을 다시 읽는다). 녹색이면 루프가 바꾼 파일을 worktree로 되복사(`submit.settingsWrittenBack`) —
+      에디터 트리 사본과 worktree 사본이 둘 다 올라간 내용이었을 때만(아니면 `settingsNotWrittenBack` + `settingsNote`, G5-6). 그래서 모듈 코드와 그 YAML이 같이
+      커밋되고, land 때 에디터 트리의 미커밋 사본과 같아 stash가 버려진다.
+    - 샘플: `StageRenderSettingsStep`이 `UsePipeline(rp, 레벨)` 두 줄 대신 품질 레벨 Mobile·PC(옛 YAML 값: 파이프라인, 기본 플랫폼 Android·iPhone·WebGL / Standalone,
+      제외 플랫폼, vSync 0, LOD 바이어스 1/2, 이방성 Enable/ForceEnable, 스킨 웨이트 2/4, 실시간 반사 프로브 끔)와 색 공간 Linear. 새 `StageProjectSettingsStep`:
+      레이어 Ground(8, 지형 — MeshCollider)·Props(9, 선돌·바위·아치; 빌드 스텝이 상수로 씀), 창 1280x720 창 모드(1024x768 전체 화면 창에서 — 플레이어를 손으로 띄워도 캡처
+      크기), Time(0.02, 1/3), 중력. 소유한 값 54개(빈 사용자 레이어 27개 포함). 레이어가 바뀌어 fingerprint가 새 값(`1d7568ed…`), 픽셀은 같음(기준 이미지 `same`).
+  - 검증(이 머신):
+    - 루프: 설정 스텝 첫 적용 49 ms(레이어 2개·창 설정 3개 씀), 이후 무변경 11.5–13 ms(렌더 스텝; W4 ~10 ms) + 0.6 ms(프로젝트 스텝), 빌드의 `settings` 단계
+      16–17.5 ms(스냅샷 쓰기 포함). 새로 연 창 에디터에서 코드 변경 없는 루프 3.78–4.13 s(빌드 0.60–0.68 s) — W8 기준선(4.08–4.37 s)과 같아 기준선 표에 열을 더하지 않았다. 손으로 PC `lodBias` 2 → 3, 레이어 9 → Foo·
+      10 → Extra로 고친 YAML → 루프 한 번이 셋 다 되돌리고 `drift` 3건·경고 3줄, `QualitySettings.asset`은 바이트까지 원래대로. 메모리에서 PC vSync 1·에디터 레벨 Mobile →
+      `drift` 2건, 파이프라인 Mobile → PC 전환으로 리로드 2.27 s 뒤 녹색. 오타·잘못된 플랫폼·내장 레이어 예외 메시지와 `IgnoreCollision`의 매트릭스(선언한 쌍만)를 eval로 확인.
+    - 매트릭스(W9보다 긴 시간은 W10과 무관한 O-12 — 같은 에디터에서 W9 코드로 되돌려 A/B): 샘플 selftest 1–8 녹색 742.8 s(`1d7568ed…`, 줄 64/71/77/87; 1번 104.4 s에 새 검사 4개, 7번 121.5 s·8번 95.9 s에 3개 — `settingsWrittenBack`
+      `[ProjectSettings/TagManager.asset]`, 빨간 submit 뒤 TagManager 바이트 그대로·에디터에서 레이어 21 없음, land stash에 TagManager → 버려지고 에디터 트리 깨끗).
+      9: 새 클론 6.3 녹색(888 s: `harness_setup`이 ProjectSettings를 하나도 쓰지 않음 — 커밋된 YAML = 코드, 루프 3회 `1d7568ed` = 메인 트리·기준 이미지 same=3,
+      클론 selftest 1–8 782 s, 플레이어 410 fps, 드리프트 되돌림 뒤 두 파일 바이트까지 같음, `git status` 깨끗), 6.0 녹색(757 s, `330ebb7a`, selftest 655 s; 드리프트 되돌림이
+      두 파일을 6.0 형식으로 다시 써서 커밋본으로 되돌림 — 설계대로, 플레이어 단계는 W8처럼 건너뜀), 6.6 녹색(923 s, `995ce417`, selftest 792 s, 플레이어 312 fps; 6.0과 같이
+      다시 씀, 빌드가 쓴 6.6 직렬화는 보고만). 세 버전 모두 샷 72.6/61.3/48.2–48.3(레이어가 바뀌어도 픽셀 같음), 새 모듈 레이어의 되복사·land 녹색.
+      10: BagelGame 녹색(49 s, 루프 3회 `619be553`, 출시 빌드 `Managed/` 132개·`Harness.*` 0개), Fluid-Sim 녹색(31 s, `54880f05`, 103개·0개), 사내 프로젝트 A 녹색
+      (`brd-attach.json`, 86 s, `6664b723`) — 셋 다 W9와 같은 fingerprint(설정 스텝이 없고 attach라 돌지도 않음), 제거 뒤 `git status` 비어 있음.
+  - 남은 것: 코드가 이름 붙이지 않은 값은 여전히 커밋된 YAML(ProjectSettings 전체를 코드로 두지는 않았다 — 버전마다 필드가 다르고, 새 필드는 그 버전의 기본값이 맞다).
+    정렬 레이어·렌더링 레이어 이름은 `ProjectSetting` 경로로만. URP 전역 설정(`UniversalRenderPipelineGlobalSettings`)은 여전히 URP가 관리하는 커밋 에셋이다.
+    여러 worktree가 같은 ProjectSettings 파일을 바꾸는 경우 → G5-6. `harness_setup`이 적용하는 값(runInBackground 등)을 설정 스텝도 정하면 둘이 번갈아 쓴다(샘플은 안 씀).
 
 - [x] **G5-4 `Assets/Game/Contracts`가 공유 지점이다** · **G5-3 compile-check는 다른 모듈의 최신 변경을 모른다** (2026-09-30, W9)
   - 현상(전): 계약 폴더는 "추가만" 규칙과 주석("One file per publishing module")으로 버텼다. submit은 에디터 트리에 있는 계약 **파일**이 달라지면 거부했고(자기가 막

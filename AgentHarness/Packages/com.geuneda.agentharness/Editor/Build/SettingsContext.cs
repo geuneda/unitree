@@ -14,11 +14,12 @@ using Object = UnityEngine.Object;
 namespace Harness.Editor
 {
     /// <summary>
-    /// What an <see cref="ISettingsStep"/> uses to write render settings as code. Assets go to
+    /// What an <see cref="ISettingsStep"/> uses to write project settings as code. Render pipeline assets go to
     /// &lt;generatedRoot&gt;/&lt;Module&gt;/ with a GUID derived from that path; each is built from a fresh instance and written only
     /// when its serialized content differs from the file (in place, so the GUID and the ProjectSettings that reference it stay).
+    /// Settings in ProjectSettings/ (quality levels, player, time, physics, layers, tags): SettingsContext.Project.cs.
     /// </summary>
-    public sealed class SettingsContext
+    public sealed partial class SettingsContext
     {
         /// <summary>Module of the step currently running.</summary>
         public string Module { get; internal set; }
@@ -57,40 +58,60 @@ namespace Harness.Editor
             if (target == null) throw new ArgumentNullException(nameof(target));
             using (var so = new SerializedObject(target))
             {
-                var p = so.FindProperty(propertyPath);
-                if (p == null)
-                    throw new ArgumentException($"{target.GetType().Name} has no serialized field '{propertyPath}' in Unity {Application.unityVersion}{Similar(so, propertyPath)}");
-                try
-                {
-                    switch (p.propertyType)
-                    {
-                        case SerializedPropertyType.Boolean: p.boolValue = Convert.ToBoolean(value); break;
-                        case SerializedPropertyType.Integer: p.longValue = Convert.ToInt64(value); break;
-                        case SerializedPropertyType.Enum: p.intValue = Convert.ToInt32(value); break;
-                        case SerializedPropertyType.LayerMask: p.intValue = value is LayerMask m ? m.value : Convert.ToInt32(value); break;
-                        case SerializedPropertyType.Float: p.doubleValue = Convert.ToDouble(value); break;
-                        case SerializedPropertyType.String: p.stringValue = (string)value; break;
-                        case SerializedPropertyType.Color: p.colorValue = (Color)value; break;
-                        case SerializedPropertyType.Vector2: p.vector2Value = (Vector2)value; break;
-                        case SerializedPropertyType.Vector3: p.vector3Value = (Vector3)value; break;
-                        case SerializedPropertyType.Vector4: p.vector4Value = (Vector4)value; break;
-                        case SerializedPropertyType.ObjectReference: p.objectReferenceValue = (Object)value; break;
-                        default: throw new ArgumentException($"{target.GetType().Name}.{propertyPath} is a {p.propertyType}; Set supports numbers, bools, enums, strings, colors, vectors and object references");
-                    }
-                }
-                catch (Exception e) when (e is InvalidCastException || e is FormatException || e is OverflowException)
-                {
-                    throw new ArgumentException($"{target.GetType().Name}.{propertyPath} is a {p.propertyType}; cannot set it to {value ?? "null"} ({value?.GetType().Name})", e);
-                }
+                Assign(Find(so, target, propertyPath), value, target, propertyPath);
                 so.ApplyModifiedPropertiesWithoutUndo();
             }
         }
 
-        static string Similar(SerializedObject so, string wanted)
+        static SerializedProperty Find(SerializedObject so, Object target, string propertyPath) =>
+            so.FindProperty(propertyPath) ?? throw new ArgumentException($"{target.GetType().Name} has no serialized field '{propertyPath}' in Unity {Application.unityVersion}{Similar(so, propertyPath)}");
+
+        /// <summary>Put <paramref name="value"/> into <paramref name="p"/> (not applied yet); throws when it does not fit.</summary>
+        static void Assign(SerializedProperty p, object value, Object target, string propertyPath)
+        {
+            try
+            {
+                if (p.isArray && p.propertyType == SerializedPropertyType.Generic && p.arrayElementType == "string" && value is IEnumerable<string> items)
+                {
+                    var list = new List<string>(items);
+                    p.arraySize = list.Count;
+                    for (var i = 0; i < list.Count; i++) p.GetArrayElementAtIndex(i).stringValue = list[i];
+                    return;
+                }
+                switch (p.propertyType)
+                {
+                    case SerializedPropertyType.Boolean: p.boolValue = Convert.ToBoolean(value); break;
+                    case SerializedPropertyType.Integer: p.longValue = Convert.ToInt64(value); break;
+                    case SerializedPropertyType.Enum: p.intValue = Convert.ToInt32(value); break;
+                    case SerializedPropertyType.LayerMask: p.intValue = value is LayerMask m ? m.value : Convert.ToInt32(value); break;
+                    case SerializedPropertyType.Float: p.doubleValue = Convert.ToDouble(value); break;
+                    case SerializedPropertyType.String: p.stringValue = (string)value; break;
+                    case SerializedPropertyType.Color: p.colorValue = (Color)value; break;
+                    case SerializedPropertyType.Vector2: p.vector2Value = (Vector2)value; break;
+                    case SerializedPropertyType.Vector3: p.vector3Value = (Vector3)value; break;
+                    case SerializedPropertyType.Vector4: p.vector4Value = (Vector4)value; break;
+                    case SerializedPropertyType.ObjectReference: p.objectReferenceValue = (Object)value; break;
+                    default: throw new ArgumentException($"{target.GetType().Name}.{propertyPath} is a {p.propertyType}; Set supports numbers, bools, enums, strings, string arrays, colors, vectors and object references");
+                }
+            }
+            catch (Exception e) when (e is InvalidCastException || e is FormatException || e is OverflowException)
+            {
+                throw new ArgumentException($"{target.GetType().Name}.{propertyPath} is a {p.propertyType}; cannot set it to {value ?? "null"} ({value?.GetType().Name})", e);
+            }
+        }
+
+        /// <summary>Lower-case words of a field name ("m_SoftShadowQuality" -> soft, shadow, quality).</summary>
+        static List<string> Words(string name)
         {
             var words = new List<string>();
-            foreach (var w in System.Text.RegularExpressions.Regex.Split(wanted.Replace("m_", ""), "(?<=[a-z])(?=[A-Z])|[._]"))
+            foreach (var w in System.Text.RegularExpressions.Regex.Split(name.Replace("m_", ""), "(?<=[a-z])(?=[A-Z])|[._ ]"))
                 if (w.Length >= 3) words.Add(w.ToLowerInvariant());
+            return words;
+        }
+
+        static string Similar(SerializedObject so, string wanted)
+        {
+            var words = Words(wanted);
             var hits = new List<string>();
             var it = so.GetIterator();
             while (it.Next(true) && hits.Count < 8)
@@ -410,6 +431,17 @@ namespace Harness.Editor
                 }
                 info.ms = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
             }
+            // ProjectSettings the steps own: clear undeclared layers and tags, save, remember (only when every step ran).
+            if (!result.failed)
+            {
+                var (_, last) = steps[steps.Count - 1];
+                try { result.ctx.FinishProject(); }
+                catch (Exception e)
+                {
+                    result.failed = true;
+                    HarnessBuild.FillError(last, e);
+                }
+            }
             if (result.ctx.Assigned.Count > 0) AssetDatabase.SaveAssets();
             var after = GraphicsSettings.currentRenderPipeline;
             if (before != after)
@@ -436,6 +468,7 @@ namespace Harness.Editor
                 sb.Append("== ").Append(p).Append('\n').Append(a == null ? "missing\n" : Dump(a));
             }
             sb.Append(DescribePipelines());
+            ProjectFingerprint(sb);
             return sb.ToString();
         }
     }

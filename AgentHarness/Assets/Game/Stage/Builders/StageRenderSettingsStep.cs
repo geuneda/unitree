@@ -5,8 +5,9 @@ using UnityEngine.Rendering.Universal;
 namespace Game.Stage.Builders
 {
     /// <summary>
-    /// Render pipeline as code: a PC and a Mobile URP asset for the quality levels of the same names; PC is also the project
-    /// default. Anything not set here is URP's default for a new asset.
+    /// Rendering as code: a PC and a Mobile URP asset for the quality levels of the same names (PC is also the project default),
+    /// the quality levels themselves and the color space. Anything not set here is URP's default for a new asset; a quality level
+    /// field not set here is what ProjectSettings/QualitySettings.asset has.
     /// </summary>
     public sealed class StageRenderSettingsStep : ISettingsStep
     {
@@ -66,8 +67,30 @@ namespace Game.Stage.Builders
             });
 
             ctx.UsePipeline(pc);
-            ctx.UsePipeline(pc, "PC");
-            ctx.UsePipeline(mobile, "Mobile");
+            ctx.QualityLevels(
+                new QualityLevelValues("Mobile")
+                {
+                    Pipeline = mobile,
+                    DefaultFor = new[] { "Android", "iPhone", "WebGL" },
+                    ExcludedPlatforms = new[] { "Standalone" },
+                    VSyncCount = 0,
+                    LodBias = 1f,
+                    AnisotropicTextures = AnisotropicFiltering.Enable,
+                    SkinWeights = SkinWeights.TwoBones,
+                    RealtimeReflectionProbes = false,
+                },
+                new QualityLevelValues("PC")
+                {
+                    Pipeline = pc,
+                    DefaultFor = new[] { "Standalone" },
+                    ExcludedPlatforms = new[] { "Android", "iPhone" },
+                    VSyncCount = 0,   // frame times unpaced (the loop's fps, tools/player.ps1)
+                    LodBias = 2f,
+                    AnisotropicTextures = AnisotropicFiltering.ForceEnable,
+                    SkinWeights = SkinWeights.FourBones,
+                    RealtimeReflectionProbes = false,
+                });
+            ctx.Player(p => p.ColorSpace = ColorSpace.Linear);
         }
     }
 }

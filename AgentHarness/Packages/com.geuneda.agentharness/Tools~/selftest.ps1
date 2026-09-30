@@ -18,7 +18,10 @@
     and a stack camera made during the play; real input (G3-6): Space pressed on the real keyboard during a loop leaves
     play.events as they were, and the real devices, disabled while a scenario plays, are enabled again after it, after
     a failed play and after a stopped one; render settings as code (W4): the pipeline assets are generated and not
-    rewritten by loops 2-3, deleted they come back with one loop (same fingerprint, pixels and git status); the reflection
+    rewritten by loops 2-3, deleted they come back with one loop (same fingerprint, pixels and git status); project settings
+    as code (G1-5): the settings steps own quality level, player, time, physics and layer values that loops 2-3 do not write,
+    and the YAML edited by hand plus values changed in memory as the Project Settings window does (the Editor's quality level
+    among them) are set back by one loop and reported as drift (same fingerprint, pixels and git status); the reflection
     cubemap holds the sky (P-4), the ambient is its SH through the scene's lighting data (G4-2), AmbientProbe maps a
     uniform environment to Flat ambient and refuses garbage; ctx.Material reports a misspelled / obsolete property and an
     emission color without its toggle, ctx.LitMaterial turns emission and alpha clipping on (G4-3); content helpers (G1-3):
@@ -61,12 +64,14 @@
     submit killed after its sync is rolled back by the next loop; contracts (G5-4): a landed type that changes is refused
     (comments are no change), the same event name as another worktree's un-landed one is refused, so is another
     worktree's un-landed contracts file; a contracts type that breaks another module (CS0104) is refused by the gate
-    (G5-3); a worktree changes its own un-landed contracts file
+    (G5-3); a worktree changes its own un-landed contracts file. Project settings (G1-5): the new module's settings step
+    declares a layer, submit copies the Editor tree's TagManager.asset back to its worktree; the runtime error submit's layer
+    goes with its revert
   8 land.ps1: fast-forward land while another worktree's submit waits for the lock (module and contracts file released);
     already landed; refusals (uncommitted, missing .meta, conflict, a foreign edit in the Editor tree); a compile error
     land is undone; a land killed after its merge is undone by the next loop; the last land is kept. Contracts (G5-4): a
     branch declaring an event name that landed and one changing a landed type are refused; an event appended to a module's
-    landed file is submitted, landed (a merge) and released
+    landed file is submitted, landed (a merge) and released. The TagManager.asset submit copied back lands with the module
   Stops at the first red item (-KeepGoing: runs the rest too). Every item puts back what it changed. 6-8 need tools/, the harness package and
   Assets/Game/ committed (the worktrees run the committed code); they create temporary worktrees next to the
   repository, branches selftest/*, and commits, and reset the Editor tree's branch to where it was. A final loop
@@ -101,6 +106,11 @@ $SmokeShader = 'Assets/Game/Smoke/Shaders/SmokeIridescent.shader'
 $SmokeContracts = 'Assets/Game/Contracts/SmokeEvents.cs'
 $ProbeCs = 'Assets/Game/Probe/ProbeModule.cs'
 $ProbeEventsCs = 'Assets/Game/Contracts/ProbeEvents.cs'
+$ProbeSettingsCs = 'Assets/Game/Probe/Builders/ProbeSettingsStep.cs'
+$SmokeSettingsCs = 'Assets/Game/Smoke/Builders/SmokeSelftestSettings.cs'
+$TagManager = 'ProjectSettings/TagManager.asset'
+# Editor-tree changes of B's submits in item 7 (git status lines): its module, its contracts file, the TagManager its layer changed.
+$BSubmitted = '(^\?\? |/)Assets/Game/(Probe(/|\.meta$)|Contracts/ProbeEvents\.cs)|(^.. |/)ProjectSettings/TagManager\.asset$'
 $SubmitJournal = Join-Path $root 'Library/Harness/submit/pending.json'
 $LandJournal = Join-Path $root 'Library/Harness/land/pending.json'
 # Injections: a marker line of the sample modules and what replaces it on that line.
@@ -298,6 +308,12 @@ function Get-FirstError($r, [string]$Kind = $null) {
 function Get-EditorStatus { (@((Get-HarnessGitStatus $root).GetEnumerator() | ForEach-Object { "$($_.Value) $($_.Key)" } | Sort-Object) -join '; ') }
 # Status entries that were not there when 7 started ("XY path").
 function Get-NewStatus { @((Get-HarnessGitStatus $root).GetEnumerator() | ForEach-Object { "$($_.Value) $($_.Key)" } | Where-Object { $state.wt.base -notcontains $_ } | Sort-Object) }
+# The Unity version the project's files were saved with (the committed ProjectVersion.txt; open.ps1 -UnityVersion changes the file).
+function Get-CommittedVersion {
+    $t = (Invoke-HarnessGit $root @('show', 'HEAD:./ProjectSettings/ProjectVersion.txt')).out
+    $m = [regex]::Match("$t", 'm_EditorVersion:\s*(\S+)')
+    if ($m.Success) { $m.Groups[1].Value } else { $null }
+}
 function Get-Head([string]$Dir) { (Invoke-HarnessGit $Dir @('rev-parse', 'HEAD') -Check).out.Trim() }
 function Invoke-Git([string]$Dir, [string[]]$Arguments) { [void](Invoke-HarnessGit $Dir $Arguments -Check) }
 
@@ -373,6 +389,47 @@ namespace Game.Contracts
     {
         public readonly int Lap;
         public ProbeEcho(int lap) { Lap = lap; }
+    }
+}
+'@
+# Item 7 (G1-5): the new module's settings step declares a layer - the Editor tree's TagManager.asset changes, submit copies
+# it back to the worktree, it lands with the module. Smoke's (with a runtime error) declares one too: the revert takes it away.
+$ProbeBuildersAsmdef = @'
+{
+    "name": "Game.Probe.Builders",
+    "rootNamespace": "Game.Probe.Builders",
+    "references": [
+        "Harness.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "autoReferenced": false
+}
+'@
+$ProbeSettingsText = @'
+using Harness.Editor;
+
+namespace Game.Probe.Builders
+{
+    public sealed class ProbeSettingsStep : ISettingsStep
+    {
+        public int Order => 50;
+
+        public void Apply(SettingsContext ctx) => ctx.Layer(20, "Probe");
+    }
+}
+'@
+$SmokeSettingsText = @'
+using Harness.Editor;
+
+namespace Game.Smoke.Builders
+{
+    public sealed class SmokeSelftestSettings : ISettingsStep
+    {
+        public int Order => 50;
+
+        public void Apply(SettingsContext ctx) => ctx.Layer(21, "SmokeSelftest");
     }
 }
 '@
@@ -776,6 +833,26 @@ var failed = new System.Collections.Generic.List<string>();
 UnityEditor.AssetDatabase.DeleteAssets(new[] { __PATHS__ }, failed);
 var rp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
 return new System.Collections.Generic.Dictionary<string, object> { { "failed", failed }, { "pipeline", rp == null ? "none" : rp.name } };
+'@
+
+# Item 1's project settings checks (G1-5). After the YAML was edited by hand: load it (as the loop would), then change two values
+# in memory as the Project Settings window does - PC's vSync and the Editor's quality level (level 0: the renamed Mobile).
+$ProjectDriftText = @'
+UnityEditor.AssetDatabase.Refresh();
+var qs = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/QualitySettings.asset")[0];
+var so = new UnityEditor.SerializedObject(qs);
+so.FindProperty("m_QualitySettings.Array.data[1].vSyncCount").intValue = 1;
+so.ApplyModifiedProperties();
+UnityEngine.QualitySettings.SetQualityLevel(0, true);
+var rp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+return new System.Collections.Generic.Dictionary<string, object> { { "levels", string.Join(",", UnityEngine.QualitySettings.names) }, { "level", UnityEngine.QualitySettings.GetQualityLevel() }, { "layer9", UnityEngine.LayerMask.LayerToName(9) }, { "pipeline", rp == null ? "none" : rp.name } };
+'@
+
+# The project settings the Editor has now (G1-5), after loading changed files.
+$ProjectStateText = @'
+UnityEditor.AssetDatabase.Refresh();
+var level = UnityEngine.QualitySettings.GetQualityLevel();
+return new System.Collections.Generic.Dictionary<string, object> { { "levels", string.Join(",", UnityEngine.QualitySettings.names) }, { "level", UnityEngine.QualitySettings.names[level] }, { "vSync", UnityEngine.QualitySettings.vSyncCount }, { "ground", UnityEngine.LayerMask.NameToLayer("Ground") }, { "layer9", UnityEngine.LayerMask.LayerToName(9) }, { "layer10", UnityEngine.LayerMask.LayerToName(10) }, { "layer20", UnityEngine.LayerMask.LayerToName(20) }, { "layer21", UnityEngine.LayerMask.LayerToName(21) } };
 '@
 
 # The sky lighting of the built scene (P-4, G4-2) and material setup (G4-3), in edit mode; materials go to a scratch folder.
@@ -1421,6 +1498,58 @@ function Invoke-Item1 {
         $state.item['settings'] = [ordered]@{ assets = $assets; pipeline = $settings.pipeline; settingsMs = @($runs | ForEach-Object { @($_.build.steps | Where-Object { $_.type -like '*Settings*' } | ForEach-Object { $_.ms }) }) }
     }
 
+    # Project settings as code (G1-5): the settings steps own values in ProjectSettings/ (quality levels, player, time, physics,
+    # layers); loops 2-3 write none. Edited by hand in the YAML (the Mobile level renamed, a PC value, a layer renamed and one
+    # added) and in memory as the Project Settings window does (a PC value, the Editor's quality level): one loop sets them
+    # back and reports each one as drift; fingerprint, pixels and git status are as before.
+    $proj = $runs[0].build.settings.project
+    $projWritten = @($runs[1..2] | ForEach-Object { @($_.build.settings.project.changed) })
+    Test-Check 'project settings: owned by the settings steps, loops 2-3 write none' ($proj -and [int]$proj.owned -gt 0 -and $projWritten.Count -eq 0) "owned=$(if ($proj) { $proj.owned }) written=[$($projWritten -join '; ')]"
+    if ($proj -and [int]$proj.owned -gt 0) {
+        $status = Get-EditorStatus
+        $psFiles = @('ProjectSettings/QualitySettings.asset', $TagManager)
+        $qsAbs = Get-Abs $root $psFiles[0]
+        $tmAbs = Get-Abs $root $psFiles[1]
+        $qs = [IO.File]::ReadAllText($qsAbs)
+        $tm = [IO.File]::ReadAllText($tmAbs)
+        $pc = $qs.IndexOf('name: PC')
+        $lod = if ($pc -ge 0) { $qs.IndexOf('lodBias: 2', $pc) } else { -1 }
+        $qsEdited = if ($lod -gt 0) { ($qs.Substring(0, $lod) + 'lodBias: 3' + $qs.Substring($lod + 10)).Replace('    name: Mobile', '    name: Low') } else { $qs }
+        $tmEdited = $tm.Replace("  - Props`n  - `n", "  - Foo`n  - Extra`n")
+        Test-Check 'project settings: the values to edit are in the YAML' ($lod -gt 0 -and $qsEdited.Contains('name: Low') -and $tmEdited -ne $tm) "pcLodBias=$lod"
+        if ($lod -gt 0 -and $tmEdited -ne $tm) {
+            $utf8 = New-Object Text.UTF8Encoding($false)
+            [IO.File]::WriteAllText($qsAbs, $qsEdited, $utf8)
+            [IO.File]::WriteAllText($tmAbs, $tmEdited, $utf8)
+            $de = (Join-Path $outAbs 'project-drift.cs').Replace('\', '/')
+            Write-TextFile $de $ProjectDriftText
+            $d = Invoke-Eval $de
+            $r = Invoke-Loop '1-project-drift' @('-Golden', $gold)
+            $drift = @(@($r.build.settings.project.drift) | Sort-Object)
+            $expect = @(@('Layer[10]', 'Layer[9]', 'Quality.editor', 'Quality.levels', 'Quality[PC].lodBias', 'Quality[PC].vSyncCount') | Sort-Object)
+            $warned = @(@($r.build.warnings) | Where-Object { "$_" -like '*changed outside the code*' })
+            Test-Check 'project settings: hand-edited YAML and Project Settings window changes set back by one loop, each one reported as drift' ($d.levels -eq 'Low,PC' -and $d.layer9 -eq 'Foo' -and [int]$d.level -eq 0 -and [bool]$r.ok -and ($drift -join ',') -eq ($expect -join ',') -and $warned.Count -eq $expect.Count -and "$($r.build.settings.switched)" -like '*Mobile_RPAsset* -> *PC_RPAsset*' -and [double]$r.timings.reloadSec -gt 0) "edited: levels=$($d.levels) level=$($d.level) layer9=$($d.layer9) pipeline=$($d.pipeline) | $(Get-Summary $r) drift=[$($drift -join ',')] warned=$($warned.Count) switched=$($r.build.settings.switched) reloadSec=$($r.timings.reloadSec)"
+            $qsNow = [IO.File]::ReadAllText($qsAbs)
+            $tmNow = [IO.File]::ReadAllText($tmAbs)
+            $pcNow = $qsNow.IndexOf('name: PC')
+            $yaml = $qsNow.Contains('    name: Mobile') -and -not $qsNow.Contains('name: Low') -and $pcNow -ge 0 -and $qsNow.IndexOf('lodBias: 2', $pcNow) -gt 0 -and $qsNow.IndexOf('vSyncCount: 0', $pcNow) -gt 0 -and $tmNow.Contains("  - Props`n") -and -not $tmNow.Contains('Foo') -and -not $tmNow.Contains('Extra')
+            # Another Unity version than the project's writes the files in its own serialization: put the committed ones back.
+            $identical = (Get-EditorStatus) -eq $status
+            $sameVersion = "$($r.unityVersion)" -eq (Get-CommittedVersion)
+            if (-not $identical) {
+                foreach ($f in $psFiles) {
+                    if ($status -notlike "*$f*") { Invoke-Git $root @('checkout', '--', $f) }
+                }
+            }
+            $se = (Join-Path $outAbs 'project-state.cs').Replace('\', '/')
+            Write-TextFile $se $ProjectStateText
+            $s = Invoke-Eval $se
+            $regen = @(Get-Golden $r | Where-Object { $_ -notlike '*:same' })
+            Test-Check 'project settings: back in the YAML and the Editor; same fingerprint, pixels (golden) and git status (byte for byte in the project''s Unity version)' ($yaml -and $s.levels -eq 'Mobile,PC' -and $s.level -eq 'PC' -and [int]$s.vSync -eq 0 -and [int]$s.ground -eq 8 -and $s.layer9 -eq 'Props' -and "$($s.layer10)" -eq '' -and $r.build.fingerprint -eq $fps[0] -and $regen.Count -eq 0 -and (Get-EditorStatus) -eq $status -and ($identical -or -not $sameVersion)) "yaml=$yaml editor=$($s | ConvertTo-Json -Compress) fp=$($r.build.fingerprint) golden=[$((Get-Golden $r) -join ',')] identical=$identical sameVersion=$sameVersion status same=$((Get-EditorStatus) -eq $status)"
+            $state.item['projectSettings'] = [ordered]@{ owned = [int]$proj.owned; drift = $drift; identical = $identical; ms = @($runs | ForEach-Object { @($_.build.steps | Where-Object { $_.type -like '*Settings*' } | ForEach-Object { $_.ms }) }) }
+        }
+    }
+
     # Sky lighting (P-4, G4-2) and materials (G4-3) of the built scene, in edit mode.
     $rc = (Join-Path $outAbs 'render-check.cs').Replace('\', '/')
     Write-TextFile $rc $RenderCheckText
@@ -1876,10 +2005,13 @@ function Invoke-Item7 {
     Test-Check "gate: error at ${SmokeCs}:$line" ($e.file -eq $SmokeCs -and [int]$e.line -eq $line -and $e.module -eq 'Smoke') "$($e.file):$($e.line) $($e.module)"
     Test-Check 'gate: Editor tree untouched' (@(Get-NewStatus).Count -eq 0) (@(Get-NewStatus) -join '; ')
 
-    # 7b. Forced broken submit (A) is reverted; B's new module + contract waits for the lock and is kept.
+    # 7b. Forced broken submit (A) is reverted; B's new module + contract waits for the lock and is kept. Its settings step
+    # declares a layer (G1-5): submit copies the Editor tree's TagManager.asset back to B.
     Write-TextFile (Get-Abs $B 'Assets/Game/Probe/Game.Probe.asmdef') $ProbeAsmdef
     Write-TextFile (Get-Abs $B $ProbeCs) $ProbeModuleText
     Write-TextFile (Get-Abs $B $ProbeEventsCs) $ProbeEventsText
+    Write-TextFile (Get-Abs $B 'Assets/Game/Probe/Builders/Game.Probe.Builders.asmdef') $ProbeBuildersAsmdef
+    Write-TextFile (Get-Abs $B $ProbeSettingsCs) $ProbeSettingsText
     $da = Get-OutDir '7b-forced'; $db = Get-OutDir '7b-newmodule'
     $ta = Start-Tool $A 'submit.ps1' @('-Module', 'Smoke', '-SkipCheck', '-Out', $da)
     [void](Wait-Until { Test-Path -LiteralPath $SubmitJournal } 60 $ta)
@@ -1894,6 +2026,10 @@ function Invoke-Item7 {
     $laps = Get-EventCount $rb 'SpinnerLap'
     Test-Check 'new module: ProbeEcho = SpinnerLap' ($laps -gt 0 -and (Get-EventCount $rb 'ProbeEcho') -eq $laps) (Get-Events $rb)
     Test-Check 'new module: .meta files copied back' (@($rb.submit.metaWrittenBack).Count -ge 4) (@($rb.submit.metaWrittenBack) -join ', ')
+    $tmRoot = [IO.File]::ReadAllText((Get-Abs $root $TagManager))
+    $tmB = [IO.File]::ReadAllText((Get-Abs $B $TagManager))
+    $projB = @($rb.build.settings.project.changed)
+    Test-Check 'new module: its settings step''s layer in the Editor tree''s TagManager.asset, copied back to B' ($projB -contains 'Layer[20]: "" -> Probe' -and @($rb.submit.settingsWrittenBack) -contains $TagManager -and $tmB -eq $tmRoot -and $tmRoot.Contains("  - Probe`n")) "changed=[$($projB -join '; ')] back=[$(@($rb.submit.settingsWrittenBack) -join ',')] notBack=[$(@($rb.submit['settingsNotWrittenBack']) -join ',')] same=$($tmB -eq $tmRoot)"
     $state.item['newModuleCheck'] = @($rb.submit.check.targets)
     # The new contracts file is B's until it lands (G5-4), and the gate checked the modules that use the contracts (G5-3).
     $co = Get-HarnessContractOwners
@@ -1901,12 +2037,20 @@ function Invoke-Item7 {
     Test-Check 'new module: the gate compiled the contracts users too' (@($rb.submit.check.targets) -contains 'Game.Stage: ok' -and @($rb.submit.check.targets) -contains 'Game.Smoke: ok') (@($rb.submit.check.targets) -join ', ')
     Invoke-Git $A @('checkout', '--', '.')
 
-    # 7c. A runtime error submit is reverted.
+    # 7c. A runtime error submit is reverted, with the layer its new settings step wrote (G1-5: the ProjectSettings are backed up).
+    $tmBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Get-Abs $root $TagManager)))
+    Write-TextFile (Get-Abs $A $SmokeSettingsCs) $SmokeSettingsText
     $line = Edit-Line (Get-Abs $A $SmokeCs) $RuntimeMarker $RuntimeBroken
     $r = Invoke-Tool $A 'submit.ps1' '7c-runtime' @('-Module', 'Smoke')
     $e0 = @($r.runtimeErrors) | Select-Object -First 1
     Test-Check "runtime: stage=runtime at ${SmokeCs}:$line" ($r.stage -eq 'runtime' -and $e0 -and $e0.file -eq $SmokeCs -and [int]$e0.line -eq $line) "$(Get-Summary $r) $(if ($e0) { "$($e0.file):$($e0.line)" })"
     Test-Check 'runtime: reverted, restore compile ok' ($r.submit.reverted -and $r.submit.restore.ok) "reverted=$($r.submit.reverted)"
+    $se = (Join-Path $outAbs 'project-state.cs').Replace('\', '/')
+    Write-TextFile $se $ProjectStateText
+    $s = Invoke-Eval $se
+    $projA = @($r.build.settings.project.changed)
+    Test-Check 'runtime: the layer its settings step wrote is gone again (TagManager.asset restored and loaded)' ($projA -contains 'Layer[21]: "" -> SmokeSelftest' -and [Convert]::ToBase64String([IO.File]::ReadAllBytes((Get-Abs $root $TagManager))) -eq $tmBefore -and "$($s.layer21)" -eq '' -and $s.layer20 -eq 'Probe') "changed=[$($projA -join '; ')] editor=$($s | ConvertTo-Json -Compress)"
+    Remove-Item -LiteralPath (Get-Abs $A $SmokeSettingsCs) -Force
 
     # 7d. A submit killed right after its sync is rolled back by the next loop.
     $mine = [IO.File]::ReadAllText((Get-Abs $A $SmokeCs))
@@ -1953,7 +2097,7 @@ function Invoke-Item7 {
     $r = Invoke-Tool $A 'submit.ps1' '7h-dependents' @('-Module', 'Smoke')
     $e = Get-FirstError $r
     Test-Check "contracts user broken: gate stage=compile at ${stageCs}:$lightLine, module Stage" ($r.stage -eq 'compile' -and $r.submit.phase -eq 'check' -and $e.file -eq $stageCs -and [int]$e.line -eq $lightLine -and $e.module -eq 'Stage' -and "$($e.msg)" -like '*CS0104*') "$(Get-Summary $r) $($e.file):$($e.line) $($e.module) $($e.msg)"
-    Test-Check 'contracts user broken: Editor tree untouched' (@(Get-NewStatus | Where-Object { $_ -notmatch '(^\?\? |/)Assets/Game/(Probe(/|\.meta$)|Contracts/ProbeEvents\.cs)' }).Count -eq 0) (@(Get-NewStatus) -join '; ')
+    Test-Check 'contracts user broken: Editor tree untouched' (@(Get-NewStatus | Where-Object { $_ -notmatch $BSubmitted }).Count -eq 0) (@(Get-NewStatus) -join '; ')
     Invoke-Git $A @('checkout', '--', '.')
 
     # 7i. B may change its own un-landed contracts file (a new field; the constructor stays).
@@ -1963,7 +2107,7 @@ function Invoke-Item7 {
     Test-Check 'own un-landed contracts file: green, updated, same events' ($r.ok -and @($r.submit.contractsUpdated) -contains $ProbeEventsCs -and (Get-EventCount $r 'ProbeEcho') -eq (Get-EventCount $r 'SpinnerLap')) "$(Get-Summary $r) updated=$(@($r.submit.contractsUpdated) -join ',')"
     Test-Check 'own un-landed contracts file: the Editor tree has the new version' ([IO.File]::ReadAllText((Get-Abs $root $ProbeEventsCs)) -eq [IO.File]::ReadAllText((Get-Abs $B $ProbeEventsCs))) ''
 
-    $left = @(Get-NewStatus | Where-Object { $_ -notmatch '(^\?\? |/)Assets/Game/(Probe(/|\.meta$)|Contracts/ProbeEvents\.cs)' })
+    $left = @(Get-NewStatus | Where-Object { $_ -notmatch $BSubmitted })
     Test-Check "Editor tree: only B's submitted module is uncommitted" ($left.Count -eq 0) ($left -join ', ')
     Complete-Item
 }
@@ -1987,6 +2131,7 @@ function Invoke-Item8 {
     Test-Check 'land: green, merged, kept' ($rl.ok -and $rl.land.merged -and $rl.land.kept) (Get-Summary $rl)
     Test-Check 'land: fast-forward, Probe and ProbeEvents.cs released' ($rl.land.fastForward -and @($rl.land.releasedOwners) -contains 'Probe' -and @($rl.land.releasedContracts) -contains $ProbeEventsCs -and -not (Get-HarnessContractOwners)[$ProbeEventsCs]) "ff=$($rl.land.fastForward) released=$(@($rl.land.releasedOwners) -join ',') contracts=$(@($rl.land.releasedContracts) -join ',')"
     Test-Check 'land: Editor tree clean, at the branch' (@(Get-NewStatus).Count -eq 0 -and (Get-Head $top) -eq (Get-Head $B)) (@(Get-NewStatus) -join '; ')
+    Test-Check 'land: the TagManager.asset submit copied back landed with the module (G1-5)' ([IO.File]::ReadAllText((Get-Abs $root $TagManager)).Contains("  - Probe`n") -and @($rl.land.stash.paths | Where-Object { "$_" -like "*$TagManager" }).Count -eq 1) "stash=[$(@($rl.land.stash.paths) -join ',')]"
     Test-Check 'submit during the land: waited, green' ($ra.ok -and [double]$ra.timings.lockWaitSec -gt 0) "$(Get-Summary $ra) wait=$($ra.timings.lockWaitSec)"
 
     # 8b. Already landed.

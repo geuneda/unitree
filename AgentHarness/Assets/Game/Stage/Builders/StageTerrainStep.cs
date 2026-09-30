@@ -57,6 +57,7 @@ namespace Game.Stage.Builders
 
             var go = ctx.MeshObject("Terrain", mesh, mat);
             go.AddComponent<MeshCollider>().sharedMesh = mesh;
+            go.layer = StageProjectSettingsStep.Ground;
             go.isStatic = true;
 
             ctx.Shot("overview", new Vector3(0f, 30f, -40f), new Vector3(0f, 2f, 0f), 55f);

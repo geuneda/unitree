@@ -12,7 +12,7 @@ Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **
 
 | # | Three.js 환경의 성질 | Unity 기본 상태 | 이 하네스가 복원하는 방법 |
 |---|---|---|---|
-| 1 | 모든 게 텍스트(JS 코드) | 씬/프리팹이 GUID로 얽힌 YAML, GUI 중심 도구 | 씬은 `IBuildStep` 코드가 생성, 렌더 파이프라인 설정은 `ISettingsStep` 코드, HLSL·UXML/USS·코드로 만든 머티리얼/Volume/라이팅/파티클/애니메이션 클립 |
+| 1 | 모든 게 텍스트(JS 코드) | 씬/프리팹이 GUID로 얽힌 YAML, GUI 중심 도구 | 씬은 `IBuildStep` 코드가 생성, 렌더 파이프라인과 프로젝트 설정(품질 레벨·레이어·Player·Time·Physics)은 `ISettingsStep` 코드, HLSL·UXML/USS·코드로 만든 머티리얼/Volume/라이팅/파티클/애니메이션 클립 |
 | 2 | 수정→새로고침이 초 단위 | 컴파일 + 도메인 리로드, GUI 에디터와 모달 대화상자 | Domain Reload 끔, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 본문만 바꾸면 컴파일 없이 적용하는 핫 루프(`loop.ps1 -Hot`), 대화상자에 멈추지 않는 `-automated` 에디터·창 없는 에디터(`open.ps1 -Headless`) |
 | 3 | 스크린샷·콘솔·FPS를 눈/기계로 확인 | 에이전트가 화면을 못 봄 | `harness_capture/play`가 PNG + 이미지 통계, `harness_console/stats`가 JSON, 같은 시나리오를 개발 빌드 플레이어에서(`player.ps1`: 에디터 없는 프레임 시간, 게임이 그린 실제 화면과 캡처·에디터 샷의 비교) |
 | 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/SDF/스플라인/스캐터), GPU 텍스처 베이크(`ctx.BakeTexture`, C#과 같은 HLSL 노이즈), URP Volume·데칼을 코드로, 파티클·키프레임 애니메이션을 코드로(`ctx.Particles`, `ctx.AnimationClip` + Playables `ClipPlayer`) |
@@ -93,7 +93,8 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
   "hot": {"applied","reloaded":[{"file","methods","ms"}],"overridesCleared","fallback","changes":[{"file","kind","line","methods"}]},   // -Hot만
   "build": {"fingerprint","steps":[{"type","module","ms","error","file","line"}], "warnings":[],   // warnings: 머티리얼 설정 실수 등(실패 아님, 읽을 것)
             "phases": {"check","settings","steps","cleanup","save","lighting","fingerprint"},   // 빌드 시간이 든 곳(ms)
-            "settings": {"assets","written","assigned","pipeline","switched","reloadRequested"}, ...},   // ISettingsStep이 만든 RP 에셋·이번에 다시 쓴 것·활성 파이프라인·전환
+            "settings": {"assets","written","assigned","pipeline","switched","reloadRequested",   // ISettingsStep이 만든 RP 에셋·이번에 다시 쓴 것·활성 파이프라인·전환
+                         "project": {"owned","changed":[],"drift":[]}}, ...},   // 설정 스텝이 소유한 ProjectSettings 값 수·이번에 쓴 것·코드 밖에서 바뀌었던 것(아래 "프로젝트 설정")
             // 핫 루프는 빌드하지 않는다: {"ok":true,"skipped":true,"note"}
   "play": {"success","probeReady","frames","gameSec","modules","failedModules","inputEventsApplied",
            "events":[{"name":"SpinnerLap","count":2}],     // EventBus 발행 횟수 → 게임플레이를 기계적으로 검증 (클립 이벤트는 "ClipEvent:<이름>")
@@ -117,7 +118,8 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
              "errorModules","restore","check","owner","takeover",   // timings에 checkSec/syncSec/restoreSec 추가
              "contractsUpdated","contractsDeleted","contractsBehind",   // 계약 폴더(아래 "계약 폴더"): 바꾼 것·지운 것·이 worktree가 안 바꿔 건너뛴 것
              "contractChanged":[{"path","type","change","line"}],"contractConflicts":[{"type","full","path","line","other","otherLine","otherOwner"}],
-             "contractOwner","contractTakeover"},   // 계약 거부 사유(stage=submit)
+             "contractOwner","contractTakeover",   // 계약 거부 사유(stage=submit)
+             "settingsWrittenBack","settingsNotWrittenBack","settingsNote"},   // 루프의 설정 스텝이 바꾼 ProjectSettings를 worktree로 되복사했는지(아래 "프로젝트 설정")
   "land": {"branch","into","phase","head":{"before","after"},"merged","fastForward","kept","reverted",  // land.ps1만.
            "modules","files","stash":{"sha","paths","dropped"},"releasedOwners","releasedContracts","errorModules","undo","restore",
            "conflicts","missingMeta","owner","foreign","uncommitted","contractOwner","contractChanged","contractConflicts",
@@ -131,14 +133,16 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 셰이더만 수정 ~4.1s / **~2.6s**(도메인 리로드 없음), 모듈 C# 1줄 수정 ~9.5s / **~7.0s**(창: 컴파일 ~0.4s + 도메인 리로드 ~2.7s + 리로드 뒤 에디터 자체
 작업 ~0.9s + 리로드 직후 빌드 ~1.2s + 플레이 ~2.8s; 창 없음: 리로드 ~2.1s, 리로드 뒤 작업 없음, 플레이 ~1.6s), **`-Hot`(본문만) ~3.3s / ~2.1s**
 (도메인 리로드 뒤 첫 핫 루프는 +0.9s), 컴파일 에러 보고 **~1.1s**. 창 없는 에디터는 플레이 동안 Game 뷰가 그리지 않아 빠르다(캡처만 그림).
-도메인 리로드는 에디터를 오래 띄워 둘수록 늘었다(2.5 → 3.5s, 아래 "함정").
+도메인 리로드는 에디터를 오래 띄워 둘수록 늘었다(2.5 → 3.5s, 아래 "함정"). 리로드 뒤 ~14 s 동안 요청이 401("Editor token rotated")이면
+Pipeline의 새 토큰이 늦게 적힌 것이다(C# 1줄 루프가 ~24 s, 하네스 코드와 무관 — ROADMAP O-12). 루프는 기다렸다가 계속한다.
 
 ## 규칙 (반드시 지킬 것)
 
 1. **`.unity` / `.prefab` / `.asset` YAML 직접 수정 금지.** 씬은 `Assets/Game/<Module>/Builders/`의 `IBuildStep`이 만든다.
    `Assets/Scenes/Main.unity`와 `Assets/Generated/`는 빌드 산출물이며 gitignore 되어 있다(고쳐도 다음 빌드에 덮어써진다).
    렌더 파이프라인(URP·Renderer 에셋, Renderer Feature, 품질 레벨별 파이프라인)은 같은 폴더의 `ISettingsStep` 코드가 만든다(아래 "렌더 설정").
-   그 밖의 프로젝트 설정도 YAML이 아니라 에디터 API(`harness_setup` 등)로 바꾼다.
+   품질 레벨·레이어·태그·Player·Time·Physics 같은 `ProjectSettings/` 값도 같은 설정 스텝이 소유한다(아래 "프로젝트 설정" — Project Settings 창이나
+   YAML로 바꾸면 다음 루프가 되돌리고 `drift`로 보고). 그 밖의 설정도 YAML이 아니라 에디터 API(`harness_setup` 등)로 바꾼다.
 2. **텍스트로 쓸 수 있는 형태만.** 셰이더 = 손으로 쓴 HLSL `.shader`(Shader Graph 금지), UI = UI Toolkit UXML/USS(uGUI 프리팹 금지; 모양은 UI 킷 클래스·변수, 아래 "UI 킷"),
    머티리얼·파티클·Volume·라이팅·PanelSettings = 빌더 코드(`BuildContext`)로 생성. 애니메이션은 `ctx.AnimationClip`(키를 코드로) + `ctx.Animate`
    (Playables — AnimatorController 에셋 없음, 아래 "파티클·애니메이션"). 그 밖의 GUI 에셋(Timeline 등)이 필요하면 코드로 생성한다.
@@ -173,7 +177,8 @@ Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json:
                                에디터의 유휴 CPU 억제, HarnessContracts: 계약 폴더의 lint 규칙과 소스 선언 읽기) 와 BuildContext(+.Materials: LitMaterial,
                                +.Particles: Particles·ParticleMaterial, +.Animation: AnimationClip·Animate, +.Bake: BakeTexture·FloatTexture,
                                +.Decals: Decal·DecalMaterial)/IBuildStep,
-                               SettingsContext/ISettingsStep(렌더 설정), HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
+                               SettingsContext(+.Project: ProjectSettings 값, ProjectValues: 값 묶음)/ISettingsStep(렌더·프로젝트 설정), HarnessReleaseBuild
+                               (asmdef Harness.Editor, Editor 전용)
   UI/                          DefaultRuntimeTheme.tss (UI Toolkit 기본 테마) + HarnessKit.uss (UI 킷: 디자인 변수·컴포넌트 클래스, 텍스트)
   Shaders/                     HarnessBake.hlsl (GPU 베이크 셰이더의 정점·도우미) + HarnessNoise.hlsl (C# Noise와 같은 HLSL 노이즈)
   Tools~/                      도구 본체(.ps1, Harness.psm1) + templates/ (진입점, 기본 시나리오, 기존 프로젝트용 안내서, HarnessInput.cs)
@@ -449,6 +454,48 @@ public sealed class FooRenderSettings : ISettingsStep     // Builders/ 폴더, �
   스카이박스·반사)와 라이팅 데이터 참조도 fingerprint에 들어간다(GPU로 구운 큐브맵·그 SH는 참조만 — GPU마다 끝자리가 다를 수 있어 기준 이미지가 본다).
 - URP의 전역 설정(`Assets/Settings/UniversalRenderPipelineGlobalSettings.asset`, `DefaultVolumeProfile.asset`)은 URP가 없으면 새 GUID로 만들어서 커밋된 채 둔다.
 
+### 프로젝트 설정 (ISettingsStep, G1-5)
+
+```csharp
+public sealed class FooProjectSettings : ISettingsStep       // 렌더 설정과 같은 스텝이어도 된다
+{
+    public const int Enemy = 10;
+    public int Order => 10;
+    public void Apply(SettingsContext ctx)
+    {
+        ctx.Layer(Enemy, "Enemy");                             // 사용자 레이어(3, 6-31). 빌드 스텝은 Enemy 상수나 LayerMask.NameToLayer("Enemy")
+        ctx.Tag("Pickup");
+        ctx.Player(p => { p.ColorSpace = ColorSpace.Linear; p.DefaultScreenWidth = 1280; p.DefaultScreenHeight = 720; });
+        ctx.Time(t => t.FixedTimestep = 0.02f);
+        ctx.Physics(p => { p.Gravity = new Vector3(0, -20, 0); p.IgnoreCollision("Enemy", "Enemy"); });
+        // 품질 레벨 목록 전체(이 순서), 한 스텝만. pc·mobile = 같은 스텝의 ctx.UniversalPipeline(...)이 돌려준 에셋
+        ctx.QualityLevels(
+            new QualityLevelValues("Mobile") { Pipeline = mobile, DefaultFor = new[] { "Android", "iPhone" }, ExcludedPlatforms = new[] { "Standalone" }, LodBias = 1f },
+            new QualityLevelValues("PC") { Pipeline = pc, DefaultFor = new[] { "Standalone" }, VSyncCount = 0 }.Set("terrainPixelError", 1));
+        ctx.ProjectSetting("TagManager", "m_RenderingLayers.Array.data[1]", "Glow");   // 헬퍼에 없는 값: 파일 + 직렬화 경로
+    }
+}
+```
+- `ProjectSettings/`는 에디터가 시작할 때 필요해서 RP 에셋처럼 생성물로 둘 수 없다. 그래서 **코드가 이름 붙인 값만 소유**한다: 매 빌드(`harness_build`·
+  `harness_setup`)가 읽어 보고 다르면 쓰고(`build.settings.project.changed`: `"키: 전 -> 후"`), 설정 파일을 저장한다. 값 묶음(`PlayerValues` 등)에서 null인 것과
+  이름 붙이지 않은 값은 커밋된 YAML 그대로다. 결과를 좌우하는 값은 코드에 적는다.
+- **드리프트**: 마지막 빌드가 남긴 값을 `Library/Harness/project-settings.json`에 둔다. 찾은 값이 코드와도 그것과도 다르면 코드가 바뀐 게 아니라 Project Settings 창·YAML이
+  바꾼 것 → 되돌리고 `build.settings.project.drift`(키) + `build.warnings`("changed outside the code"). 6.0·6.3·6.6 모두 밖에서 고친 ProjectSettings YAML을 루프의
+  recompile(`AssetDatabase.Refresh`)에 다시 읽으므로 손으로 고친 YAML도 잡힌다. **바꾸려면 설정 스텝을 고친다.**
+- 목록은 선언한 것이 전부: 레이어를 하나라도 선언하면 다른 사용자 레이어는 비운다(모든 설정 스텝이 끝난 뒤), `ctx.Tag`도 선언한 목록 그대로(내장 태그는 선언할 필요
+  없음), `ctx.QualityLevels`는 레벨을 이름으로 맞춰 순서를 바꾸고·더하고(앞 레벨의 복사, Unity의 "Add Quality Level"처럼)·지운다(에디터의 레벨·플랫폼별 기본 레벨은 이름을
+  따라감). 에디터가 쓰는 품질 레벨은 활성 플랫폼의 기본 레벨(`DefaultFor`)이다 — 에디터에서 다른 레벨을 클릭해도 다음 루프가 되돌린다(그 레벨로 보려면 코드의 기본 레벨을
+  바꾼다). 활성 파이프라인이 바뀌면 렌더 설정의 리로드 경로(`settings.switched`)를 탄다.
+- 두 스텝이 같은 키를 다른 값으로 정하면 예외. 오타도 스텝의 줄로 예외: 품질 레벨 필드(비슷한 이름), 알 수 없는 플랫폼 이름(목록), 내장 레이어 번호, 선언 안 된
+  레이어 이름(`IgnoreCollision`), 없는 직렬화 경로. 숫자는 1e-6(상대) 안이면 같은 값이다 — 6.3은 fixed timestep을 분수로 저장해 0.02가 0.0199999921로 읽힌다.
+- 공개 API가 있으면 API로 쓴다(색 공간 전환의 텍스처 재임포트 같은 부수 효과), 없으면 SerializedObject. 쓸 때 Unity가 그 파일 전체를 이 버전의 형식으로 다시 쓴다
+  (6.3: TagManager가 serializedVersion 3, 옛 형식의 TimeManager·DynamicsManager도) — 값이 같으면 쓰지 않으니 새 클론의 `git status`는 깨끗하다.
+- 소유한 값은 `build.fingerprint`에 들어간다(`fingerprint.txt`의 `--project--`). `setup: attach` 프로젝트에서는 설정 스텝이 돌지 않는다(렌더 설정과 같음).
+- **worktree에서**: 설정 스텝을 고친 모듈을 submit하면 에디터 트리의 루프가 ProjectSettings 파일을 바꾼다. submit은 그 파일들을 먼저 백업하고(빨간·중단된 submit은
+  바뀐 파일만 복원), 녹색이면 `.meta`처럼 worktree로 되복사한다(`submit.settingsWrittenBack` — **모듈과 함께 커밋할 것**, land 때 에디터 트리 사본과 같아서 깨끗하게
+  병합된다). 에디터 트리 사본이나 worktree 사본이 이미 올라간 것과 달랐으면(다른 worktree의 미병합 설정, 이 worktree에 없는 병합된 설정) 되복사하지 않고
+  `settingsNotWrittenBack` + `settingsNote` → `git merge master` 뒤 다시 submit하거나, `open.ps1 -Own` 에디터의 루프가 쓴 파일을 커밋한다(ROADMAP G5-6).
+
 ## 에디터 커맨드 (모두 JSON 반환)
 
 호출: `tools/uc.ps1 <command> '<JSON 인자>'` (권장: 빠르고 PowerShell 인용 문제 없음, 락 적용)
@@ -456,7 +503,7 @@ public sealed class FooRenderSettings : ISettingsStep     // Builders/ 폴더, �
 
 | 커맨드 | 하는 일 |
 |---|---|
-| `harness_build` | Builders의 ISettingsStep(렌더 설정, harness 프로젝트만) → IBuildStep을 Order 순으로 빈 씬에 실행 → `buildScene` 저장. `{ok, fingerprint, steps[], settings, cacheHits, bakes, bakesSkipped, deletedAssets}`. `dry_run`, `no_cache`. 빌드 스텝이 없고 `playScene`이 build가 아니면(기존 프로젝트) 플레이 씬을 열고 에셋 기준 fingerprint만(`skipped`) |
+| `harness_build` | Builders의 ISettingsStep(렌더·프로젝트 설정, harness 프로젝트만) → IBuildStep을 Order 순으로 빈 씬에 실행 → `buildScene` 저장. `{ok, fingerprint, steps[], settings, cacheHits, bakes, bakesSkipped, deletedAssets}`. `dry_run`, `no_cache`. 빌드 스텝이 없고 `playScene`이 build가 아니면(기존 프로젝트) 플레이 씬을 열고 에셋 기준 fingerprint만(`skipped`) |
 | `harness_capture` | `{"preset":"all"\|"<name>"\|"main","out":"HarnessOut/capture","scene":"","ui":true}` 편집 모드 오프스크린 PNG(프로젝트 캡처 크기, 화면의 카메라들 + 스크린 공간 UI 합성) + `meanLuma/stdLuma/blank/dark/magenta/cameras/ui`. 샷 = 씬의 ShotPreset + 설정 `shots`. 플레이 씬을 먼저 연다(`"scene":"open"`이면 열린 씬 그대로) |
 | `harness_golden` | `{"shots":"[{\"path\",\"name\",\"ignore\":[{x,y,w,h}]}]","golden":"","key":"default","out":"","update":false}` 샷을 `<golden>/<Unity 버전>/<key>/<파일>`과 비교(샷마다 status·meanDiff·changedRatio·ssim·rect, 바뀌었으면 `<out>/golden/<샷>.diff.png`) 또는 그 폴더에 씀(`update`). 루프가 매번 부른다 |
 | `harness_play` | `{"scenario":"tools/scenarios/default.json"\|"{...inline}","out":"HarnessOut/play"}` 즉시 반환 → `harness_play_status` 폴링 |
@@ -467,7 +514,7 @@ public sealed class FooRenderSettings : ISettingsStep     // Builders/ 폴더, �
 | `harness_contracts` | `{"sources":"[{id, path \| text}]"}` C# 소스가 선언하는 최상위 타입(`name, ns, full, kind, line, hash`; Roslyn, 컴파일 없음). submit·land의 계약 검사가 부른다 |
 | `harness_shaders` | Assets/ 셰이더의 현재 컴파일 에러(file, line, msg, module). 셰이더 에러는 로그가 아니라 상태라 매 루프 조회 |
 | `harness_ping` | domainReloads, isCompiling, isPlaying, compileFailed, mark, unityVersion |
-| `harness_setup` | `setup: harness`면 프로젝트 설정 멱등 적용(Domain Reload off, runInBackground, 동기 셰이더 컴파일(`syncShaders`), 템플릿 샘플 삭제, ISettingsStep 실행 → `settings`). `attach`면 아무것도 안 바꾸고 `recommendations`만(`{"apply":"domainReload,syncShaders"}`로 명시 적용). Debug 코드 최적화(세션 한정)는 둘 다 |
+| `harness_setup` | `setup: harness`면 프로젝트 설정 멱등 적용(Domain Reload off, runInBackground, 동기 셰이더 컴파일(`syncShaders`), 템플릿 샘플 삭제, ISettingsStep 실행 → `settings`·`warnings`). `attach`면 아무것도 안 바꾸고 `recommendations`만(`{"apply":"domainReload,syncShaders"}`로 명시 적용). Debug 코드 최적화(세션 한정)는 둘 다 |
 | `harness_sync_csproj` | .sln/.csproj 생성(사용자 외부 에디터 설정은 복원) — compile-check msbuild 백엔드용 |
 | `harness_hot` | `{"mode":"apply"\|"check"\|"prepare"\|"commit"}` 핫 루프(위 "핫 루프"). apply: 마지막 컴파일 스냅샷과 비교해 `[CodeReload]` 본문만 바뀌었으면 앞선 교체를 지우고 인터프리터로 다시 넣음 → `{hot, applied, changes}`, 아니면 `{hot:false, reason, changes}`. check: 판정만. prepare/commit: 전체 루프가 컴파일 전후에 부른다 |
 | `harness_quit` | 응답 ~0.3s 뒤 `EditorApplication.Exit(0)`(저장 확인 없음). 직접 부르지 말고 `tools/quit.ps1`(락 + 종료 대기) |
@@ -664,15 +711,15 @@ git worktree add ..\wt-foo -b agent/foo
 cd ..\wt-foo\AgentHarness                                                        # 이후 편집·명령은 모두 여기서
 powershell -ExecutionPolicy Bypass -File tools/compile-check.ps1 -Module Foo    # 에디터 없이 ~0.5s, 동시 실행 OK
 powershell -ExecutionPolicy Bypass -File tools/submit.ps1 -Module Foo          # 에디터 트리에서 루프(트랜잭션)
-git add -A; git commit -m "Foo: ..."                                             # submit이 되복사한 .meta까지
+git add -A; git commit -m "Foo: ..."                                             # submit이 되복사한 .meta·ProjectSettings까지
 powershell -ExecutionPolicy Bypass -File tools/land.ps1                         # 이 브랜치를 에디터 트리 브랜치에 병합(트랜잭션)
 ```
 
 `submit.ps1` = ① worktree 소스로 compile-check(락 없음, `-Dependents`: 바뀐 계약을 쓰는 다른 모듈도; 실패면 아무것도 복사하지 않고 `stage=compile`,
 `submit.phase=check`) → ② 에디터 락 → 계약 검사(위 "계약 폴더": 올라간 타입 변경·이름 중복·남의 미병합 계약 파일이면 `stage=submit`으로 거부) → 덮어쓰거나
 지울 파일을 백업하고 저널을 남긴 뒤 `Assets/Game/<Module>/`를 에디터 트리로 미러링, `Assets/Game/Contracts/`는 이 worktree가 바꾼 파일만
-→ ③ 에디터 트리에서 평소 루프 → ④ 녹색이면 유지하고 Unity가 만든 `.meta`를
-worktree로 되복사(**커밋할 것**), 아니면 **백업으로 되돌리고 재컴파일**해 에디터 트리를 submit 전 상태로 돌려놓는다.
+→ ③ 에디터 트리에서 평소 루프 → ④ 녹색이면 유지하고 Unity가 만든 `.meta`와 설정 스텝이 바꾼 ProjectSettings 파일을
+worktree로 되복사(**커밋할 것**; 위 "프로젝트 설정"), 아니면 **백업으로 되돌리고(ProjectSettings 포함) 재컴파일**해 에디터 트리를 submit 전 상태로 돌려놓는다.
 결과는 loop와 같은 report.json + `submit` 필드(worktree의 `HarnessOut/submit/`). 종료코드 0 = 녹색이고 반영됨.
 
 - 컴파일 실패는 항상 되돌린다. 런타임/린트/셰이더/샷 실패도 기본은 되돌린다. `-KeepOnFail`은 유지 — `submit.errorModules`가
@@ -722,7 +769,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1           # 이 worktree
 submit한 파일은 에디터 트리에 미커밋 사본으로 남아 그냥 `git merge agent/foo`는 "would be overwritten"으로 거부된다. `land.ps1`이 락 안에서 처리한다.
 worktree에서 인자 없이 돌리면 그 worktree의 브랜치, 에디터 트리에서는 `-Branch agent/foo`. 결과는 `HarnessOut/land/report.json`. 종료코드 0 = 병합되고 녹색.
 
-1. (락 없음) 브랜치를 체크아웃한 worktree에 미커밋 파일이 있으면 거부(`land.uncommitted`) — 커밋된 것만 병합된다. **submit이 되복사한 `.meta`도 커밋할 것.**
+1. (락 없음) 브랜치를 체크아웃한 worktree에 미커밋 파일이 있으면 거부(`land.uncommitted`) — 커밋된 것만 병합된다. **submit이 되복사한 `.meta`·ProjectSettings도 커밋할 것.**
 2. (락) 아무것도 건드리기 전에 거부(`stage=land`): 에디터 트리가 detached/병합·리베이스 중/staged 변경 있음 ·
    `git merge-tree`로 미리 병합해 충돌(`land.conflicts` → worktree에서 `git merge master`, 해결, 커밋, submit, 다시 land) ·
    브랜치가 `Assets/`에 추가하는 파일·폴더의 `.meta`가 커밋 안 됨(`land.missingMeta`) · 건드리는 모듈에 다른 worktree의 미병합 submit(`land.owner`, `-Takeover`) ·
@@ -781,14 +828,14 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
   `-Keep`은 녹색이어도 클론과 에디터를 남긴다(비교·디버깅용).
 - `-UnityVersion <설치된 버전>`: 클론의 `ProjectVersion.txt`를 그 버전으로 바꿔서 연다(P-1; 이때 `git status` 변경은 보고만 한다).
 - `-SelfTest`: 루프 뒤 클론에서 `tools/selftest.ps1`(매트릭스 1–8, 루프의 fingerprint를 기대값으로)까지 돌린다 → `selftest.json`,
-  report의 `selftest`(`stage=selftest`). worktree는 클론 옆(`ah-fresh-st-a/-b/-o`)에 생겼다가 지워진다. 전체 ~9분.
+  report의 `selftest`(`stage=selftest`). worktree는 클론 옆(`ah-fresh-st-a/-b/-o`)에 생겼다가 지워진다. 전체 ~9분(ROADMAP O-12가 겹치면 ~13–15분).
 - 언제: `tools/`, `ProjectSettings/`, `Packages/`, `.gitignore`, 에디터 시작 경로(`[InitializeOnLoad]`)를 바꿨을 때와 공개 전.
 
 ## 하네스 자기 검증 (tools/selftest.ps1)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~9분
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 345ba0d7
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~9분(O-12면 ~12분)
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 1d7568ed
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
 - 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark/magenta 없음, 모든 샷 1280x720에 HUD 합성, 기준 이미지: 루프 1이 `HarnessOut/selftest/golden`에
@@ -800,7 +847,9 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   에디터에 포커스가 없던 시도는 3번까지 다시 — 백그라운드에선 Input System이 장치를 먼저 꺼서 격리가 돌 일이 없다, ROADMAP G3-9) +
   렌더 설정(W4: RP 에셋이 생성물이고 루프 2·3은 다시 쓰지 않음, 지우면 루프 한 번으로 다시 생기고 fingerprint·픽셀·`git status` 같음; 반사 큐브맵에 잘못된 텍셀이
   없고 가장 밝은 텍셀이 태양 방향(2° 안); 앰비언트 = 라이팅 데이터의 큐브맵 SH; `AmbientProbe` 균일 환경 → Flat과 같음·쓰레기 텍셀 거부; 머티리얼 경고 3종과
-  `LitMaterial`의 이미션·알파 클립) + 콘텐츠 헬퍼(G1-3: 빌드된 불씨의 고정 시드·`AlwaysSimulate`, Halo의 `ClipPlayer`; 픽스처 클립의 경로·컴포넌트·머티리얼 속성·
+  `LitMaterial`의 이미션·알파 클립) + 프로젝트 설정(G1-5: 설정 스텝이 소유한 값을 루프 2·3은 쓰지 않음; YAML을 손으로 고치고(Mobile 레벨 이름, PC의 LOD 바이어스,
+  레이어 이름 바꾸기·추가) Project Settings 창처럼 메모리에서 바꾼 값(PC의 vSync, 에디터의 품질 레벨 → 파이프라인 전환)을 루프 한 번이 되돌리고 6개 모두 `drift`, 파일·에디터에
+  코드 값, fingerprint·픽셀·`git status` 같음 — 샘플 버전은 바이트까지) + 콘텐츠 헬퍼(G1-3: 빌드된 불씨의 고정 시드·`AlwaysSimulate`, Halo의 `ClipPlayer`; 픽스처 클립의 경로·컴포넌트·머티리얼 속성·
   Transform 속성 오타 → 경고 한 줄씩, 선형 회전 샘플, 파티클 두 번 시뮬레이션이 같음, 가산 `ParticleMaterial`; 플레이 중 런타임 클립을 받은 `ClipPlayer`의
   끝까지 재생·이벤트 `ClipEvent:RiseEnd`·크로스페이드) + UI 킷(G1-4: 루프의 `play.uiClock`이 `frames`; 빌드된 HUD의 Gauge·ToastStack·킷 버튼, 테마 변수 해석,
   토스트 클래스; 플레이 중 라벨·게이지가 모듈 데이터 객체를 따름(바인딩), REVERSE 버튼을 이름으로 클릭, 페이드 중 토스트 캡처가 두 번 픽셀까지 같음) + GPU 베이크(G4-1:
@@ -817,9 +866,11 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   에디터 트리 루프의 샷과 허용치 안에서 같음(커밋된 기준 이미지도 `changed` 0) → `quit.ps1`) · 7 worktree submit(게이트 거부, 강제 submit 되돌림 +
   다른 worktree의 새 모듈·계약은 락 대기 후 유지(계약 파일은 그 worktree 소유, 게이트가 계약을 쓰는 모듈도 컴파일), 런타임 에러 되돌림, sync 직후 kill →
   `recoveredSubmit`; 계약(W9): 올라간 타입 변경 거부(주석·줄바꿈은 같은 해시), 남의 미병합 계약과 같은 이름 거부, 남의 미병합 계약 파일 거부, 다른 모듈이 쓰는
-  이름(`Light`)은 게이트가 Stage의 CS0104로 거부(G5-3), 자기 미병합 계약 수정은 녹색) ·
+  이름(`Light`)은 게이트가 Stage의 CS0104로 거부(G5-3), 자기 미병합 계약 수정은 녹색; 프로젝트 설정(G1-5): 새 모듈의 설정 스텝이 레이어를 선언 → 에디터 트리의
+  `TagManager.asset`이 바뀌고 submit이 worktree로 되복사, 런타임 에러 submit에 넣은 설정 스텝의 레이어는 되돌리며 TagManager도 복원) ·
   8 land(fast-forward + 그 사이 submit 락 대기, 모듈·계약 파일 소유 해제, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
-  병합 직후 kill → `recoveredLand`; 계약: 올라간 이름과 같은 이름·올라간 타입 변경 거부, Smoke 파일에 덧붙인 이벤트의 submit → land(병합 커밋) → 소유 해제).
+  병합 직후 kill → `recoveredLand`; 계약: 올라간 이름과 같은 이름·올라간 타입 변경 거부, Smoke 파일에 덧붙인 이벤트의 submit → land(병합 커밋) → 소유 해제;
+  되복사한 `TagManager.asset`이 모듈과 함께 land돼 에디터 트리 깨끗).
   에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
   1번 끝에는 플레이어 실행(W8): `player.ps1`이 기본 시나리오 + 게임 카메라 캡처를 개발 빌드 플레이어에서 돌린다 — 녹색, 1280x720 창·vSync 0, 에디터와 같은
   `play.events`, 플레이어의 프레임·렌더 통계, 샷이 에디터 것과 파티클 차이 안(바뀐 픽셀 ≤ 1%, 평균 ≤ 2), 그 프레임의 화면 = 캡처(`screen.vsShot` same),
@@ -840,13 +891,13 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-09-30 W9, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W6c에서 스모크 씬에 GPU 베이크 지형·소품이 더해져 새 값):
+- 검증한 버전(2026-09-30 W10, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W10에서 지형·소품이 레이어 Ground·Props로 가고 소유한 프로젝트 설정 값이 더해져 새 값):
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
-  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `c8561a2d…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크·`-automated`·창 없는 전용 에디터 포함), 샷 72.6/61.3/48.2(6.3과 같음). 플레이어 단계는 건너뜀 — 6.3이 저장한 URP 전역 설정(에셋 버전 10)을 URP 17.0(8)이 빌드에 거부 |
-  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `345ba0d7…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 실행 포함), 커밋된 기준 이미지와 같음 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `7cda8899…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 330–414 fps), 샷 72.6/61.3/48.3. `render.batches`는 null(6.6엔 그 카운터가 없다, 아래 "함정") |
+  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `330ebb7a…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크·`-automated`·창 없는 전용 에디터 포함), 샷 72.6/61.3/48.2(6.3과 같음). 플레이어 단계는 건너뜀 — 6.3이 저장한 URP 전역 설정(에셋 버전 10)을 URP 17.0(8)이 빌드에 거부 |
+  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `1d7568ed…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 실행 포함), 커밋된 기준 이미지와 같음 |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `995ce417…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 312–414 fps), 샷 72.6/61.3/48.3. `render.batches`는 null(6.6엔 그 카운터가 없다, 아래 "함정") |
 
   `-automated`·`-debugCodeOptimization`·`-batchmode -ignoreCompilerErrors`와 창 없는 에디터의 렌더(O-11 우회 포함)는 세 버전에서 같게 동작했다.
 
@@ -857,7 +908,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 하네스 패키지에는 버전 문자열을 쓰지 않는다. 에디터·컴파일러 경로는 실행 중인 에디터 프로세스 → `unity editors --installed`에서 얻고,
   API 차이는 `Runtime/UnityCompat.cs` 한 곳에서 `#if UNITY_6000_4_OR_NEWER`처럼 가른다(예: 6.4부터 `FindObjectsSortMode` obsolete).
   선택 패키지는 asmdef `versionDefines`로 가른다: `AGENTHARNESS_URP`(URP 카메라 데이터 복사), `AGENTHARNESS_RP_CORE`(`ctx.VolumeProfile`),
-  `AGENTHARNESS_INPUT_SYSTEM`(입력 재생). 없으면 그 기능만 빠지고 컴파일은 된다(Built-in·구 Input Manager 프로젝트).
+  `AGENTHARNESS_INPUT_SYSTEM`(입력 재생), `AGENTHARNESS_PHYSICS`(`ctx.Physics`). 없으면 그 기능만 빠지고 컴파일은 된다(Built-in·구 Input Manager 프로젝트).
   모듈 코드도 버전을 타는 API는 `UnityCompat`을 쓰거나 같은 방식으로 가른다.
 
 ## 설정 (ProjectSettings/AgentHarness.json)
@@ -953,6 +1004,10 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   URP를 만들고 배정 → selftest 1번 카메라 픽스처의 첫 캡처에서 스택 Overlay 카메라의 새 Unlit 쿼드가 없었다(두 번째 캡처엔 있음, 비동기 셰이더 컴파일은 꺼져 있음,
   6.6 새 클론 2회 연속·같은 클론을 Built-in 시작으로 되돌려 재현; 처음부터 URP로 연 세션은 셰이더 캐시를 지워도 정상, 6.0·6.3은 정상). 전환 뒤 도메인 리로드
   한 번이면 정상 → 설정 스텝이 활성 파이프라인을 바꾸면 `EditorUtility.RequestScriptReload()`, `uc.ps1`·루프가 리로드를 기다린다.
+- **에디터에서 품질 레벨을 클릭하면 그 뒤 루프가 모두 그 레벨의 파이프라인으로 돌았다**(W10 전: 샘플에서 Mobile을 누르면 렌더 스케일 0.8·SSAO 없음, 보고 없음).
+  `m_CurrentQuality`가 ProjectSettings에 저장되는 "설정"이라서다 → 설정 스텝이 품질 레벨을 선언하면 에디터의 레벨 = 활성 플랫폼의 기본 레벨로 되돌리고 `drift`로 보고.
+- **`Time.fixedDeltaTime` 세터는 TimeManager를 dirty로 만들지 않는다**(에디터 모드에서 값은 바뀌지만 저장되지 않음; `Physics.gravity`는 만든다) → 설정 스텝이 쓴
+  설정 오브젝트는 하네스가 `SetDirty` + `SaveAssets`. `UnityEngine.QualityLevel`(옛 enum)이 있어서 품질 레벨 값 묶음은 `QualityLevelValues`다.
 - 6.6은 새 씬의 **첫 렌더에 기본 환경광(스카이박스 앰비언트·반사)이 아직 없다**(빈 씬 첫 렌더 114.7 → 다음부터 197). 설정별로 밝기를 잴 때 첫 렌더를
   빼지 않으면 먼저 잰 설정만 어둡다(P-4 조사 초기에 "소프트 그림자만 어둡다"로 잘못 본 원인).
 - W4 전 `build.fingerprint`는 씬의 GameObject만 훑어서 RenderSettings(안개·앰비언트·스카이박스·반사)와 라이팅 데이터가 바뀌어도 그대로였다 → 지금은 들어간다.
@@ -1110,7 +1165,7 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - 에디터 플레이 모드 FPS는 에디터 오버헤드·autotick 영향을 받는다. 절대값이 아니라 **변경 전후 비교**용이다(`editorFocused` 확인). 실제 성능은
   `tools/player.ps1`(개발 빌드 플레이어, 샘플은 에디터의 ~3.8배).
 - Code Optimization은 Debug(정확한 예외 줄 번호). Release면 throw 위치가 메서드 끝 줄로 보고되고, **절차적 메시·텍스처의 float 결과가 달라져
-  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `345ba0d7…`).
+  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `1d7568ed…`).
   `CompilationPipeline.codeOptimization`은 에디터 세션 동안만 유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다
   → `HarnessCodeOptimization`([InitializeOnLoad])이 도메인이 로드될 때마다 이 프로젝트만 Debug로 되돌린다(재컴파일 1회; 그래서 이 프로젝트에선
   Release가 유지되지 않는다). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다. `open.ps1`은 명령줄 `-debugCodeOptimization`으로 열어서
