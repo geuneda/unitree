@@ -474,6 +474,10 @@ namespace Harness.Editor
             ps.scaleMode = UnityEngine.UIElements.PanelScaleMode.ScaleWithScreenSize;
             ps.referenceResolution = new Vector2Int(1920, 1080);
             ps.match = 0.5f;
+            // 6.6 starts a new PanelSettings at the DPI of the screen the Editor is on (144 on a 150% display, 96 headless):
+            // the asset, and the fingerprint, would follow the display. Scale-with-screen-size does not use it.
+            ps.referenceDpi = 96f;
+            ps.fallbackDpi = 96f;
             ps.sortingOrder = sortingOrder;
             ps = SaveAsset(ps, Path.GetFileNameWithoutExtension(uxmlPath) + "Panel.asset");
 

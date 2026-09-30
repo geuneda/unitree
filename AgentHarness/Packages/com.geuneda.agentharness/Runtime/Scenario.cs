@@ -123,6 +123,7 @@ namespace Harness
     {
         public string name;
         public int presses;   // events with a key or button press (a mouse move or the state a device reports on focus is kept out too, not counted)
+        public bool background;   // the Input System had it off because the Editor/player was in the background; the scenario took it over (G3-9)
     }
 
     [Serializable]
@@ -218,6 +219,7 @@ namespace Harness
         public string activeScene;
         public NamedCount[] events = Array.Empty<NamedCount>();
         public UiClock uiClock = new UiClock();
+        public string uiFocusError;   // null: UI Toolkit panels took input with the Editor/player in the background too (PanelFocus, G3-14); else why not
         public PlayerInfo player = new PlayerInfo();
     }
 }

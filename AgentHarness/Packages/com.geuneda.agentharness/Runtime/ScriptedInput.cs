@@ -179,9 +179,13 @@ namespace Harness
     /// managed side only (keepSendingEvents, as TouchSimulation does with the mouse): their events still arrive, and are
     /// marked handled instead of changing state; the ones with a key or button press are counted (<see cref="Report"/>).
     /// Each device is hard-reset when isolated (no key held, the pointer at 0,0), so every run starts from the same state.
-    /// A device that is disabled already (by the game, TouchSimulation, or while the Editor is in the background) is left
-    /// alone, and isolated if it is enabled during the scenario (focus comes back, a gamepad is plugged in). Dispose enables
-    /// exactly the devices it disabled.
+    /// A device the Input System turned off because the Editor or player is in the background (on focus loss, and when play
+    /// mode starts unfocused) is taken over too (G3-9): its events are dropped before <see cref="InputSystem.onEvent"/>, so
+    /// its presses could not be counted, and focus coming back during the scenario does not turn it on while
+    /// <see cref="ScriptedInput"/> ignores focus. A device disabled by the game or TouchSimulation is left alone, and isolated
+    /// if it is enabled during the scenario (a gamepad is plugged in). Dispose enables exactly the devices it disabled (one it
+    /// took over in the background too: play mode or the player ends right after the scenario, and the Input System turns it
+    /// off again on the next focus loss).
     /// </summary>
     public sealed class RealInputIsolation : IDisposable
     {
@@ -189,10 +193,15 @@ namespace Harness
         // back should a scenario not have ended normally.
         static readonly HashSet<InputDevice> s_Disabled = new HashSet<InputDevice>();
 
+        // InputDevice.disabledWhileInBackground (internal; there is no public way to tell it from a device the game disabled).
+        static readonly System.Reflection.PropertyInfo s_OffInBackground = typeof(InputDevice).GetProperty("disabledWhileInBackground",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics() => RestoreAll();
 
         readonly HashSet<InputDevice> m_Isolated = new HashSet<InputDevice>();
+        readonly HashSet<InputDevice> m_Background = new HashSet<InputDevice>();
         readonly List<InputDevice> m_Order = new List<InputDevice>();
         readonly Dictionary<InputDevice, int> m_Presses = new Dictionary<InputDevice, int>();
         readonly Action<InputEventPtr, InputDevice> m_OnEvent;
@@ -215,20 +224,26 @@ namespace Harness
         }
 
         /// <summary>Every device isolated during the scenario, with the number of its key or button presses kept from the game.</summary>
-        public IsolatedDevice[] Report() => m_Order.ConvertAll(d => new IsolatedDevice { name = d.name, presses = m_Presses[d] }).ToArray();
+        public IsolatedDevice[] Report() => m_Order.ConvertAll(d => new IsolatedDevice { name = d.name, presses = m_Presses[d], background = m_Background.Contains(d) }).ToArray();
 
         void Isolate(InputDevice device)
         {
-            if (m_Disposed || device == null || !device.native || !device.added || !device.enabled) return;
-            InputSystem.DisableDevice(device, keepSendingEvents: true);
-            if (device.enabled) return;
+            if (m_Disposed || device == null || !device.native || !device.added) return;
+            // enabled is no help for a device off in the background: it reads true during an Editor input update.
+            var background = OffInBackground(device);
+            if (!background && !device.enabled) return;
+            InputSystem.DisableDevice(device, keepSendingEvents: true);   // also clears the background state
+            if (device.enabled || OffInBackground(device)) return;
             InputSystem.ResetDevice(device, alsoResetDontResetControls: true);
             m_Isolated.Add(device);
             s_Disabled.Add(device);
+            if (background) m_Background.Add(device);
             if (m_Presses.ContainsKey(device)) return;
             m_Presses[device] = 0;
             m_Order.Add(device);
         }
+
+        static bool OffInBackground(InputDevice device) => s_OffInBackground != null && s_OffInBackground.GetValue(device) is bool off && off;
 
         void OnDeviceChange(InputDevice device, InputDeviceChange change)
         {

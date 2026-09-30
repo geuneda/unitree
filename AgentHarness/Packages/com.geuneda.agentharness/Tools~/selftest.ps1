@@ -16,8 +16,11 @@
     the main camera in its viewport, one before it covered, a capture from the minimap camera by name drawing it alone,
     everything put back; a play-mode fixture: a capture sequence (G3-3, contact sheet, motion) with an overlay canvas
     and a stack camera made during the play; real input (G3-6): Space pressed on the real keyboard during a loop leaves
-    play.events as they were, and the real devices, disabled while a scenario plays, are enabled again after it, after
-    a failed play and after a stopped one; render settings as code (W4): the pipeline assets are generated and not
+    play.events as they were and is counted, with the game focused when play mode starts and (G3-9) unfocused then (the
+    Input System turns the real devices off itself), getting focus back during the play - focus changes made inside Unity
+    (Application.InvokeFocusChanged, the Input System's only source), whatever window has the OS focus; UI Toolkit takes
+    input while the application is unfocused during a scenario (G3-14); the real devices, disabled while a scenario plays,
+    are enabled again after it, after a failed play and after a stopped one; render settings as code (W4): the pipeline assets are generated and not
     rewritten by loops 2-3, deleted they come back with one loop (same fingerprint, pixels and git status); project settings
     as code (G1-5): the settings steps own quality level, player, time, physics and layer values that loops 2-3 do not write,
     and the YAML edited by hand plus values changed in memory as the Project Settings window does (the Editor's quality level
@@ -767,19 +770,39 @@ $SequenceScenarioText = @'
 }
 '@
 
-# Item 1's real input checks (G3-6), eval_file bodies (no usings). The first one presses and releases Space on every real
+# Item 1's real input checks (G3-6, G3-9), eval_file bodies (no usings). The arm presses and releases Space on every real
 # (native) keyboard every few input updates of the next play session - queued on the Input System device, the path the
-# OS's key events take - like a person typing in another window. It disarms itself when play mode exits (or unused, after 120 s).
+# OS's key events take - like a person typing in another window. The Input System learns about focus only through
+# Application.focusChanged, which Unity raises through Application.InvokeFocusChanged: the arm calls it as play mode starts
+# (__FOCUS_START__ 1: focused, 0: unfocused - the Input System then turns the real devices off itself, as when someone works
+# in another window) and, with __FOCUS_BACK__ >= 0, focused again once it has queued that many Space events - whichever
+# window has the OS focus. It also notes UI Toolkit's "ignore input while unfocused" check during the play (G3-14).
+# It disarms itself when play mode exits (or unused, after 120 s).
 $RealInputArmText = @'
+const int focusStart = __FOCUS_START__;
+const int focusBack = __FOCUS_BACK__;
 const string key = "AgentHarness.selftest.realInput";
+const string focusKey = "AgentHarness.selftest.realInputFocus";
+const string uiKey = "AgentHarness.selftest.realInputUiIgnores";
 UnityEditor.SessionState.SetInt(key, 0);
+UnityEditor.SessionState.SetInt(focusKey, -1);
+UnityEditor.SessionState.SetInt(uiKey, -1);
+var any = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+var invokeFocus = typeof(UnityEngine.Application).GetMethod("InvokeFocusChanged", any);
+if (invokeFocus == null) throw new System.InvalidOperationException("UnityEngine.Application.InvokeFocusChanged not found");
+var uiEvents = typeof(UnityEngine.UIElements.PanelSettings).Assembly.GetType("UnityEngine.UIElements.DefaultEventSystem");
+// A private instance method that reads no instance state: called on an uninitialized object (no event system is made).
+var uiIgnores = uiEvents == null ? null : uiEvents.GetMethod("ShouldIgnoreEventsOnAppNotFocused", any | System.Reflection.BindingFlags.Instance);
+var uiTarget = uiIgnores == null ? null : System.Runtime.Serialization.FormatterServices.GetUninitializedObject(uiEvents);
 var deadline = System.DateTime.UtcNow.AddSeconds(120);
 var updates = 0;
 var queued = 0;
+var giveFocus = false;
 System.Action tick = () =>
 {
     if (!UnityEngine.Application.isPlaying) return;
     updates++;
+    if (updates == 60 && uiIgnores != null) UnityEditor.SessionState.SetInt(uiKey, (bool)uiIgnores.Invoke(uiTarget, null) ? 1 : 0);
     if (updates % 6 != 0) return;
     var down = (updates / 6) % 2 == 1;
     foreach (var d in UnityEngine.InputSystem.InputSystem.devices)
@@ -791,6 +814,17 @@ System.Action tick = () =>
         queued++;
     }
     UnityEditor.SessionState.SetInt(key, queued);
+    if (focusBack >= 0 && queued >= focusBack && UnityEditor.SessionState.GetInt(focusKey, -1) < 0)
+    {
+        UnityEditor.SessionState.SetInt(focusKey, queued);
+        giveFocus = true;   // raised from the Editor update, outside the input update
+    }
+};
+UnityEditor.EditorApplication.CallbackFunction focusBackNow = () =>
+{
+    if (!giveFocus) return;
+    giveFocus = false;
+    invokeFocus.Invoke(null, new object[] { true });
 };
 System.Action<UnityEditor.PlayModeStateChange> onChange = null;
 onChange = c =>
@@ -798,11 +832,15 @@ onChange = c =>
     if (c == UnityEditor.PlayModeStateChange.EnteredPlayMode)
     {
         if (System.DateTime.UtcNow > deadline) { UnityEditor.EditorApplication.playModeStateChanged -= onChange; return; }
+        // After Unity's own focus event of entering play mode, before the scenario runner starts.
+        if (focusStart >= 0) invokeFocus.Invoke(null, new object[] { focusStart == 1 });
         UnityEngine.InputSystem.InputSystem.onBeforeUpdate += tick;
+        UnityEditor.EditorApplication.update += focusBackNow;
     }
     else if (c == UnityEditor.PlayModeStateChange.ExitingPlayMode)
     {
         UnityEngine.InputSystem.InputSystem.onBeforeUpdate -= tick;
+        UnityEditor.EditorApplication.update -= focusBackNow;
         UnityEditor.EditorApplication.playModeStateChanged -= onChange;
     }
 };
@@ -810,7 +848,8 @@ UnityEditor.EditorApplication.playModeStateChanged += onChange;
 return "armed";
 '@
 
-# The real devices, the disabled ones among them, and how many Space events the armed play queued.
+# The real devices, the disabled ones among them, how many Space events the armed play queued (and had queued when it gave
+# focus back), UI Toolkit's "ignore input while unfocused" during that play and now (1 = ignores, 0 = takes input, -1 = none).
 $RealInputStateText = @'
 var native = new List<string>();
 var disabled = new List<string>();
@@ -820,7 +859,17 @@ foreach (var d in UnityEngine.InputSystem.InputSystem.devices)
     native.Add(d.name);
     if (!d.enabled) disabled.Add(d.name);
 }
-return new Dictionary<string, object> { { "injected", UnityEditor.SessionState.GetInt("AgentHarness.selftest.realInput", -1) }, { "native", native }, { "disabled", disabled }, { "focused", UnityEditorInternal.InternalEditorUtility.isApplicationActive } };
+var any = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+var uiEvents = typeof(UnityEngine.UIElements.PanelSettings).Assembly.GetType("UnityEngine.UIElements.DefaultEventSystem");
+// A private instance method that reads no instance state: called on an uninitialized object (no event system is made).
+var uiIgnores = uiEvents == null ? null : uiEvents.GetMethod("ShouldIgnoreEventsOnAppNotFocused", any | System.Reflection.BindingFlags.Instance);
+var uiTarget = uiIgnores == null ? null : System.Runtime.Serialization.FormatterServices.GetUninitializedObject(uiEvents);
+return new Dictionary<string, object> {
+    { "injected", UnityEditor.SessionState.GetInt("AgentHarness.selftest.realInput", -1) },
+    { "focusAt", UnityEditor.SessionState.GetInt("AgentHarness.selftest.realInputFocus", -1) },
+    { "uiIgnores", UnityEditor.SessionState.GetInt("AgentHarness.selftest.realInputUiIgnores", -1) },
+    { "uiIgnoresNow", uiIgnores == null ? -1 : ((bool)uiIgnores.Invoke(uiTarget, null) ? 1 : 0) },
+    { "native", native }, { "disabled", disabled }, { "focused", UnityEngine.Application.isFocused } };
 '@
 
 # A play that fails (waitTarget times out) and one that is stopped in the middle.
@@ -1315,6 +1364,7 @@ function Invoke-Eval([string]$File) {
 }
 
 function Get-DisabledDevices($State) { (@($State.disabled) | Sort-Object) -join ',' }
+
 function Invoke-Item1 {
     Start-Item 1 'loop x3: green, deterministic, compile-check'
     # Golden images (G3-4) of this run: loop 1 writes them, loops 2-3 compare.
@@ -1430,54 +1480,64 @@ function Invoke-Item1 {
     Test-Check "golden: another shot is changed, with a diff image, from version $patch0" ($plain.status -eq 'changed' -and $plain.diff -and (Test-Path -LiteralPath $plain.diff) -and "$($plain.golden)" -like "*/$patch0/*") "$($plain.status) $($plain.golden) $($plain.diff)"
     Test-Check 'golden: ignore everything -> same; ignore the left / top half -> changed only right / below it' ($all.status -eq 'same' -and $left.status -eq 'changed' -and [int]@($left.rect)[0] -ge 640 -and $top.status -eq 'changed' -and [int]@($top.rect)[1] -ge 360) "all=$($all.status) left=$($left.status) [$(@($left.rect) -join ',')] top=$($top.status) [$(@($top.rect) -join ',')]"
 
-    # Real input (G3-6): Space pressed on the real keyboard during a loop does not reach the game; the real devices are
-    # disabled only while a scenario plays, also when the play fails or is stopped.
+    # Real input (G3-6, G3-9): Space pressed on the real keyboard during a loop does not reach the game and is counted, with the
+    # game focused when play mode starts, and unfocused then (the Input System turns the real devices off itself) getting focus
+    # back during the play; the real devices are disabled only while a scenario plays, also when the play fails or is stopped.
+    # The arm makes the focus changes inside Unity: they do not depend on which window has the OS focus (someone at work).
     $files = @{}
-    foreach ($kv in @{ arm = @('realinput-arm.cs', $RealInputArmText); state = @('realinput-state.cs', $RealInputStateText); fail = @('realinput-fail.json', $RealInputFailText); long = @('realinput-long.json', $RealInputLongText) }.GetEnumerator()) {
+    $armFocused = $RealInputArmText.Replace('__FOCUS_START__', '1').Replace('__FOCUS_BACK__', '-1')
+    $armUnfocused = $RealInputArmText.Replace('__FOCUS_START__', '0').Replace('__FOCUS_BACK__', '20')   # a third of the default play
+    foreach ($kv in @{ arm = @('realinput-arm.cs', $armFocused); armUnfocused = @('realinput-arm-unfocused.cs', $armUnfocused); state = @('realinput-state.cs', $RealInputStateText); fail = @('realinput-fail.json', $RealInputFailText); long = @('realinput-long.json', $RealInputLongText) }.GetEnumerator()) {
         $files[$kv.Key] = (Join-Path $outAbs $kv.Value[0]).Replace('\', '/')
         Write-TextFile $files[$kv.Key] $kv.Value[1]
     }
     $before = Invoke-Eval $files.state
-    # The isolation is only exercised with the Editor in the foreground: in the background the Input System has turned the real
-    # devices off itself (nothing to isolate; nothing reaches the game either). Someone using another window makes a try
-    # unfocused - try again, up to three times (realInputTries).
-    for ($try = 1; $try -le 3; $try++) {
-        [void](Invoke-Eval $files.arm)
-        $r = Invoke-Loop "1-real-input$(if ($try -gt 1) { "-$try" })"
-        $s = Invoke-Eval $files.state
-        if ($null -eq $r.fps -or $r.fps.editorFocused -ne $false) { break }
-    }
-    $state.item['realInputTries'] = [math]::Min($try, 3)
-    $injected = $s.injected
-    $presses = [int](@($r.play.isolatedDevices | ForEach-Object { [int]$_.presses }) | Measure-Object -Sum).Sum
-    $isolated = @($r.play.isolatedDevices | ForEach-Object { "$($_.name)=$($_.presses)" }) -join ','
+    $keyboard = { param($r) @($r.play.isolatedDevices | Where-Object { "$($_.name)" -like 'Keyboard*' })[0] }
+    $offInBackground = { param($d) [bool]($d -and $d.PSObject.Properties['background'] -and $d.background) }
+    $describe = { param($r) @($r.play.isolatedDevices | ForEach-Object { "$($_.name)=$($_.presses)$(if (& $offInBackground $_) { '(background)' })" }) -join ',' }
+    # Focused when play mode starts.
+    [void](Invoke-Eval $files.arm)
+    $r = Invoke-Loop '1-real-input'
+    $s = Invoke-Eval $files.state
+    $kb = & $keyboard $r
+    $isolated = & $describe $r
     Test-Check 'real input: loop green' ([bool]$r.ok) (Get-Summary $r)
     Test-Check 'real input: Space queued on the real keyboard during the play' ([int]$s.injected -gt 0) "injected=$($s.injected) native=$(@($s.native) -join ',')"
     Test-Check 'real input: same play.events' ((Get-Events $r) -eq $evs[0]) (Get-Events $r)
-    Test-Check 'real input: its presses kept out (play.isolatedDevices)' ($presses -gt 0) "$isolated focused=$($r.fps.editorFocused) tries=$($state.item['realInputTries'])"
+    Test-Check 'real input, focused at the start: its presses kept out (play.isolatedDevices)' ($kb -and [int]$kb.presses -gt 0 -and -not (& $offInBackground $kb)) "$isolated editorFocused=$($r.fps.editorFocused)"
     Test-Check 'real input: real devices enabled again' ((Get-DisabledDevices $s) -eq (Get-DisabledDevices $before)) "before [$(Get-DisabledDevices $before)] after [$(Get-DisabledDevices $s)]"
+    $state.item['realInput'] = [ordered]@{ injected = $s.injected; isolated = $isolated; native = @($s.native) }
+    # Unfocused when play mode starts (G3-9), focus back after 20 of the Space events.
+    [void](Invoke-Eval $files.armUnfocused)
+    $r = Invoke-Loop '1-real-input-unfocused'
+    $s2 = Invoke-Eval $files.state
+    $kb = & $keyboard $r
+    $isolated = & $describe $r
+    Test-Check 'real input, unfocused at the start: loop green, same play.events' ([bool]$r.ok -and (Get-Events $r) -eq $evs[0]) (Get-Summary $r)
+    Test-Check 'real input, unfocused at the start: the real keyboard taken over from the background, its presses kept out' ($kb -and (& $offInBackground $kb) -and [int]$kb.presses -gt 0) "$isolated editorFocused=$($r.fps.editorFocused)"
+    Test-Check 'real input, focus back during the play: presses still kept out and counted after it' ($kb -and [int]$s2.focusAt -ge 0 -and 2 * [int]$kb.presses -gt [int]$s2.focusAt + 2) "injected=$($s2.injected) at focus=$($s2.focusAt) presses=$(if ($kb) { $kb.presses })"
+    Test-Check 'real input, unfocused at the start: real devices enabled again' ((Get-DisabledDevices $s2) -eq (Get-DisabledDevices $before)) "before [$(Get-DisabledDevices $before)] after [$(Get-DisabledDevices $s2)]"
+    # G3-14: UI Toolkit ignores input while the application is unfocused (desktop) - not while a scenario plays.
+    Test-Check 'UI Toolkit takes input while unfocused during a scenario, ignores it again after (G3-14)' ([int]$s.uiIgnores -eq 0 -and [int]$s2.uiIgnores -eq 0 -and [int]$s2.uiIgnoresNow -eq 1 -and -not $r.play.uiFocusError) "during=$($s.uiIgnores)/$($s2.uiIgnores) after=$($s2.uiIgnoresNow) $($r.play.uiFocusError)"
+    $state.item.realInput['unfocused'] = [ordered]@{ injected = $s2.injected; focusAt = $s2.focusAt; isolated = $isolated }
     $r = Invoke-Tool $root 'loop.ps1' '1-real-input-fail' @('-Scenario', $files.fail)
     $s = Invoke-Eval $files.state
     Test-Check 'failed play: stage=play, real devices enabled again' ($r.stage -eq 'play' -and (Get-DisabledDevices $s) -eq (Get-DisabledDevices $before)) "$(Get-Summary $r) disabled [$(Get-DisabledDevices $s)]"
-    for ($try = 1; $try -le 3; $try++) {   # same as above: only a focused try exercises the isolation
-        $dir = Get-OutDir "1-real-input-stop$(if ($try -gt 1) { "-$try" })"
-        $t = Start-Tool $root 'loop.ps1' @('-Scenario', $files.long, '-Out', $dir)
-        $during = $null
-        $running = Wait-Until { $p = Invoke-UnityCommand -Name 'harness_play_status' -TimeoutSec 5; $p.success -and $p.result.state -eq 'running' } 120 $t
-        if ($running) {
-            Start-Sleep -Milliseconds 1000
-            $p = Invoke-UnityCommand -Name 'eval_file' -Params @{ file = $files.state } -TimeoutSec 30   # the loop holds the lock
-            if ($p.success -and $p.result.success) { $during = $p.result.result }
-            [void](Invoke-UnityCommand -Name 'editor_stop' -TimeoutSec 30)
-        }
-        $r = Read-ToolReport $dir (Wait-Tool $t 180)
-        $s = Invoke-Eval $files.state
-        if ($null -eq $during -or $during.focused -ne $false) { break }
+    $dir = Get-OutDir '1-real-input-stop'
+    $t = Start-Tool $root 'loop.ps1' @('-Scenario', $files.long, '-Out', $dir)
+    $during = $null
+    $running = Wait-Until { $p = Invoke-UnityCommand -Name 'harness_play_status' -TimeoutSec 5; $p.success -and $p.result.state -eq 'running' } 120 $t
+    if ($running) {
+        Start-Sleep -Milliseconds 1000
+        $p = Invoke-UnityCommand -Name 'eval_file' -Params @{ file = $files.state } -TimeoutSec 30   # the loop holds the lock
+        if ($p.success -and $p.result.success) { $during = $p.result.result }
+        [void](Invoke-UnityCommand -Name 'editor_stop' -TimeoutSec 30)
     }
-    $state.item['realInputStopTries'] = [math]::Min($try, 3)
-    Test-Check 'stopped play: real devices disabled while it ran' ($running -and $during -and @($during.disabled).Count -gt 0 -and @($during.disabled).Count -eq @($during.native).Count) "running=$running disabled [$(if ($during) { Get-DisabledDevices $during })] focused=$(if ($during) { $during.focused }) tries=$($state.item['realInputStopTries'])"
+    $r = Read-ToolReport $dir (Wait-Tool $t 180)
+    $s = Invoke-Eval $files.state
+    # Focused or not: a device the Input System turned off in the background is taken over as well (G3-9).
+    Test-Check 'stopped play: real devices disabled while it ran' ($running -and $during -and @($during.disabled).Count -gt 0 -and @($during.disabled).Count -eq @($during.native).Count) "running=$running disabled [$(if ($during) { Get-DisabledDevices $during })] focused=$(if ($during) { $during.focused })"
     Test-Check 'stopped play: stage=play, real devices enabled again' ($r.stage -eq 'play' -and (Get-DisabledDevices $s) -eq (Get-DisabledDevices $before)) "$(Get-Summary $r) $($r.play.error) disabled [$(Get-DisabledDevices $s)]"
-    $state.item['realInput'] = [ordered]@{ injected = $injected; isolated = $isolated; native = @($s.native) }
 
     # Render settings as code (G1-1): the pipeline assets are generated, rewritten only when the code changes them; deleted,
     # one loop makes them again (same path GUIDs: the ProjectSettings that reference them do not change) with the same

@@ -139,7 +139,8 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
 - URP·Built-in 둘 다, Input System 유무와 상관없이 컴파일됩니다. 입력 재생: Input System 게임은 그대로, 구 Input Manager(`Input.GetKey`) 게임은
   에디터가 OS 입력을 직접 읽어서 코드로 누를 수 없으므로 `Input.` → `HarnessInput.`(같은 멤버 이름의 드롭인, `-InputShim`)으로 받습니다.
   시나리오가 도는 동안 게임은 시나리오 입력만 받습니다(실제 키보드·마우스·게임패드는 꺼지고 끝나면 다시 켜짐) — 루프 중에 사람이 다른 창에서
-  타이핑해도 결과가 같습니다.
+  타이핑해도, 그래서 에디터가 백그라운드여도 결과가 같습니다. 포커스 없이 플레이가 시작돼 Input System이 먼저 꺼 둔 장치도 가져가 세고, 앱 포커스가 없으면
+  입력을 통째로 버리는 UI Toolkit도 시나리오 동안은 클릭을 받습니다.
 - **부트 → 메뉴 → 레벨**: 시나리오가 `waitTarget`(버튼이 보일 때까지)·`waitScene`(씬이 로드될 때까지)으로 시계를 멈추고, `click`이 이름으로 찾은
   UI(uGUI, UI Toolkit — 월드 공간 패널 포함)나 씬 오브젝트를 누릅니다. 캡처는 카메라 이름·포즈를 시나리오나 설정(`shots`)에 적어 기존 씬을 건드리지 않습니다.
   아래는 BagelGame에 붙인 뒤 시나리오 한 번(`waitTarget play-button` → `click` → `waitTarget select-button` → `click`)이 찍은 Game 뷰 3컷입니다.
@@ -187,7 +188,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1               # 끝낼 �
 들어가는데, `open.ps1`과 루프가 그 에러(file·line)를 로그에서 읽어 보고합니다(창 없는 에디터는 마지막으로 성공한 어셈블리로 떠서 루프가 에러를 보고).
 
 위 과정 전체(클론 → 열기 → 설정 → 루프 3회 → 종료 → 삭제)를 `tools/fresh-clone-test.ps1` 하나로 검증할 수 있습니다(이 머신에서 ~110 s).
-하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·동시 루프·worktree 전용 에디터·worktree submit/land·계약 규칙·프로젝트 설정 드리프트)는 `tools/selftest.ps1`이 한 번에 돌리고(~9–12분),
+하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·실제 입력 격리(포커스 있음·없음)·동시 루프·worktree 전용 에디터·worktree submit/land·계약 규칙·프로젝트 설정 드리프트)는 `tools/selftest.ps1`이 한 번에 돌리고(~11–14분),
 `fresh-clone-test.ps1 -UnityVersion <버전> -SelfTest`는 그것을 다른 Unity 버전의 새 클론에서 돌립니다.
 
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)

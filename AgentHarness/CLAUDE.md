@@ -99,10 +99,12 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
   "play": {"success","probeReady","frames","gameSec","modules","failedModules","inputEventsApplied",
            "events":[{"name":"SpinnerLap","count":2}],     // EventBus 발행 횟수 → 게임플레이를 기계적으로 검증 (클립 이벤트는 "ClipEvent:<이름>")
            "inputBackends":["inputSystem"|"hook"], "inputHooks":["HarnessInput.OnScenarioInput"],   // 입력이 들어간 곳
-           "isolatedDevices":[{"name":"Keyboard","presses":0}],   // 시나리오 동안 끈 실제 장치와 막은 키·버튼 누름 수
+           "isolatedDevices":[{"name":"Keyboard","presses":0,"background":true}],   // 시나리오 동안 끈 실제 장치와 막은 키·버튼 누름 수
+               // background: 에디터·플레이어가 백그라운드라 Input System이 먼저 꺼 둔 장치를 가져감(G3-9) — 포커스가 어디 있든 결과는 같다
            "activeScene", "scenes":[{"name","mode","t","wallSec"}],      // 로드된 씬(Start = 처음부터 있던 씬, t = 시나리오 시계)
            "waits":[{"type","target","t","waitedSec","frames"}], "clicks":[{"target","t","x","y","via"}],
-           "uiClock":{"mode":"frames"|"real","panels","scope","error"}},   // UI Toolkit 패널이 프레임 시계로 돌았는지(아래 "시나리오")
+           "uiClock":{"mode":"frames"|"real","panels","scope","error"},   // UI Toolkit 패널이 프레임 시계로 돌았는지(아래 "시나리오")
+           "uiFocusError"},   // 있을 때만: 이 Unity에서는 UI Toolkit이 백그라운드(포커스 없음)에서 시나리오 입력을 버린다(G3-14, 내부 API 없음)
   "render": {"batches","setPassCalls","drawCalls","triangles","vertices"},   // headless면 null(Game 뷰가 그리지 않음). 6.6은 batches null(카운터 없음), drawCalls = 종류별 합
   "shotStats": [{"name","preset","t","width","height","meanLuma","stdLuma","blank","dark","magenta","magentaRatio",
                  "cameras":["Stage/Main Camera","Stage/Main Camera/Weapon (overlay)","Minimap"],   // 그린 카메라(아래부터)
@@ -554,7 +556,10 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
   `"begin"`을 보낸다(`HarnessInput`은 그때부터 `UnityEngine.Input`을 읽지 않고, 마우스는 시나리오가 옮기기 전까지 화면 중앙). 끝나면(실패·중단 포함)
   켜고 `"end"`. 다른 창에서 누른 키가 `<Keyboard>/space` 같은 바인딩으로 들어와 `play.events`가 달라지던 문제다. 막은 실제 키·버튼 누름은
   `play.isolatedDevices[].presses`(마우스 이동, 플레이 진입·포커스 때 장치가 보내는 상태(sync)는 막되 세지 않는다). 원래 꺼져 있던 장치(TouchSimulation이
-  끈 마우스 등)는 건드리지 않는다. 구 Input Manager를 `Input.`으로 직접 읽는 코드는 막을 수 없다 — `HarnessInput`을 거쳐야 한다.
+  끈 마우스 등)는 건드리지 않는다. 에디터(플레이어)가 백그라운드라 Input System이 먼저 꺼 둔 장치 — 포커스 없이 플레이 모드에 들어가면 전부 — 는 가져가서 끄고 센다
+  (`background: true`, G3-9). **UI Toolkit은 앱 포커스가 없으면 입력을 통째로 버리므로 시나리오 동안 그 판정을 끈다**(G3-14, `Runtime/PanelFocus.cs`; uGUI는
+  `runInBackground`로 이미 받는다) → 루프 중에 사람이 다른 창을 써도 UI 클릭까지 결과가 같다. 구 Input Manager를 `Input.`으로 직접 읽는 코드는 막을 수 없다 —
+  `HarnessInput`을 거쳐야 한다.
 - 캡처는 그 프레임의 모든 `LateUpdate` 뒤에 찍는다(LateUpdate에서 카메라를 움직이거나 `Graphics.DrawMesh*`로 그리는 게임도 그대로 찍힌다).
 - **UI Toolkit의 시간도 프레임을 따른다**(G3-10): USS transition·`schedule.Execute` 타이머·캐럿은 원래 실시간으로 돌아서 고정 시간 간격이어도 transition 도중의
   캡처가 매번 달랐다. `fixedDeltaTime`이 있는 시나리오 동안 런타임 패널은 러너가 매 프레임 `fixedDeltaTime`씩 미는 시계로 시간을 잰다(`Runtime/PanelClock.cs`,
@@ -828,13 +833,13 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
   `-Keep`은 녹색이어도 클론과 에디터를 남긴다(비교·디버깅용).
 - `-UnityVersion <설치된 버전>`: 클론의 `ProjectVersion.txt`를 그 버전으로 바꿔서 연다(P-1; 이때 `git status` 변경은 보고만 한다).
 - `-SelfTest`: 루프 뒤 클론에서 `tools/selftest.ps1`(매트릭스 1–8, 루프의 fingerprint를 기대값으로)까지 돌린다 → `selftest.json`,
-  report의 `selftest`(`stage=selftest`). worktree는 클론 옆(`ah-fresh-st-a/-b/-o`)에 생겼다가 지워진다. 전체 ~9분(ROADMAP O-12가 겹치면 ~13–15분).
+  report의 `selftest`(`stage=selftest`). worktree는 클론 옆(`ah-fresh-st-a/-b/-o`)에 생겼다가 지워진다. 전체 ~12–17분(ROADMAP O-12 포함).
 - 언제: `tools/`, `ProjectSettings/`, `Packages/`, `.gitignore`, 에디터 시작 경로(`[InitializeOnLoad]`)를 바꿨을 때와 공개 전.
 
 ## 하네스 자기 검증 (tools/selftest.ps1)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~9분(O-12면 ~12분)
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~11–14분(O-12 포함)
 powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 1d7568ed
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
@@ -844,7 +849,8 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   카메라(G3-7, 픽스처: 메인 카메라 자식인 스택 Overlay 카메라가 그리는 쿼드가 메인·다른 포즈 모두 화면 중앙, 미니맵 Base 카메라가 오른쪽 위, 앞 depth 카메라는 덮임,
   `"camera"`로 미니맵만, 메인 카메라·타깃·스택 되돌림, 씬 dirty 아님) + 플레이 중 픽스처(오버레이 캔버스·스택 카메라)와 연속 캡처(2x2 시트, `motion` > 0) +
   실제 입력 격리(플레이 동안 실제 키보드 장치에 스페이스를 넣어도 events 그대로·`isolatedDevices` 누름 > 0, 실패·중단한 플레이 뒤에도 실제 장치가 다시 켜짐;
-  에디터에 포커스가 없던 시도는 3번까지 다시 — 백그라운드에선 Input System이 장치를 먼저 꺼서 격리가 돌 일이 없다, ROADMAP G3-9) +
+  플레이가 포커스 있음·없음으로 시작하는 두 번 — 없음은 Input System이 먼저 꺼 둔 장치를 `background`로 가져가 세고 도중에 포커스가 돌아와도 끝까지(G3-9), 포커스 변화는
+  Unity 안에서 `Application.InvokeFocusChanged`로 만들어 OS 포커스와 무관; UI Toolkit의 "포커스 없으면 입력 무시"가 시나리오 동안 꺼짐(G3-14)) +
   렌더 설정(W4: RP 에셋이 생성물이고 루프 2·3은 다시 쓰지 않음, 지우면 루프 한 번으로 다시 생기고 fingerprint·픽셀·`git status` 같음; 반사 큐브맵에 잘못된 텍셀이
   없고 가장 밝은 텍셀이 태양 방향(2° 안); 앰비언트 = 라이팅 데이터의 큐브맵 SH; `AmbientProbe` 균일 환경 → Flat과 같음·쓰레기 텍셀 거부; 머티리얼 경고 3종과
   `LitMaterial`의 이미션·알파 클립) + 프로젝트 설정(G1-5: 설정 스텝이 소유한 값을 루프 2·3은 쓰지 않음; YAML을 손으로 고치고(Mobile 레벨 이름, PC의 LOD 바이어스,
@@ -891,7 +897,8 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-09-30 W10, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W10에서 지형·소품이 레이어 Ground·Props로 가고 소유한 프로젝트 설정 값이 더해져 새 값):
+- 검증한 버전(2026-10-01 W11, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W10에서 지형·소품이 레이어 Ground·Props로 가고 소유한 프로젝트 설정 값이 더해져 새 값,
+  W11은 그대로 — 6.6은 에디터 창이 있는 화면의 DPI에 따라 fingerprint가 달랐는데(150% 화면 `9950ea8a`, ROADMAP G1-6) W11에서 고정했다):
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
@@ -1064,6 +1071,16 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   다른 창에서 누른 키가 게임 이벤트가 됐다(루프 ~25회에 1회 `play.events`가 달랐다, G3-6) → 시나리오 동안 실제 장치를 끈다. Input System의
   `LeavePlayMode`는 백그라운드 때문에 꺼진 장치만 켜고 `DisableDevice`로 끈 장치는 그대로 두므로, 끈 쪽이 반드시 다시 켜야 한다(러너 `Finish`,
   에디터의 `EnteredEditMode`). 실제 장치는 플레이 진입·에디터 포커스 때 상태 이벤트(sync)를 보내므로 "막은 입력"은 이벤트 수가 아니라 누름으로 센다.
+- **에디터에 포커스가 없는 채 플레이 모드에 들어가면 Input System이 실제 장치를 모두 끈다**(게임 설정이 기본 `ResetAndDisableNonBackgroundDevices`일 때,
+  `disabledWhileInBackground`). 그 장치의 이벤트는 `InputSystem.onEvent` 전에 버려지고, **`InputDevice.enabled`는 에디터 입력 업데이트 동안에는 그 장치를 켜진 것으로
+  읽는다** — eval·에디터 코드가 본 값이 게임이 보는 값과 다르다. `IgnoreFocus`인 동안은 포커스가 돌아와도 켜지지 않는다. 격리는 그 장치도 가져간다(G3-9).
+- **UI Toolkit 런타임은 앱 포커스가 없으면 입력을 통째로 버린다**(`DefaultEventSystem`, 데스크톱 OS; Unity Remote 연결 때만 예외) — 코드가 보낸 가상 마우스 클릭도.
+  uGUI + `InputSystemUIInputModule`은 `runInBackground`면 포커스를 무시한다. 시나리오 동안은 하네스가 UI Toolkit 쪽 판정을 끈다(G3-14).
+- **6.6은 코드로 만든 `PanelSettings`에 에디터 창이 있는 화면의 DPI를 넣는다**(`referenceDpi`: 150% 화면 144, 창 없는 에디터 96; 6.3·6.0은 96) → 빌더가 만들면 에셋과
+  fingerprint가 화면을 따라간다(G1-6). `ctx.UIDocument`는 96으로 고정한다 — PanelSettings를 직접 만들면 `referenceDpi`·`fallbackDpi`를 정할 것.
+- **Input System이 포커스를 아는 경로는 `Application.focusChanged` 하나다** → 테스트에서는 내부 `Application.InvokeFocusChanged(bool)`로 포커스 잃음·복귀를 만든다
+  (selftest 1번). OS 포커스를 실제로 옮기면(다른 창 앞으로) 사람이 쓰는 창과 다투어 불안정하다. 도메인 리로드 뒤에는 다른 창이 앞에 있어도 `Application.isFocused`가
+  true일 수 있다(ROADMAP O-13) — `fps.editorFocused`는 참고값이다.
 - **URP는 Base 카메라를 겹쳐 그리지 않는다.** Depth-only(Uninitialized) Base 카메라를 depth를 높여 하나 더 두면 Game 뷰에서 앞 카메라의 씬이 지워지고
   그 카메라 것만 남는다(Built-in은 겹쳐진다). UI 카메라·무기 카메라는 메인 카메라의 스택에 Overlay로 넣는다. W2까지의 캡처는 그런 카메라의 캔버스를
   씬 위에 합성해 게임과 다르게 찍었다 → G3-7 캡처는 화면의 카메라를 실제 순서대로 그린다.

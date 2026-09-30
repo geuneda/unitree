@@ -170,6 +170,7 @@ namespace Harness
             m_RunInBackground = Application.runInBackground;
             Application.runInBackground = true;
             BeginIsolation();
+            m_Result.uiFocusError = PanelFocus.Begin();   // UI Toolkit panels take the scenario's input in the background too
 
             var render = RenderCounters();
             if (render.TryGetValue("Batches Count", out var batches)) m_Batches = new ProfilerRecorder(batches, 1, ProfilerRecorderOptions.Default | ProfilerRecorderOptions.StartImmediately);
@@ -893,6 +894,7 @@ namespace Harness
             m_Result.uiClock.panels = PanelClock.Panels;
             if (m_Result.uiClock.mode == "frames") m_Result.uiClock.scope = PanelClock.Scope;
             PanelClock.End();
+            PanelFocus.End();
             Application.runInBackground = m_RunInBackground;
             foreach (var input in m_Inputs)
             {

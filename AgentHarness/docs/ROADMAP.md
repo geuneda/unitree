@@ -17,7 +17,7 @@
 - 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태·워크플로우 절 갱신 → 새로 드러난 항목 추가 →
   **저장소 루트 `README.md`와 `AgentHarness/CLAUDE.md`(필요하면 `Tools~/templates/AgentHarness.md`)에 바뀐 기능·측정값 반영** → 커밋(메시지에 항목 ID).
   README·ROADMAP 갱신은 워크플로우마다 빠뜨리지 않는다(W2 커밋은 README를 건드리지 않았고, W4 뒤에도 README "요구 사항"에 6.6의 옛 상태가 남아 있었다).
-- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. 남은 W11–W12는 선행이 모두 끝나 순서를 바꿔도 된다.
+- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. 남은 W12는 선행(W5)이 끝나 바로 할 수 있다.
 - 크기: S = 파일 1–2개 · M = 여러 파일 또는 새 커맨드 · L = 조사가 필요하거나 새 하위 시스템.
 
 | 순서 | 워크플로우 | 항목 | 크기 | 선행 | 상태 |
@@ -32,9 +32,9 @@
 | W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 (+G3-12, G3-13) | L | W1 | 완료 (2026-09-30; G3-8은 사내 프로젝트 A 확인만 남음 — Android 타깃) |
 | W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 완료 (2026-09-30) |
 | W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 완료 (2026-09-30; 여러 worktree가 같은 ProjectSettings 파일을 바꾸는 경우는 G5-6) |
-| W11 | 백그라운드 에디터의 실제 입력 격리 | G3-9 | S | — | 대기 |
+| W11 | 백그라운드 에디터의 실제 입력 격리 | G3-9 (+G3-14, G1-6) | S | — | 완료 (2026-10-01) |
 | W12 | 핫 루프 넓히기 | G2-5 | M | W5 | 대기 |
-| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, P-4·G2-5 신고 | S | 새 버전이 나올 때 | — |
+| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5 신고 | S | 새 버전이 나올 때 | — |
 | 마지막 | macOS | P-3 | L | 실제 Mac | 대기 |
 
 ### W1 시나리오 입력 격리 (G3-6) — 완료 (2026-09-29, 아래 "해결됨")
@@ -142,10 +142,19 @@
   worktree로 되복사(`settingsWrittenBack`). 여러 worktree가 같은 파일을 바꾸는 경우는 G5-6으로 남겼다.
 - 매트릭스 1(설정 스텝이 소유한 값, 손으로 고친 YAML·창에서 바꾼 값의 되돌림과 드리프트 6건), 7(새 모듈 레이어의 되복사, 빨간 submit의 복원), 8(되복사한 TagManager의 land).
 
-### W11 백그라운드 에디터의 실제 입력 격리 (G3-9)
-- 재현부터: 루프 도중 다른 창을 눌러 에디터 포커스를 뺏고(`fps.editorFocused=false`) 실제 키보드에 스페이스를 넣는 selftest 1번 절차를 돌린다. 이어서 플레이
-  도중 포커스를 되돌렸을 때 켜지는 장치가 `OnDeviceChange`로 잡히는지(누름이 `isolatedDevices`에 세어지고 `play.events`가 같은지) 본다.
-- 고치는 곳: `Runtime/ScriptedInput.cs`(`RealInputIsolation`), `Tools~/selftest.ps1`(지금은 포커스 없는 시도를 3번까지 다시 한다).
+### W11 백그라운드 에디터의 실제 입력 격리 (G3-9) — 완료 (2026-10-01, 아래 "해결됨")
+- 결과: 재현부터 했다(다른 프로세스의 작은 창으로 OS 포커스를 에디터에서 빼고 selftest 1번의 스페이스 주입). 에디터가 백그라운드인 채 플레이 모드에 들어가면 Unity가
+  그때 `Application.focusChanged(false)`를 보내고, 게임의 Input System 설정(기본 `ResetAndDisableNonBackgroundDevices`)이 실제 장치를 모두 "백그라운드라 끔"
+  (`disabledWhileInBackground`)으로 둔다. 그 장치의 이벤트는 `InputSystem.onEvent` 전에 버려져 게임에는 닿지 않았지만, 격리는 켜진 장치만 가져가서 세지 못했고,
+  시나리오 동안은 `IgnoreFocus`라 도중에 포커스가 돌아와도 장치가 켜지지 않아 끝까지 보고되지 않았다. selftest의 eval이 본 "켜져 있음"은 `InputDevice.enabled`가
+  에디터 입력 업데이트 동안 그런 장치를 켜진 것으로 읽는 탓이었다. → 격리가 그런 장치도 가져가 끄고 센다(`isolatedDevices[].background`).
+- 하다가 찾은 것: **UI Toolkit이 앱 포커스가 없으면 입력을 통째로 버린다**(G3-14) — 시나리오의 UI Toolkit 클릭이 에디터가 백그라운드면 아무 일도 하지 않았다.
+  selftest가 끝난 뒤 사람이 쓰던 창으로 포커스를 돌려주자 UI 킷 검사가 빨갛게 되어 드러났다 → 시나리오 동안 그 판정을 끈다(`PanelFocus`). 도메인 리로드 뒤 에디터가
+  다른 창이 앞에 있어도 포커스가 있다고 보고한다(O-13, 보고만). 6.6 새 클론의 6번이 빨갰던 것은 W11과 무관한 **G1-6** — `ctx.UIDocument`가 만든 PanelSettings의
+  `referenceDpi`가 6.6에서는 에디터가 있는 화면의 DPI라 창 에디터(144)와 창 없는 에디터(96)의 fingerprint가 달랐다 → 96으로 고정.
+- selftest: 재시도(`realInputTries`) 대신 포커스 잃음·복귀를 Unity 안에서 만든다(`Application.InvokeFocusChanged` — Input System이 포커스를 아는 유일한 경로). 처음에는
+  OS 포커스를 실제로 옮겼는데(도우미 창 ↔ 에디터) 사람이 다른 창을 쓰는 동안에는 전환이 거부되거나 도중에 뺏겨 두 번 빨갰고, 사람의 작업도 방해했다.
+- 매트릭스 1이 포커스 있음·없음으로 시작하는 플레이(없음은 도중에 복귀)와 UI Toolkit의 포커스 판정을 본다.
 
 ### W12 핫 루프 넓히기 (G2-5)
 - 하네스 쪽: 핫 판정(`Editor/HarnessHot.cs` `Diff`)이 새 메서드 선언을 "컨텍스트 변경"으로 보고 전체 루프로 돌린다. Pipeline은 교체 본문에서 부르는
@@ -153,11 +162,13 @@
 - 핫 루프 동안 `fps`가 인터프리터 비용을 포함한다 → 인터프리터로 돈 메서드와 호출 수를 report에 넣어 전체 루프와 비교할 수 있게 한다.
 - 추가 검증: selftest 3번에 "Tick이 새 헬퍼 메서드를 부름 → 핫" 단계.
 
-### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, P-4·G2-5 신고)
+### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5 신고)
 - 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존)과 G2-5의 인터프리터 2건(`try/catch` 미지원,
   교체 본문이 던진 예외를 줄 없이 로그하고 원래 본문으로 이어 돌림), Unity에 P-4의 원인
   (`Camera.RenderToCubemap(Cubemap)`: 6.6은 CPU 픽셀을 안 채우고 6.3은 sRGB로 인코딩 — 빈 씬 + 스카이박스 + half 큐브맵 한 개로 재현), O-6 Unity Search 예외,
-  O-11(batchmode의 첫 메시 그리기 — 빈 프로젝트 재현부터), O-12(도메인 리로드 뒤 새 토큰이 디스크립터에 늦게 적힘 — 먼저 원인 조사). O-10: Unity 6.7이 나오면 `EditorDialogEvents`로 자동으로 닫힌 대화상자를 report에 싣는다.
+  O-11(batchmode의 첫 메시 그리기 — 빈 프로젝트 재현부터), O-12(도메인 리로드 뒤 새 토큰이 디스크립터에 늦게 적힘 — 먼저 원인 조사),
+  O-13(도메인 리로드 뒤 다른 창이 앞에 있어도 `Application.isFocused` true). W11: UI Toolkit 내부 `DefaultEventSystem.IsEditorRemoteConnected`(`PanelFocus`)와
+  `InputDevice.disabledWhileInBackground`(격리)에 기댄다 — 새 버전에서 selftest 1번의 포커스 검사로 확인. O-10: Unity 6.7이 나오면 `EditorDialogEvents`로 자동으로 닫힌 대화상자를 report에 싣는다.
   W8: Unity에 증분 플레이어 빌드가 앞선 빌드의 `ScriptingAssemblies.json`을 쓰는 것(출시 빌드 → 다른 폴더로 개발 빌드, define 제약으로 어셈블리 집합이
   달라짐; 6.0 Fluid-Sim에서 재현 — 고쳐지면 `player.ps1`의 `CleanBuildCache` 재빌드를 걷어낸다), 플레이어 첫 씬 파티클의 로드 시점 한 스텝(의도인지 문의).
 - 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
@@ -206,6 +217,9 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 
 - **G1-5 렌더 파이프라인 밖의 프로젝트 설정은 여전히 YAML** → 2026-09-30 해결(W10, 아래 "해결됨"): 설정 스텝이 품질 레벨·Player·Time·Physics·레이어·태그 값을
   소유하고, 창·YAML로 바꾼 값을 다음 루프가 되돌리며 `drift`로 보고한다. 코드가 이름 붙이지 않은 값과 URP 전역 설정 에셋은 여전히 커밋된 YAML.
+
+- **G1-6 6.6에서 빌더가 만든 PanelSettings가 에디터가 있는 화면의 DPI를 따라 fingerprint가 흔들린다** (2026-10-01, W11 매트릭스 9에서 발견) → 같은 날 해결
+  (W11, 아래 "해결됨"). 같은 코드인데 에디터 창을 둔 화면에 따라 6.6의 build.fingerprint가 달랐다.
 
 ## 성질 2 — 루프가 초 단위
 
@@ -271,12 +285,11 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 
 - **G3-11 빌더가 메시를 바꾼 첫 루프의 샷이 옛 메시를 그린다** (2026-09-30, W6c에서 발견) → 같은 날 해결(W6c, 아래 "해결됨").
 
-- [ ] **G3-9 에디터가 백그라운드일 때 실제 입력 격리가 검증되지 않는다** (2026-09-30, W4 매트릭스에서 발견)
-  - 현상: 새 클론 selftest 1번(6.3·6.6)의 실제 입력 단계에서 그 루프만 `fps.editorFocused=false`였고(누군가 다른 창을 씀) `isolatedDevices`가 비었으며, 중간에 멈춘
-    플레이 동안 실제 장치가 켜진 채였다(`disabled []`). 넣은 스페이스 60번은 게임에 닿지 않았다(`play.events` 같음). 격리는 켜져 있는 장치만 끈다(백그라운드라
-    Input System이 끈 장치는 두고, 포커스 복귀로 켜지면 그때 끈다 — W1 설계). 포커스 없이 켜져 있던 장치를 왜 못 껐는지, 포커스 복귀 경로가 맞게 도는지는 확인하지 않았다.
-  - 지금: selftest가 포커스 없는 시도를 3번까지 다시 한다(`realInputTries`, `realInputStopTries`). 포커스가 계속 없으면 여전히 빨갛다.
-  - 완료 기준: 에디터가 백그라운드인 채로도, 도중에 포커스가 돌아와도 실제 누름이 게임에 닿지 않고 `isolatedDevices`에 보고된다(selftest에서 포커스를 조작해 확인).
+- **G3-9 에디터가 백그라운드일 때 실제 입력 격리가 검증되지 않는다** → 2026-10-01 해결(W11, 아래 "해결됨"). 격리는 켜진 장치만 가져가서, 에디터가 백그라운드인 채
+  플레이가 시작되면 Input System이 먼저 꺼 둔 장치를 세지 못했다(게임에는 닿지 않았다).
+
+- **G3-14 에디터(플레이어)가 백그라운드면 UI Toolkit이 시나리오 입력을 버린다** (2026-09-30, W11 매트릭스에서 발견) → 같은 날 해결(W11, 아래 "해결됨").
+  같은 시나리오의 UI Toolkit 클릭이 어느 창에 포커스가 있느냐에 따라 먹거나 안 먹었다.
 
 - **G3-10 UI Toolkit의 transition·타이머가 실시간이라 UI가 움직이는 동안의 캡처가 매번 다르다** (2026-09-30, W6b에서 발견) → 같은 날 해결(W6b, 아래 "해결됨").
 
@@ -400,6 +413,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
   - 할 일(상시): 새 Unity 버전마다 매트릭스 9의 selftest 1번 HUD 검사로 확인. 공개 API가 생기면 교체.
   - 2026-09-30(W6b): 시나리오 동안의 UI 시계(`Runtime/PanelClock.cs`, G3-10)도 내부 API(`BaseVisualElementPanel.TimeSinceStartupFunc`,
     `UIElementsRuntimeUtility.GetSortedPlayerPanels`)에 기댄다. 없으면 `play.uiClock`이 `real` + `error`이고 selftest 1번의 UI 시계 검사가 빨갛다.
+  - 2026-09-30(W11): 시나리오 동안 앱 포커스 없이도 입력을 받게 하는 것(`Runtime/PanelFocus.cs`, G3-14)도 내부 필드 `DefaultEventSystem.IsEditorRemoteConnected`다
+    (6.0.84f1·6.3.11f1·6.6.3f1에 있음). 없으면 `play.uiFocusError`이고 selftest 1번의 G3-14 검사가 빨갛다.
 - [ ] **O-10 `-automated`가 닫은 대화상자가 6.0–6.6에서는 보이지 않는다** (2026-09-30, W7)
   - 현상: `-automated` 에디터의 `EditorUtility.DisplayDialog`는 곧바로 `false`, `DisplayDialogComplex`는 1(취소)을 돌려주고 로그에 아무것도 남기지 않는다.
     Pipeline이 대화상자를 보는 `EditorDialogEvents`는 6.7부터라(`EditorDialogStateMirror`가 `#if UNITY_6000_7_OR_NEWER`) 6.0–6.6에서는 에디터 작업이 "취소"로
@@ -420,11 +435,18 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
     모든 버전에서). 새로 연 에디터에서도 재현됐고 W9 측정 때는 없었다 — 이 머신의 상태(다른 앱의 부하 등)와 어떻게 맞물리는지는 모른다.
   - 할 일: Pipeline의 토큰(`SecurityTokenManager.GetOrCreateToken`)과 디스크립터 쓰기(`CreateInstanceDescriptor`, 요청마다의 `UpdateHeartBeat`) 시점을 조사해 신고.
     하네스 쪽 우회는 토큰 없이 디스크립터를 다시 쓰게 하는 경로가 있어야 한다(없으면 신고만). 기준선의 "C# 1줄" 행은 이 현상이 없을 때의 값이다.
+  - 2026-10-01(W11): 여전하다 — 샘플 selftest 1–8 677–850 s(3번 88–153 s).
+- [ ] **O-13 도메인 리로드 뒤 에디터가 다른 창이 앞에 있어도 포커스가 있다고 보고한다** (2026-09-30, W11에서 발견)
+  - 현상: 다른 프로세스의 창이 포그라운드인 채 스크립트를 고쳐 도메인 리로드가 일어나면, 그 뒤 `Application.isFocused`(루프의 `fps.editorFocused`)와
+    `InternalEditorUtility.isApplicationActive`가 true였다(6.3, 2회: 도우미 창·다른 앱이 앞). 에디터를 한 번 앞으로 가져왔다가 다른 창으로 옮기면 `isFocused`만 false로
+    돌아오고 `isApplicationActive`는 true로 남았다. 그동안 Input System도 포커스가 있다고 보고 플레이 진입 때 장치를 끄지 않는다.
+  - 영향: `fps.editorFocused`는 프레임 시간을 읽을 때의 참고값이다. 격리(G3-9)와 UI Toolkit 입력(G3-14)은 이제 포커스와 무관하게 같게 돌아 루프 결과는 같다.
+  - 할 일(상시): 빈 프로젝트로 재현해 Unity에 신고. 그 전에는 `fps.editorFocused`·`isApplicationActive`를 포커스 판정에 쓰지 않는다(selftest는 포커스를 Unity 안에서 만든다).
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
-**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; ~9분, O-12가 겹치면 ~12분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
-(새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~9분, O-12가 겹치면 ~13–15분), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
+**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; O-12가 겹쳐 ~11–14분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
+(새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~12–17분(O-12 포함)), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
 
 1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark·magenta 샷 없음, 모든 샷 1280x720에
@@ -436,7 +458,9 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    + 카메라(G3-7, 편집 모드 픽스처: 메인 카메라 자식인 스택 Overlay 카메라의 쿼드가 메인·다른 포즈 모두 화면 중앙, 미니맵 Base 카메라가 viewport에,
    앞 depth 카메라는 덮임, `"camera"`로 미니맵만 전체 화면, 메인 카메라 위치·다른 카메라 타깃·스택 되돌림, 씬 dirty 아님)
    + 연속 캡처(G3-3, 플레이 중 eval로 만든 오버레이 캔버스·스택 카메라가 2x2 시트의 모든 프레임에, `motion` > 0)
-   + 실제 입력 격리(G3-6): 플레이 동안 실제 키보드 장치에 스페이스를 넣어도 `play.events` 그대로·`isolatedDevices` 누름 > 0, 실패한 플레이·중간에
+   + 실제 입력 격리(G3-6): 플레이 동안 실제 키보드 장치에 스페이스를 넣어도 `play.events` 그대로·`isolatedDevices` 누름 > 0 — 플레이가 포커스 있음으로 시작할 때와
+   없음으로 시작할 때(G3-9: Input System이 먼저 꺼 둔 장치를 가져가 `background`로 세고, 20번째 주입 뒤 포커스가 돌아와도 끝까지 셈; 포커스 변화는 Unity 안에서
+   `Application.InvokeFocusChanged`로 만들어 OS 포커스와 무관), UI Toolkit의 "포커스 없으면 입력 무시"가 시나리오 동안 꺼지고 뒤에 돌아옴(G3-14), 실패한 플레이·중간에
    멈춘 플레이 뒤에도 실제 장치가 다시 켜짐)
    + 렌더 설정(W4): RP·Renderer 에셋이 생성물이고 루프 2·3은 다시 쓰지 않음, 지우면(그동안 Built-in) 루프 한 번으로 다시 생기고 fingerprint·픽셀·
    `git status`가 같음(G1-1); 프로젝트 설정(G1-5): 설정 스텝이 소유한 값을 루프 2·3은 쓰지 않음, YAML을 손으로 고치고(Mobile 레벨 이름, PC `lodBias`, 레이어 9 이름·레이어 10
@@ -507,6 +531,55 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G3-9 에디터가 백그라운드일 때 실제 입력 격리가 검증되지 않는다** · **G3-14 에디터(플레이어)가 백그라운드면 UI Toolkit이 시나리오 입력을 버린다** (2026-10-01, W11)
+  - 재현(G3-9): 다른 프로세스의 작은 창으로 OS 포커스를 에디터에서 빼고 selftest 1번의 주입(실제 키보드 장치에 스페이스 누름·뗌 60개)을 건 기본 루프 → 녹색,
+    `SpinDirectionChanged=1`(게임에 닿지 않음)인데 `isolatedDevices`가 비었다. 플레이 동안 장치 플래그를 기록해 보니, 플레이 모드 진입 때(에디터 업데이트) Unity가
+    `Application.focusChanged(false)`를 보내고 게임의 Input System 설정(기본 `ResetAndDisableNonBackgroundDevices`·`PointersAndKeyboardsRespectGameViewFocus`)이
+    Keyboard·Mouse·Touchscreen·Pen을 `DisabledWhileInBackground`로 끈다 → 러너의 격리가 다음 프레임에 `enabled == false`를 보고 모두 건너뛰었다. 그런 장치의 이벤트는
+    `InputManager.OnUpdate`가 `InputSystem.onEvent` 리스너보다 먼저 버려서 게임에는 안 닿지만 누름을 셀 수 없다. 시나리오 동안은 `ScriptedInput`이 `IgnoreFocus`로 바꾸고
+    러너가 `runInBackground`를 켜서, 도중에 포커스가 돌아와도(`focusChanged(true)`) Input System이 장치를 켜지 않는다(4 s 시나리오 도중 에디터를 앞으로 → 장치가
+    `LeavePlayMode`까지 그대로). selftest가 본 "중단한 플레이 동안 켜져 있음(`disabled []`)"은 `InputDevice.enabled`가 **에디터 입력 업데이트 동안에는**
+    `DisabledWhileInBackground` 장치를 켜진 것으로 읽기 때문이었다(eval은 에디터 문맥; 같은 순간 플레이어 업데이트에서는 꺼짐).
+  - 방법(G3-9, `Runtime/ScriptedInput.cs` `RealInputIsolation`): 켜진 장치뿐 아니라 "백그라운드라 꺼진" 장치(내부 `InputDevice.disabledWhileInBackground`, 리플렉션 —
+    게임이 끈 장치와 구분할 공개 API가 없다)도 가져간다. `DisableDevice(keepSendingEvents: true)`가 그 상태를 지우고(런타임에서 꺼져 있었으면 켜서) 이벤트가 오게 한 뒤
+    전처럼 handled 표시·누름 세기. 게임·TouchSimulation이 끈 장치는 전처럼 두고, 속성이 없는 버전이면 전처럼 켜진 장치만. 보고: `isolatedDevices[].background = true`.
+    끝나면 다른 장치처럼 켠다 — 시나리오 직후 플레이 모드(플레이어)가 끝나고 `LeavePlayMode`도 그 장치를 켜므로 "백그라운드라 끔"으로 되돌리지 않는다(다음 포커스 변화에
+    Input System이 다시 판단).
+  - G3-14(W11 매트릭스에서 발견): 처음 만든 selftest가 끝에 사람이 쓰던 창으로 포커스를 돌려주자 그 뒤의 UI 킷 검사가 빨갰다 — REVERSE 버튼 클릭(`via uitk`)이 방향을
+    바꾸지 않았다. UI Toolkit의 `DefaultEventSystem.Update`는 `!Application.isFocused && ShouldIgnoreEventsOnAppNotFocused()`(데스크톱 OS이고
+    `IsEditorRemoteConnected()`가 거짓 — Unity Remote가 없으면)이면 입력을 하나도 처리하지 않는다(IL로 확인, 격리와 무관). uGUI의 `InputSystemUIInputModule`은
+    `runInBackground`면 포커스를 무시해서(러너가 켬) 괜찮다. → `Runtime/PanelFocus.cs`: 시나리오 동안 내부 필드 `DefaultEventSystem.IsEditorRemoteConnected`를
+    `() => true`로, 끝나면 원래 것으로. UI Toolkit 안에서 이 필드를 읽는 곳은 그 판정 하나다(UIElements 어셈블리 1.5만 메서드의 IL을 훑어 확인). 6.0.84f1·6.3.11f1·
+    6.6.3f1 모두 같은 필드. 없으면 `play.uiFocusError`.
+  - selftest(매트릭스 1): 처음에는 OS 포커스를 실제로 옮겼다(다른 프로세스의 작은 창 ↔ 에디터, `AttachThreadInput` + `SetForegroundWindow`, 끝나면 원래 앞 창으로).
+    사람이 다른 앱을 쓰는 동안 돌리자 두 번 빨갰다 — 포그라운드로 시작한 플레이 도중 포커스를 뺏겼고(`editorFocused=False`), 도중에 에디터를 앞으로 가져오는 전환이
+    거부됐다(`back=False`). 사람의 작업도 방해한다. → 주입 스크립트가 `Application.InvokeFocusChanged`(네이티브가 포커스 이벤트를 올리는 내부 함수; Input System이
+    포커스를 아는 경로는 `Application.focusChanged` 하나)를 플레이 진입 직후(Unity 자신의 포커스 이벤트 뒤, 러너 시작 전)와 20번째 주입 뒤에 부른다 — OS 포커스와
+    무관하게 같고, 창 없는 에디터·macOS에서도 돈다. G3-14는 OS 포커스 자체(`Application.isFocused`)를 읽으므로 판정 함수의 값을 본다(플레이 중 0, 뒤 1).
+    재시도(`realInputTries`, `realInputStopTries`)는 없앴다.
+  - 검증(이 머신, 6.3):
+    - 실제 OS 포커스(수동): 도우미 창을 앞에 두고 주입한 기본 루프 → `Keyboard=30(background)`, Mouse·Touchscreen·Pen 0(background), events 그대로. 4 s 시나리오 도중
+      에디터를 앞으로 → 주입 80·누름 40(복귀 뒤까지 모두), 장치가 끝까지 격리. UI 킷 시나리오를 백그라운드에서: `PanelFocus` 없이 클릭은 기록되지만 `SpinDirectionChanged`
+      없음 → 있으면 1. OS 포커스를 옮기던 selftest 실행에서 UI 킷 루프 1회차 포그라운드·2회차 백그라운드(장치 전부 `background`)의 토스트 캡처가 픽셀까지 같음(`same` 2/2).
+    - selftest 1번의 새 검사: 포커스 있음으로 시작 → `Keyboard=30`(background 아님); 없음으로 시작 → `Keyboard=30(background)`, 20번째 주입 뒤 복귀해도 누름 30(= 주입 60의
+      절반, 복귀 뒤까지 모두), events 그대로; UI Toolkit 판정 플레이 중 0/0, 뒤 1. W10 `ScriptedInput.cs`로 되돌린 "없음으로 시작" 루프는 `isolatedDevices` 비어 있음
+      → 새 검사가 G3-9를 잡는다. OS 포커스를 건드리지 않으므로 그동안 사람이 다른 앱을 써도 같다. 1번 99.8–141.5 s(W10 104.4 s; 루프 1회·검사 5개를 더하고 재시도를 뺌).
+    - 매트릭스(최종 커밋, G1-6 포함): 샘플 selftest 1–8 녹색 677.4 s(`1d7568ed…` 그대로, 줄 64/71/77/87; 1번 99.8 s; 그 전 커밋으로 849.5 s — O-12 편차).
+      9: 새 클론 6.3 녹색(G1-6 전 커밋으로 1022.6 s — selftest 905.7 s, 루프 3회 `1d7568ed` = 메인 트리·기준 이미지 same=3, `git status` 깨끗; 최종 커밋 루프 3회 100.5 s
+      같은 값·same=3), 6.0 녹색(G1-6 전 커밋 733.7 s — selftest 633.1 s, `330ebb7a`; 최종 커밋 루프 3회 92.9 s 같은 값), 6.6 녹색(최종 커밋 878.8 s — selftest 746.3 s,
+      `995ce417`; G1-6 전에는 6번만 빨강) — 세 버전 모두 새 검사(포커스 있음·없음 시작, UI Toolkit 판정) 녹색, `git status`는 버전 전환 파일뿐.
+      10: BagelGame 녹색 48.3 s(루프 3회 `619be553`, 출시 빌드 `Managed/` 132개·`Harness.*` 0개), Fluid-Sim 녹색 31.4 s(`54880f05`, 103개·0개), 사내 프로젝트 A 녹색
+      90.2 s(`brd-attach.json`, `6664b723`) — 셋 다 W10과 같은 fingerprint, 제거 뒤 `git status` 비어 있음.
+  - 남은 것: `fps.editorFocused`는 도메인 리로드 뒤 틀릴 수 있다(O-13). 격리·`PanelFocus`는 내부 API에 기댄다(상시, O-9).
+
+- [x] **G1-6 6.6에서 빌더가 만든 PanelSettings가 에디터가 있는 화면의 DPI를 따라 fingerprint가 흔들린다** (2026-10-01, W11 매트릭스 9에서 발견)
+  - 현상: 6.6 새 클론의 selftest 6번이 빨갰다 — 클론 에디터 트리(창)의 fingerprint `9950ea8a`, 같은 커밋의 worktree 전용 에디터(창 없음) `995ce417`. W10 커밋의 새 클론도
+    오늘은 `9950ea8a`였고(W10 때는 둘 다 `995ce417`), 6.3·6.0은 그대로였다. 두 에디터의 fingerprint 덤프(`Library/Harness/fingerprint.txt`) 차이는 한 줄:
+    HUD의 `SmokeHudPanel.asset`(`ctx.UIDocument`가 만든 PanelSettings) `m_ReferenceDpi` 144 대 96. 6.6은 `CreateInstance<PanelSettings>()`에 에디터가 있는 화면의 DPI를
+    넣는다(150% 화면 = 144, 창 없는 에디터 = 96; 6.3·6.0은 늘 96). 어제는 에디터 창이 100% 화면에 있었던 것으로 보인다. `ScaleWithScreenSize`라 화면에는 영향이 없다.
+  - 방법: `Editor/Build/BuildContext.cs` `UIDocument`가 `referenceDpi`·`fallbackDpi`를 96으로 정한다(6.3·6.0의 기본값 → 두 버전의 fingerprint 그대로).
+  - 검증: 같은 6.6 클론에서 창 에디터·창 없는 전용 에디터 모두 `995ce417`(W10 기록값), 덤프 `m_ReferenceDpi=96`. 매트릭스는 위 W11 항목.
 
 - [x] **G1-5 렌더 파이프라인 밖의 프로젝트 설정은 여전히 YAML** (2026-09-30, W10)
   - 현상(전): W4로 URP·Renderer 에셋과 품질 레벨별 파이프라인 배정은 코드가 됐지만 품질 레벨 목록·레벨별 값, Player(색 공간·창), Time, Physics, Tags/Layers는 커밋된
