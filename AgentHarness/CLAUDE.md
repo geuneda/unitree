@@ -1,7 +1,7 @@
 # AgentHarness — Unity 6(6.0 LTS 이상) + URP 에이전트 하네스
 
 이 문서만 읽고 바로 루프를 돌릴 수 있어야 한다. 게임은 아직 없다 — `Assets/Game/Stage`, `Assets/Game/Smoke`는
-하네스를 검증하는 스모크 씬이다(절차적 지형 + 커스텀 HLSL + 라이트 + Volume 후처리 + 회전 오브젝트 + UI Toolkit HUD).
+하네스를 검증하는 스모크 씬이다(절차적 지형 + 커스텀 HLSL + 라이트 + Volume 후처리 + 회전 오브젝트 + 코드로 만든 파티클·애니메이션 + UI Toolkit HUD).
 샘플 프로젝트는 Unity 6000.3.11f1로 고정돼 있고, 하네스는 UPM 패키지 `Packages/com.geuneda.agentharness/`(이 프로젝트에 임베드)로
 Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **기존 Unity 프로젝트에 설치 스크립트로 붙일 수 있다**(아래 "기존 프로젝트에 붙이기").
 `tools/*.ps1`은 패키지 `Tools~/`의 같은 이름 스크립트를 부르는 얇은 진입점이다(모두 같은 파일). 도구를 고칠 때는 `Tools~/`를 고친다.
@@ -12,10 +12,10 @@ Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **
 
 | # | Three.js 환경의 성질 | Unity 기본 상태 | 이 하네스가 복원하는 방법 |
 |---|---|---|---|
-| 1 | 모든 게 텍스트(JS 코드) | 씬/프리팹이 GUID로 얽힌 YAML, GUI 중심 도구 | 씬은 `IBuildStep` 코드가 생성, 렌더 파이프라인 설정은 `ISettingsStep` 코드, HLSL·UXML/USS·코드로 만든 머티리얼/Volume/라이팅 |
+| 1 | 모든 게 텍스트(JS 코드) | 씬/프리팹이 GUID로 얽힌 YAML, GUI 중심 도구 | 씬은 `IBuildStep` 코드가 생성, 렌더 파이프라인 설정은 `ISettingsStep` 코드, HLSL·UXML/USS·코드로 만든 머티리얼/Volume/라이팅/파티클/애니메이션 클립 |
 | 2 | 수정→새로고침이 초 단위 | 컴파일 + 도메인 리로드 | Domain Reload 끔, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 본문만 바꾸면 컴파일 없이 적용하는 핫 루프(`loop.ps1 -Hot`) |
 | 3 | 스크린샷·콘솔·FPS를 눈/기계로 확인 | 에이전트가 화면을 못 봄 | `harness_capture/play`가 PNG + 이미지 통계, `harness_console/stats`가 JSON |
-| 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/Texture 베이크), URP Volume을 코드로 |
+| 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/Texture 베이크), URP Volume을 코드로, 파티클·키프레임 애니메이션을 코드로(`ctx.Particles`, `ctx.AnimationClip` + Playables `ClipPlayer`) |
 | 5 | 레지스트리 구조라 병렬 작업이 쉬움 | 에디터 하나를 공유 | `GameRoot.Register` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 git worktree + `submit.ps1`/`land.ps1` 트랜잭션 |
 
 모든 설계 결정의 기준: **"Three.js 환경의 어떤 성질을 복원하는가"**. URP·물리·엔진 기능을 쓰니 결과는 그 이상을 노린다.
@@ -45,7 +45,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 `tools/loop.ps1` = recompile → (C# 컴파일 에러면 즉시 중단) → lint → `harness_build` → `harness_shaders` → `harness_play`(기본 3컷)
 → `harness_console` + `harness_stats` → `HarnessOut/latest/report.json` (stdout에도 같은 JSON). 종료코드 0 = 전부 녹색.
 **모듈의 `[CodeReload] Tick` 본문만 고쳤으면 `tools/loop.ps1 -Hot`**: 컴파일·도메인 리로드·빌드 없이 그 본문을 바꿔 넣고 같은 시나리오를 돈다
-(~3.1 s, 전체 루프 ~9 s). 그 밖의 변경이면 알아서 전체 루프를 돌고 이유를 `hot.fallback`에 남긴다(아래 "핫 루프").
+(~3.3 s, 전체 루프 ~9 s). 그 밖의 변경이면 알아서 전체 루프를 돌고 이유를 `hot.fallback`에 남긴다(아래 "핫 루프").
 
 **매 루프 후 반드시**: `report.json`의 `ok/stage`를 보고, `shots`의 PNG를 **Read 툴로 직접 열어** 눈으로 확인한다. `build.warnings`(머티리얼 설정 실수 등)도 읽는다.
 `shotStats[].blank=true`(평평/검은 화면)면 렌더가 깨진 것이다. `dark=true`(픽셀 98% 이상이 거의 검정)는 실패로 치지 않지만
@@ -82,7 +82,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
             "settings": {"assets","written","assigned","pipeline","switched","reloadRequested"}, ...},   // ISettingsStep이 만든 RP 에셋·이번에 다시 쓴 것·활성 파이프라인·전환
             // 핫 루프는 빌드하지 않는다: {"ok":true,"skipped":true,"note"}
   "play": {"success","probeReady","frames","gameSec","modules","failedModules","inputEventsApplied",
-           "events":[{"name":"SpinnerLap","count":2}],     // EventBus 발행 횟수 → 게임플레이를 기계적으로 검증
+           "events":[{"name":"SpinnerLap","count":2}],     // EventBus 발행 횟수 → 게임플레이를 기계적으로 검증 (클립 이벤트는 "ClipEvent:<이름>")
            "inputBackends":["inputSystem"|"hook"], "inputHooks":["HarnessInput.OnScenarioInput"],   // 입력이 들어간 곳
            "isolatedDevices":[{"name":"Keyboard","presses":0}],   // 시나리오 동안 끈 실제 장치와 막은 키·버튼 누름 수
            "activeScene", "scenes":[{"name","mode","t","wallSec"}],      // 로드된 씬(Start = 처음부터 있던 씬, t = 시나리오 시계)
@@ -108,9 +108,9 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 }
 ```
 
-측정된 한 바퀴 시간(이 머신, W5): 코드 변경 없음 **~3.4s**, 셰이더만 수정 **~3.8s**(도메인 리로드 없음), 모듈 C# 1줄 수정 **~9.2s**
-(컴파일 ~0.4s + 도메인 리로드 ~2.5s + 리로드 뒤 에디터 자체 작업 ~0.9s + 리로드 직후 빌드 ~0.9s + 플레이 ~2.4s), **`-Hot`(본문만) ~3.1s**
-(첫 캡처까지 ~1.3s; 도메인 리로드 뒤 첫 핫 루프는 +0.8s), 컴파일 에러 보고 **~1.1s**. 도메인 리로드는 에디터를 오래 띄워 둘수록 늘었다(2.5 → 3.5s, 아래 "함정").
+측정된 한 바퀴 시간(이 머신, W6a — ROADMAP "기준선"): 코드 변경 없음 **~3.6s**, 셰이더만 수정 **~3.8s**(도메인 리로드 없음), 모듈 C# 1줄 수정 **~9.0s**
+(컴파일 ~0.4s + 도메인 리로드 ~2.5s + 리로드 뒤 에디터 자체 작업 ~0.9s + 리로드 직후 빌드 ~1.0s + 플레이 ~2.6s), **`-Hot`(본문만) ~3.3s**
+(도메인 리로드 뒤 첫 핫 루프는 +0.7s), 컴파일 에러 보고 **~1.1s**. 도메인 리로드는 에디터를 오래 띄워 둘수록 늘었다(2.5 → 3.5s, 아래 "함정").
 
 ## 규칙 (반드시 지킬 것)
 
@@ -119,7 +119,8 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
    렌더 파이프라인(URP·Renderer 에셋, Renderer Feature, 품질 레벨별 파이프라인)은 같은 폴더의 `ISettingsStep` 코드가 만든다(아래 "렌더 설정").
    그 밖의 프로젝트 설정도 YAML이 아니라 에디터 API(`harness_setup` 등)로 바꾼다.
 2. **텍스트로 쓸 수 있는 형태만.** 셰이더 = 손으로 쓴 HLSL `.shader`(Shader Graph 금지), UI = UI Toolkit UXML/USS(uGUI 프리팹 금지),
-   머티리얼·파티클·Volume·라이팅·PanelSettings = 빌더 코드(`BuildContext`)로 생성. Animator/Timeline 같은 GUI 에셋이 필요하면 코드로 생성한다.
+   머티리얼·파티클·Volume·라이팅·PanelSettings = 빌더 코드(`BuildContext`)로 생성. 애니메이션은 `ctx.AnimationClip`(키를 코드로) + `ctx.Animate`
+   (Playables — AnimatorController 에셋 없음, 아래 "파티클·애니메이션"). 그 밖의 GUI 에셋(Timeline 등)이 필요하면 코드로 생성한다.
 3. **자기 모듈 폴더 밖 수정 금지.** 작업 범위는 `Assets/Game/<Module>/` 하나. 모듈 간 공유 이벤트 타입만
    `Assets/Game/Contracts/`에 **추가**(기존 타입 수정 금지). 하네스 패키지(`Packages/com.geuneda.agentharness/`)와 `tools/`는 하네스 작업일 때만 고친다.
 4. **에디터 조작은 한 번에 하나씩.** 에디터는 하나다. `tools/loop.ps1`과 `tools/uc.ps1`은 프로젝트별 시스템 뮤텍스를 잡으므로
@@ -140,10 +141,11 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
 Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json: com.unity.pipeline 의존)
   Runtime/                     런타임 계약: GameRoot, IGameModule, EventBus, HarnessProbe, HarnessConfig, ShotPreset(+ShotPose), ScriptedInput,
                                ScenarioInput(KeyNames, InputHookReplay), ScenarioRunner, HarnessCapture(+CaptureCameras: 화면의 카메라들,
-                               CaptureUi: 스크린 공간 UI 합성, ContactSheet: 연속 캡처 시트)
+                               CaptureUi: 스크린 공간 UI 합성, ContactSheet: 연속 캡처 시트), ClipPlayer(Playables 클립 재생, ClipEvent)
                                (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
   Runtime/Procedural/          MeshBuilder, Noise(Perlin/fBm/Ridged/Worley/Rng), TextureBaker, PMath, AmbientProbe(큐브맵 → 앰비언트 SH)
-  Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교, HarnessHot: 핫 루프) 와 BuildContext(+.Materials: LitMaterial)/IBuildStep,
+  Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교, HarnessHot: 핫 루프) 와 BuildContext(+.Materials: LitMaterial,
+                               +.Particles: Particles·ParticleMaterial, +.Animation: AnimationClip·Animate)/IBuildStep,
                                SettingsContext/ISettingsStep(렌더 설정), HarnessReleaseBuild (asmdef Harness.Editor, Editor 전용)
   UI/                          DefaultRuntimeTheme.tss (UI Toolkit 기본 테마, 텍스트)
   Tools~/                      도구 본체(.ps1, Harness.psm1) + templates/ (진입점, 기본 시나리오, 기존 프로젝트용 안내서, HarnessInput.cs)
@@ -219,6 +221,8 @@ public sealed class FooBuildStep : IBuildStep
         ctx.VolumeProfile("Post", p => p.Add<Bloom>(true).intensity.value = 1f);         // Volume 오버라이드
         ctx.UIDocument("HUD", "Assets/Game/Foo/UI/Hud.uxml");                            // UI Toolkit
         ctx.Shot("foo_close", new Vector3(0, 2, -4), Vector3.zero, 45f);                // 캡처 프리셋
+        ctx.Particles("Sparks", p => { p.Rate = 30f; p.Material = ctx.ParticleMaterial("Spark", m => m.Blend = ParticleBlend.Additive); });  // 아래 "파티클·애니메이션"
+        ctx.Animate(go, ctx.AnimationClip("Bob", c => c.Position("", (0f, Vector3.zero), (1f, Vector3.up), (2f, Vector3.zero))));      // Playables로 재생
         if (!ctx.CacheHit("bake", new[] { "Big.png" }, someParam)) { /* 무거운 베이크 후 저장 */ }
     }
 }
@@ -232,6 +236,59 @@ public sealed class FooBuildStep : IBuildStep
   설정에서 만든다 — 이미션은 GI 플래그(인스펙터의 Emission 체크)로 켜지므로 `EnableKeyword("_EMISSION")`은 검증이 되돌린다.
   다른 셰이더는 `ctx.Material(name, shader, m => …)`: 셰이더에 없는 프로퍼티(오타, 다른 파이프라인 이름), URP가 읽지 않는 옛 이름
   (`_MainTex`·`_Color`·`_Glossiness`), 검증이 덮어쓴 값, 이미션 색만 넣고 꺼진 이미션은 `build.warnings`에 나온다.
+
+### 파티클·애니메이션 (G1-3)
+
+```csharp
+// 파티클: ParticleSettings 한 벌 → ParticleSystem (샘플: Assets/Game/Smoke/Builders/SmokeFxStep.cs)
+ctx.Particles("Embers", p =>
+{
+    p.Prewarm = true;                                            // 첫 프레임부터 공중에(루프일 때)
+    p.Lifetime = new ParticleSystem.MinMaxCurve(2.5f, 4.5f);     // float = 상수, (min, max) = 무작위 범위, (배율, 커브)
+    p.Speed = new ParticleSystem.MinMaxCurve(0.5f, 1.4f);
+    p.Size = new ParticleSystem.MinMaxCurve(0.06f, 0.16f);
+    p.Color = new Color(1f, 0.45f, 0.12f);                       // 8비트(0..1): 발광은 머티리얼의 HDR 색으로
+    p.Rate = 40f; p.Angle = 10f; p.Radius = 1.9f;                // 원뿔(기본)은 위(+Y)로: ShapeRotation 기본 (-90, 0, 0)
+    p.Space = ParticleSystemSimulationSpace.World;               // 이미터가 움직여도 뿜은 입자는 제자리
+    p.ColorOverLifetime = TextureBaker.Ramp((0f, new Color(1f, 0.9f, 0.5f, 0f)), (0.1f, Color.white), (1f, new Color(1f, 0.2f, 0f, 0f)));
+    p.SizeOverLifetime = AnimationCurve.Linear(0f, 1f, 1f, 0.3f);
+    p.NoiseStrength = 0.4f;                                      // 0 = 모듈 끔 (Velocity, Drag, RotationOverLifetime도 같은 식)
+    p.Material = ctx.ParticleMaterial("Ember", m => { m.Blend = ParticleBlend.Additive; m.Color = Color.white * 2f; });
+}).transform.localPosition = new Vector3(0f, 1.45f, 0f);
+
+// 애니메이션: 키를 코드로 → <name>.anim, ClipPlayer가 Playables로 재생 (AnimatorController 에셋 없음)
+var orbit = ctx.AnimationClip("HaloOrbit", c =>
+{
+    c.Loop = true;
+    c.Rotation("RingA", (0f, new Vector3(68f, 0f, 0f)), (4f, new Vector3(68f, 360f, 0f))).Linear();   // Euler(도)를 숫자 그대로 보간: 한 바퀴
+    c.Scale("", (0f, Vector3.one), (2f, Vector3.one * 1.06f), (4f, Vector3.one));                     // "" = 재생하는 오브젝트 자신
+    c.Color("RingA", typeof(MeshRenderer), "material._EmissionColor", (0f, cyan), (2f, magenta), (4f, cyan));
+    c.Float("Lamp", typeof(Light), "m_Intensity", (0f, 1f), (0.5f, 4f)).Constant();                   // 직렬화 이름(YAML의 m_…)
+    c.Active("Spark", (0f, false), (1f, true));
+    c.Event(2f, "HaloHalfTurn");                                                                        // → ClipEvent, play.events
+});
+var player = ctx.Animate(halo, orbit);   // Animator(컨트롤러 없음, 루트 모션 끔) + ClipPlayer; 첫 클립이 씬 시작 때 재생
+```
+- 파티클은 **모듈+경로에서 만든 고정 시드**(`useAutoRandomSeed` 끔), 화면 밖에서도 시뮬레이션(`AlwaysSimulate` — 자동이면 화면 밖 루프 시스템이 멈춰
+  뒤 프레임이 카메라가 본 것에 달라진다), 씬 시작 때 재생. 고정 시간 간격 시나리오라 캡처가 매번 픽셀까지 같다(기준 이미지 비교 가능).
+  `ParticleSettings`: Duration/Loop/Prewarm, Lifetime/Speed/Size/Rotation(도)/Color/Gravity/Space/MaxParticles, Rate/`Burst(t, n)`, Shape/Angle/Radius/
+  RadiusThickness/Arc/BoxSize/ShapeRotation/ShapePosition, ColorOverLifetime/SizeOverLifetime/RotationOverLifetime/Velocity/Drag/Noise*, Material/RenderMode/
+  LengthScale/VelocityScale/Mesh/CastShadows/ReceiveShadows/SortMode. 그 밖의 모듈(서브 이미터·트레일·라이트)은 반환된 ParticleSystem을 고친다.
+  `ctx.ParticleMaterial`: URP Particles/Unlit(투명), `Blend`(Alpha/Premultiply/Additive/Multiply), `Color`(HDR 가능), `SoftParticles`, `Cull`, `Texture`
+  (없으면 생성한 부드러운 점 `ParticleDot.png`). 모듈 코드에서 터뜨리기: `ctx.Find("Foo", "Sparks").GetComponent<ParticleSystem>().Emit(30)`.
+- `ClipBuilder`: `Position`/`Rotation`/`Scale`(경로, (초, Vector3)…), `Float`/`Color`(경로, 컴포넌트 타입, 직렬화 이름, 키…), `Active`, `Event`, `Loop`,
+  `FrameRate`. 키는 시간 순. 트랙마다 `.Linear()`(등속)·`.Constant()`(계단), 기본은 Smooth(애니메이션 창의 Clamped Auto). 경로는 `Animate`한 오브젝트 기준.
+  `Color` 값은 `Material.SetColor`/인스펙터와 같은 의미(`LitSettings.Emission`과 같은 숫자, HDR 가능).
+- **빌드 뒤 검사**: 모든 스텝이 끝난 뒤 `Animate`한 클립의 커브마다 대상에서 경로·컴포넌트·속성을 찾는다 — 없으면 `build.warnings`에 트랙마다 한 줄
+  (`no child 'Ring'`, `has no Light`, `material._BaseColr is not a property of the materials of 'Cube' (similar: material._BaseColor, …)`). 틀린 이름의
+  커브는 에러 없이 아무것도 안 한다. 그리고 씬은 첫 클립의 0초 포즈로 저장된다(클립이 움직이는 값은 빌더가 준 값을 덮는다) → 편집 모드 캡처가 플레이 시작 모습.
+- 런타임 `ClipPlayer`(모듈 코드): `Play(name, fade)`(처음부터, 앞 클립에서 `fade`초 크로스페이드), `Stop()`, `Current`, `Time`, `IsDone`(루프 아닌 클립이 끝나
+  마지막 프레임을 유지), `speed`. `AddComponent<ClipPlayer>()` 뒤에 `clips`를 넣어도 `Play`가 반영한다. 게임 시간(`Time.deltaTime`)으로 돈다.
+  클립 이벤트는 `EventBus.Subscribe<ClipEvent>(e => …)`(`e.Name`, `e.Source`)로 받고 `play.events`에 **`ClipEvent:<이름>`**으로 세진다 → "애니메이션이 그 순간에
+  닿았다"를 기계적으로 검증(샘플 기본 루프: `ClipEvent:HaloHalfTurn=1`).
+- 편집 모드 캡처(`harness_capture`, `-NoPlay`)에는 파티클이 없다(시뮬레이션하지 않음). 움직임은 플레이 캡처·연속 캡처(`"frames"`)로 본다.
+- 출시 빌드: `ClipPlayer`는 `Harness.Runtime`에 있어 `GameRoot`처럼 `AGENTHARNESS_RUNTIME`이 필요하다. 타임라인(TimelineAsset) 헬퍼는 없다 — 여러 오브젝트의
+  순서는 클립 + `ClipEvent` + 모듈 코드로.
 
 ### 렌더 설정 (ISettingsStep, G1-1)
 
@@ -380,7 +437,7 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1                 # 이후
 ## 핫 루프 (loop.ps1 -Hot, G2-1)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -Hot           # 본문만 고쳤으면 ~3.1s, 아니면 알아서 전체 루프
+powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -Hot           # 본문만 고쳤으면 ~3.3s, 아니면 알아서 전체 루프
 powershell -ExecutionPolicy Bypass -File tools/uc.ps1 harness_hot '{"mode":"check"}'   # 무엇이 바뀌었고 핫으로 되는지만
 ```
 - **핫으로 되는 것**: 마지막 전체 루프가 컴파일한 뒤 바뀐 것이 `[CodeReload]` 메서드의 **본문뿐**일 때. 그 파일들을 Pipeline의 인터프리터 백엔드
@@ -507,7 +564,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~5분
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 78354e2e
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 1c6fa406
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
 - 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark/magenta 없음, 모든 샷 1280x720에 HUD 합성, 기준 이미지: 루프 1이 `HarnessOut/selftest/golden`에
@@ -519,7 +576,9 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   에디터에 포커스가 없던 시도는 3번까지 다시 — 백그라운드에선 Input System이 장치를 먼저 꺼서 격리가 돌 일이 없다, ROADMAP G3-9) +
   렌더 설정(W4: RP 에셋이 생성물이고 루프 2·3은 다시 쓰지 않음, 지우면 루프 한 번으로 다시 생기고 fingerprint·픽셀·`git status` 같음; 반사 큐브맵에 잘못된 텍셀이
   없고 가장 밝은 텍셀이 태양 방향(2° 안); 앰비언트 = 라이팅 데이터의 큐브맵 SH; `AmbientProbe` 균일 환경 → Flat과 같음·쓰레기 텍셀 거부; 머티리얼 경고 3종과
-  `LitMaterial`의 이미션·알파 클립) + `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 + 핫 루프(G2-1: `[CodeReload] Tick` 본문 수정 →
+  `LitMaterial`의 이미션·알파 클립) + 콘텐츠 헬퍼(G1-3: 빌드된 불씨의 고정 시드·`AlwaysSimulate`, Halo의 `ClipPlayer`; 픽스처 클립의 경로·컴포넌트·머티리얼 속성·
+  Transform 속성 오타 → 경고 한 줄씩, 선형 회전 샘플, 파티클 두 번 시뮬레이션이 같음, 가산 `ParticleMaterial`; 플레이 중 런타임 클립을 받은 `ClipPlayer`의
+  끝까지 재생·이벤트 `ClipEvent:RiseEnd`·크로스페이드) + `compile-check -IncludeHarness` · 2 C# 컴파일 에러 · 3 런타임 예외 + 핫 루프(G2-1: `[CodeReload] Tick` 본문 수정 →
   `-Hot`이 컴파일·빌드·도메인 리로드 없이 반영, events 같음, golden `changed` → 되돌리면 교체 해제·`same` → 필드 추가는 전체 루프(사유에 그 줄) →
   핫 본문의 예외는 전체 루프가 주입한 줄로 보고) ·
   4 HLSL 에러(재임포트 없는 다음 루프에서도) + 되돌린 상태를 기준 이미지로 → 셰이더 한 줄(스펙큘러 절반) → golden `changed`(rect·diff PNG), 루프는 녹색 +
@@ -542,13 +601,13 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-09-30 W5, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W5에서 메시 해시 방식이 바뀌어 새 값):
+- 검증한 버전(2026-09-30 W6a, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W6a에서 스모크 씬에 파티클·애니메이션이 더해져 새 값):
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
-  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `d6e6d71b…` | 63 / 70 / 87 | 1–9 녹색(핫 루프 포함), 샷 60.3/55.6/45.7(6.3과 같음, W4) |
-  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `78354e2e…` | 63 / 70 / 87 | 1–9 녹색(핫 루프 포함), 커밋된 기준 이미지와 같음 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `df34f931…` | 63 / 70 / 87 | 1–9 녹색(핫 루프 포함), 샷 60.4/55.7/45.7(W4 전에는 첫 플레이 뒤 검었다 — ROADMAP P-4) |
+  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `4ffb4440…` | 63 / 70 / 87 | 1–9 녹색(핫 루프·파티클·클립 포함), 샷 62.7/55.9/45.7(6.3과 같음) |
+  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `1c6fa406…` | 63 / 70 / 87 | 1–9 녹색(핫 루프·파티클·클립 포함), 커밋된 기준 이미지와 같음 |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `5ab10290…` | 63 / 70 / 87 | 1–9 녹색(핫 루프·파티클·클립 포함), 샷 62.8/56.0/45.8(W4 전에는 첫 플레이 뒤 검었다 — ROADMAP P-4) |
 
   fingerprint는 버전마다 다르다(URP가 만드는 머티리얼·에셋 직렬화가 다르다). 같은 버전 안에서만 매번 같아야 한다.
 - 다른 버전으로 열면 Unity가 다시 쓰는 파일(커밋하지 않는다): `Packages/packages-lock.json`, `Assets/Settings/UniversalRenderPipelineGlobalSettings.asset`,
@@ -656,6 +715,16 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - 6.6은 새 씬의 **첫 렌더에 기본 환경광(스카이박스 앰비언트·반사)이 아직 없다**(빈 씬 첫 렌더 114.7 → 다음부터 197). 설정별로 밝기를 잴 때 첫 렌더를
   빼지 않으면 먼저 잰 설정만 어둡다(P-4 조사 초기에 "소프트 그림자만 어둡다"로 잘못 본 원인).
 - W4 전 `build.fingerprint`는 씬의 GameObject만 훑어서 RenderSettings(안개·앰비언트·스카이박스·반사)와 라이팅 데이터가 바뀌어도 그대로였다 → 지금은 들어간다.
+  W6a 전에는 AnimationCurve를 키 개수로만, Gradient는 아예 해시하지 않았다(파티클 커브·색, 클립 키 값을 바꿔도 그대로) → 지금은 모든 키.
+- **새로 만든 `.anim`과 제자리 덮어쓴 `.anim`의 직렬화가 다르다**: `AnimationUtility.SetEditorCurves` 직후 저장한 클립은 파생 바인딩 캐시 `m_ClipBindingConstant`가
+  채워져 있고, `CopySerialized`로 덮어쓴 뒤에는 비어 있다(재생은 같다). 생성물을 지운 뒤 첫 빌드만 fingerprint가 달랐다 → 그 경로는 해시에서 뺐다.
+  생성물 폴더를 지우고 루프 2회로 첫 빌드 = 다음 빌드를 확인하는 것이 이런 차이를 잡는 방법이다(새 클론의 첫 루프가 그 경우).
+- **애니메이션 커브의 머티리얼 속성(`material._X`)은 이름이 틀려도 "풀린다"**: `AnimationUtility.GetEditorCurveValueType`이 `material._BaseColr`에도 Single을 준다
+  (경로·컴포넌트·Transform 속성 오타는 null). 셰이더에 있는 이름은 렌더러의 `GetAnimatableBindings`로만 안다. 또 HDR 색은 그 목록에 `.x/.y/.z/.w`로 나오는데
+  `.r` 키와 `.x` 키는 뜻이 다르다(`.r` 0.75 → 감마에서 선형으로 0.52 = `SetColor`, `.x` 0.75 → 그대로).
+- 파티클 색(`startColor`, Color over Lifetime)은 입자마다 8비트로 저장된다 — HDR 시작 색은 1로 잘린다. 블룸이 걸리는 발광은 머티리얼의 `_BaseColor`(HDR)로 준다.
+- `Playable.SetTime`을 한 번만 불러 클립을 되감으면 그 사이의 애니메이션 이벤트가 다음 평가에서 발행된다(0.78 s → 0: 0.5 s 이벤트가 한 번 더). 같은 값으로
+  두 번 부르면 안 나간다(`ClipPlayer.Play`). PlayableGraph의 애니메이션 이벤트는 `AnimationPlayableOutput`의 Animator가 붙은 오브젝트의 컴포넌트가 받는다.
 - Game 뷰 크기 목록(`PlayModeWindow.SetCustomRenderingResolution`이 여기에 추가한다)과 에디터 기본 레이아웃은 **사용자 전역**이다
   (`%APPDATA%\Unity\Editor-5.x\Preferences\GameViewSizes.asset`, `Layouts\current\default-6000.dwlt`). 하네스·실험 코드에서 바꾸지 않는다.
 - **에디터에서 `ScriptableObject.CreateInstance<PanelSettings>()`를 하면 Unity가 `Assets/UI Toolkit/UnityThemes/UnityDefaultRuntimeTheme.tss`를 만든다**
@@ -731,7 +800,7 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - 캡처 카메라는 메인 카메라 설정(후처리 포함)을 복사해 오프스크린 렌더한다. 메인 카메라가 없으면 캡처 실패.
 - 에디터 플레이 모드 FPS는 에디터 오버헤드·autotick 영향을 받는다. 절대값이 아니라 **변경 전후 비교**용이다(`editorFocused` 확인).
 - Code Optimization은 Debug(정확한 예외 줄 번호). Release면 throw 위치가 메서드 끝 줄로 보고되고, **절차적 메시·텍스처의 float 결과가 달라져
-  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `78354e2e…`).
+  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `1c6fa406…`).
   `CompilationPipeline.codeOptimization`은 에디터 세션 동안만 유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다
   → `HarnessCodeOptimization`([InitializeOnLoad])이 도메인이 로드될 때마다 이 프로젝트만 Debug로 되돌린다(재컴파일 1회; 그래서 이 프로젝트에선
   Release가 유지되지 않는다). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다.

@@ -31,9 +31,11 @@ namespace Harness
             return new Subscription(() => list.Remove(handler));
         }
 
-        public static void Publish<T>(T evt)
+        public static void Publish<T>(T evt) => Publish(evt, typeof(T).Name);
+
+        /// <summary>Publish, counted under <paramref name="key"/> instead of the type name (ClipPlayer: "ClipEvent:&lt;name&gt;").</summary>
+        internal static void Publish<T>(T evt, string key)
         {
-            var key = typeof(T).Name;
             s_Counts.TryGetValue(key, out var n);
             s_Counts[key] = n + 1;
 

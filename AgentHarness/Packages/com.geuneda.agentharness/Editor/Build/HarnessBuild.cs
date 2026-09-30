@@ -178,6 +178,7 @@ namespace Harness.Editor
                     durationMs = Math.Round(sw.Elapsed.TotalMilliseconds),
                 };
             }
+            ctx.AfterSteps();
 
             // Delete generated assets that no step produced this time (keeps Assets/Generated == f(code)).
             var deleted = new List<string>();

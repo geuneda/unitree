@@ -30,6 +30,16 @@
             "name": "com.unity.render-pipelines.universal",
             "expression": "0.0.0",
             "define": "AGENTHARNESS_URP"
+        },
+        {
+            "name": "com.unity.modules.animation",
+            "expression": "0.0.0",
+            "define": "AGENTHARNESS_ANIMATION"
+        },
+        {
+            "name": "com.unity.modules.particlesystem",
+            "expression": "0.0.0",
+            "define": "AGENTHARNESS_PARTICLES"
         }
     ],
     "noEngineReferences": false

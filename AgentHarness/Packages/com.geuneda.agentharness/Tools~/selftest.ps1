@@ -21,7 +21,11 @@
     rewritten by loops 2-3, deleted they come back with one loop (same fingerprint, pixels and git status); the reflection
     cubemap holds the sky (P-4), the ambient is its SH through the scene's lighting data (G4-2), AmbientProbe maps a
     uniform environment to Flat ambient and refuses garbage; ctx.Material reports a misspelled / obsolete property and an
-    emission color without its toggle, ctx.LitMaterial turns emission and alpha clipping on (G4-3)
+    emission color without its toggle, ctx.LitMaterial turns emission and alpha clipping on (G4-3); content helpers (G1-3):
+    the built embers have a fixed seed and always simulate, the halo plays through a ClipPlayer; a clip with a misspelled
+    path, component, material property and Transform property gives one warning each; a linear turn samples right; particles
+    simulate the same twice; an additive ParticleMaterial; in play mode a ClipPlayer plays runtime clips to their end, fires
+    their event into play.events and cross-fades
   2 C# compile error in Smoke -> stage=compile at the injected file/line, module Smoke; reverted -> green
   3 runtime exception in Smoke -> stage=runtime at the injected line; reverted -> green. Hot loop (G2-1): an edit of the
     [CodeReload] Tick body -> loop.ps1 -Hot reloads it (no compile, build or domain reload), same events, golden changed;
@@ -759,6 +763,156 @@ UnityEditor.AssetDatabase.DeleteAsset(Harness.Editor.HarnessPaths.GeneratedRoot 
 return r;
 '@
 
+# Content helpers (G1-3), in edit mode: the built scene's embers and halo; a scratch module in a scene of its own with a clip whose
+# path, component, material property and Transform property are misspelled, and particles simulated twice from their fixed seed.
+$ContentCheckText = @'
+var r = new System.Collections.Generic.Dictionary<string, object>();
+var embers = UnityEngine.GameObject.Find("Smoke/Embers");
+var eps = embers == null ? null : embers.GetComponent<UnityEngine.ParticleSystem>();
+r["embers"] = eps == null ? "none" : $"autoSeed={eps.useAutoRandomSeed} culling={eps.main.cullingMode} shader={eps.GetComponent<UnityEngine.ParticleSystemRenderer>().sharedMaterial.shader.name}";
+var halo = UnityEngine.GameObject.Find("Smoke/Halo");
+var hp = halo == null ? null : halo.GetComponent<Harness.ClipPlayer>();
+var ha = halo == null ? null : halo.GetComponent<UnityEngine.Animator>();
+r["halo"] = hp == null || ha == null ? "none" : $"{hp.playOnEnable}:{hp.clips.Length} controller={(ha.runtimeAnimatorController == null ? "none" : "yes")} rootMotion={ha.applyRootMotion}";
+var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+var scene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(UnityEditor.SceneManagement.NewSceneSetup.EmptyScene, UnityEditor.SceneManagement.NewSceneMode.Additive);
+try
+{
+    var ctx = (Harness.Editor.BuildContext)System.Activator.CreateInstance(typeof(Harness.Editor.BuildContext), flags, null, new object[] { scene, false }, null);
+    typeof(Harness.Editor.BuildContext).GetProperty("Module").SetValue(ctx, "_SelftestContent");
+    var probe = ctx.Create("Probe");
+    var cube = ctx.Create("Probe/Cube", typeof(UnityEngine.MeshFilter), typeof(UnityEngine.MeshRenderer));
+    cube.GetComponent<UnityEngine.MeshRenderer>().sharedMaterial = ctx.LitMaterial("ProbeLit", m => { });
+    var clip = ctx.AnimationClip("ProbeClip", c =>
+    {
+        c.Rotation("Cube", (0f, UnityEngine.Vector3.zero), (4f, new UnityEngine.Vector3(0f, 360f, 0f))).Linear();
+        c.Color("Cube", typeof(UnityEngine.MeshRenderer), "material._BaseColor", (0f, UnityEngine.Color.white), (1f, UnityEngine.Color.red));
+        c.Color("Cube", typeof(UnityEngine.MeshRenderer), "material._BaseColr", (0f, UnityEngine.Color.white), (1f, UnityEngine.Color.red));
+        c.Position("Missing", (0f, UnityEngine.Vector3.zero), (1f, UnityEngine.Vector3.one));
+        c.Float("", typeof(UnityEngine.Light), "m_Intensity", (0f, 1f), (1f, 2f));
+        c.Float("Cube", typeof(UnityEngine.Transform), "m_LocalPositon.y", (0f, 0f), (1f, 1f));
+        c.Event(0.5f, "Probe");
+    });
+    ctx.Animate(probe, clip);
+    typeof(Harness.Editor.BuildContext).GetMethod("AfterSteps", flags).Invoke(ctx, null);
+    clip.SampleAnimation(probe, 1f);
+    r["sampledYaw"] = cube.transform.localEulerAngles.y;
+    r["clip"] = $"loop={clip.isLooping} length={clip.length} events={UnityEditor.AnimationUtility.GetAnimationEvents(clip).Length} curves={UnityEditor.AnimationUtility.GetCurveBindings(clip).Length}";
+    var ps = ctx.Particles("Sparks", p =>
+    {
+        p.Rate = 50f; p.Lifetime = 2f; p.Speed = new UnityEngine.ParticleSystem.MinMaxCurve(1f, 3f); p.NoiseStrength = 0.5f;
+        p.Material = ctx.ParticleMaterial("ProbeAdd", m => m.Blend = Harness.Editor.ParticleBlend.Additive);
+    });
+    ps.Simulate(1f, true, true);
+    var a = new UnityEngine.ParticleSystem.Particle[ps.particleCount];
+    var na = ps.GetParticles(a);
+    ps.Simulate(1f, true, true);
+    var b = new UnityEngine.ParticleSystem.Particle[ps.particleCount];
+    var nb = ps.GetParticles(b);
+    var same = na == nb && na > 0;
+    for (var i = 0; same && i < na; i++) same = a[i].position == b[i].position;
+    ps.Clear();
+    r["particles"] = na;
+    r["simulateSame"] = same;
+    r["sparks"] = $"autoSeed={ps.useAutoRandomSeed} culling={ps.main.cullingMode} playOnAwake={ps.main.playOnAwake}";
+    var mat = ps.GetComponent<UnityEngine.ParticleSystemRenderer>().sharedMaterial;
+    var tex = mat.GetTexture("_BaseMap");
+    r["additive"] = $"{mat.shader.name} src={mat.GetFloat("_SrcBlend")} dst={mat.GetFloat("_DstBlend")} queue={mat.renderQueue} keywords={string.Join(",", mat.shaderKeywords)} tex={(tex == null ? "none" : tex.name)}";
+    r["warnings"] = typeof(Harness.Editor.BuildContext).GetField("Warnings", flags).GetValue(ctx);
+}
+finally
+{
+    UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
+    UnityEditor.AssetDatabase.DeleteAsset(Harness.Editor.HarnessPaths.GeneratedRoot + "/_SelftestContent");
+}
+return r;
+'@
+
+# ClipPlayer in play mode (G1-3): on the next play, a player gets two clips made at runtime after AddComponent (it picks them up
+# on Play): Rise moves a child's x 0 -> 1 in 0.5 s with the event "RiseEnd" at its end, Hold keeps x at 3. At 0.8 s Rise is done
+# and holds; Play("Hold", 0.4) cross-fades; the x values, the sample's embers and halo go to SessionState. Disarms itself.
+$ClipsArmText = @'
+const string key = "AgentHarness.selftest.clips";
+UnityEditor.SessionState.SetString(key, "");
+var deadline = System.DateTime.UtcNow.AddSeconds(120);
+var result = new System.Collections.Generic.Dictionary<string, object>();
+Harness.ClipPlayer player = null;
+UnityEngine.Transform probe = null;
+var phase = 0;
+var t0 = 0f;
+UnityEditor.EditorApplication.CallbackFunction tick = null;
+tick = () =>
+{
+    if (!UnityEngine.Application.isPlaying || player == null) return;
+    var now = UnityEngine.Time.time - t0;
+    if (phase == 0 && now >= 0.8f)
+    {
+        result["riseDone"] = player.IsDone;
+        result["riseX"] = probe.localPosition.x;
+        player.Play("Hold", 0.4f);
+        t0 = UnityEngine.Time.time;
+        phase = 1;
+    }
+    else if (phase == 1 && now >= 0.2f)
+    {
+        result["fadeX"] = probe.localPosition.x;
+        result["fadeCurrent"] = player.Current;
+        phase = 2;
+    }
+    else if (phase == 2 && now >= 0.6f)
+    {
+        result["holdX"] = probe.localPosition.x;
+        result["holdCurrent"] = player.Current;
+        var embers = UnityEngine.GameObject.Find("Smoke/Embers");
+        result["embers"] = embers == null ? -1 : embers.GetComponent<UnityEngine.ParticleSystem>().particleCount;
+        var halo = UnityEngine.GameObject.Find("Smoke/Halo");
+        var hp = halo == null ? null : halo.GetComponent<Harness.ClipPlayer>();
+        result["halo"] = hp == null ? "none" : hp.Current + "@" + hp.Time.ToString("0.00");
+        UnityEditor.SessionState.SetString(key, Newtonsoft.Json.JsonConvert.SerializeObject(result));
+        UnityEditor.EditorApplication.update -= tick;
+        phase = 3;
+    }
+};
+System.Action<UnityEditor.PlayModeStateChange> onChange = null;
+onChange = c =>
+{
+    if (c == UnityEditor.PlayModeStateChange.ExitingPlayMode) { UnityEditor.EditorApplication.update -= tick; UnityEditor.EditorApplication.playModeStateChanged -= onChange; return; }
+    if (c != UnityEditor.PlayModeStateChange.EnteredPlayMode || System.DateTime.UtcNow > deadline) return;
+    var go = new UnityEngine.GameObject("[selftest clips]");
+    go.transform.position = new UnityEngine.Vector3(0f, -50f, 0f);
+    var child = new UnityEngine.GameObject("Probe");
+    child.transform.SetParent(go.transform, false);
+    probe = child.transform;
+    go.AddComponent<UnityEngine.Animator>();
+    player = go.AddComponent<Harness.ClipPlayer>();
+    var rise = new UnityEngine.AnimationClip { name = "Rise" };
+    UnityEditor.AnimationUtility.SetEditorCurve(rise, UnityEditor.EditorCurveBinding.FloatCurve("Probe", typeof(UnityEngine.Transform), "m_LocalPosition.x"), UnityEngine.AnimationCurve.Linear(0f, 0f, 0.5f, 1f));
+    UnityEditor.AnimationUtility.SetAnimationEvents(rise, new[] { new UnityEngine.AnimationEvent { time = 0.5f, functionName = "OnClipEvent", stringParameter = "RiseEnd" } });
+    var hold = new UnityEngine.AnimationClip { name = "Hold" };
+    UnityEditor.AnimationUtility.SetEditorCurve(hold, UnityEditor.EditorCurveBinding.FloatCurve("Probe", typeof(UnityEngine.Transform), "m_LocalPosition.x"), UnityEngine.AnimationCurve.Constant(0f, 1f, 3f));
+    var s = UnityEditor.AnimationUtility.GetAnimationClipSettings(hold); s.loopTime = true; UnityEditor.AnimationUtility.SetAnimationClipSettings(hold, s);
+    player.clips = new[] { rise, hold };
+    player.Play("Rise");
+    t0 = UnityEngine.Time.time;
+    UnityEditor.EditorApplication.update += tick;
+};
+UnityEditor.EditorApplication.playModeStateChanged += onChange;
+return "armed";
+'@
+$ClipsStateText = @'
+return UnityEditor.SessionState.GetString("AgentHarness.selftest.clips", "");
+'@
+$ClipsScenarioText = @'
+{
+    "name": "selftest-clips",
+    "durationSec": 1.9,
+    "fixedDeltaTime": 0.0166667,
+    "captures": [
+        { "t": 1.8, "preset": "main", "name": "clips" }
+    ]
+}
+'@
+
 # ---- matrix 1-6: the Editor tree -----------------------------------------------------------------------------------
 # eval_file under the Editor lock: the body's return value.
 function Invoke-Eval([string]$File) {
@@ -965,6 +1119,32 @@ function Invoke-Item1 {
     Test-Check 'materials: a misspelled, an obsolete and an emission color without its toggle are reported' ($missing.Count -eq 0 -and $warnings.Count -eq $expected.Count) (@($warnings) -join ' | ')
     Test-Check 'materials: LitMaterial turns emission and alpha clipping on (hand-set _EMISSION stays off)' ("$($k.litKeywords)" -like '*_ALPHATEST_ON*' -and "$($k.litKeywords)" -like '*_EMISSION*' -and [int]$k.litQueue -eq 2450 -and -not [bool]$k.byHandEmission) "lit=[$($k.litKeywords)] queue=$($k.litQueue) byHand=$($k.byHandEmission)"
     $state.item['renderCheck'] = [ordered]@{ sunAngle = $k.sunAngle; sunTexel = $k.sunTexel; ambientUp = $k.ambientUp; uniformDiff = $k.uniformDiff }
+
+    # Content helpers (G1-3): particles and clips from code, in edit mode, then a ClipPlayer driven in play mode.
+    $cc = (Join-Path $outAbs 'content-check.cs').Replace('\', '/')
+    Write-TextFile $cc $ContentCheckText
+    $k = Invoke-Eval $cc
+    Test-Check 'content: the built embers keep a fixed seed and simulate off screen; the halo plays through a ClipPlayer (no controller)' ($k.embers -eq 'autoSeed=False culling=AlwaysSimulate shader=Universal Render Pipeline/Particles/Unlit' -and $k.halo -eq 'HaloOrbit:1 controller=none rootMotion=False') "embers: $($k.embers) | halo: $($k.halo)"
+    $warnings = @($k.warnings)
+    $expected = @("*no child 'Missing'*", "*the object has no Light*", "*material._BaseColr is not a property*(similar: material._BaseColor*", "*has no animatable Transform.m_LocalPositon (similar: m_LocalPosition*")
+    $missing = @($expected | Where-Object { $p = $_; @($warnings | Where-Object { $_ -like $p }).Count -eq 0 })
+    Test-Check 'clips: a misspelled path, component, material property and Transform property -> one warning each, with similar names' ($missing.Count -eq 0 -and $warnings.Count -eq $expected.Count) (@($warnings) -join ' | ')
+    Test-Check 'clips: a linear 0 -> 360 turn in 4 s is at 90 after 1 s; looping, one event' ([math]::Abs([double]$k.sampledYaw - 90) -lt 0.01 -and $k.clip -eq 'loop=True length=4 events=1 curves=16') "yaw=$($k.sampledYaw) $($k.clip)"
+    Test-Check 'particles: fixed seed (the same particles simulated twice), always simulated, play on awake' ([bool]$k.simulateSame -and [int]$k.particles -gt 0 -and $k.sparks -eq 'autoSeed=False culling=AlwaysSimulate playOnAwake=True') "same=$($k.simulateSame) n=$($k.particles) $($k.sparks)"
+    Test-Check 'particles: ParticleMaterial additive (SrcAlpha, One; transparent queue) with the soft dot texture' ("$($k.additive)" -like 'Universal Render Pipeline/Particles/Unlit src=5 dst=1 queue=3000 *_SURFACE_TYPE_TRANSPARENT*' -and "$($k.additive)" -like '*tex=ParticleDot') $k.additive
+    $arm = (Join-Path $outAbs 'clips-arm.cs').Replace('\', '/')
+    $cs = (Join-Path $outAbs 'clips-state.cs').Replace('\', '/')
+    $clipsScenario = (Join-Path $outAbs 'clips.json').Replace('\', '/')
+    Write-TextFile $arm $ClipsArmText
+    Write-TextFile $cs $ClipsStateText
+    Write-TextFile $clipsScenario $ClipsScenarioText
+    [void](Invoke-Eval $arm)
+    $r = Invoke-Tool $root 'loop.ps1' '1-clips' @('-Scenario', $clipsScenario)
+    $j = $null; try { $j = (Invoke-Eval $cs) | ConvertFrom-Json } catch { }
+    Test-Check 'clips (play): loop green; a clip assigned after AddComponent plays to its end and holds, its event in play.events' ([bool]$r.ok -and $j -and [bool]$j.riseDone -and [math]::Abs([double]$j.riseX - 1) -lt 1e-3 -and (Get-EventCount $r 'ClipEvent:RiseEnd') -eq 1) "$(Get-Summary $r) events=$(Get-Events $r) state=$(if ($j) { $j | ConvertTo-Json -Compress })"
+    Test-Check 'clips (play): Play("Hold", 0.4) cross-fades (x halfway between 1 and 3) and ends on Hold (x = 3)' ($j -and [double]$j.fadeX -gt 1.2 -and [double]$j.fadeX -lt 2.8 -and [math]::Abs([double]$j.holdX - 3) -lt 1e-3 -and $j.holdCurrent -eq 'Hold') "$(if ($j) { "fade=$($j.fadeX) hold=$($j.holdX) current=$($j.holdCurrent)" })"
+    Test-Check 'play: the embers in the air, the halo playing HaloOrbit, its event in the default loops (ClipEvent:HaloHalfTurn)' ($j -and [int]$j.embers -gt 0 -and "$($j.halo)" -like 'HaloOrbit@*' -and "$($evs[0])" -like '*ClipEvent:HaloHalfTurn=1*') "$(if ($j) { "embers=$($j.embers) halo=$($j.halo)" }) events=$($evs[0])"
+    $state.item['content'] = [ordered]@{ particles = $k.particles; embers = $(if ($j) { $j.embers }); fade = $(if ($j) { $j.fadeX }); halo = $(if ($j) { $j.halo }) }
 
     $cc = Invoke-HarnessProcess $ps @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'tools/compile-check.ps1'), '-IncludeHarness') -Environment $childEnv -TimeoutSec 300
     $j = $null; try { $j = $cc.out | ConvertFrom-Json } catch { }

@@ -80,6 +80,14 @@ namespace Harness.Editor
 
         public void Warn(string message) => Warnings.Add($"[{Module}] {message}");
 
+        /// <summary>After every step ran (the scene is complete): checks that need all of it.</summary>
+        internal void AfterSteps()
+        {
+#if AGENTHARNESS_ANIMATION
+            CheckAnimations();
+#endif
+        }
+
         /// <summary>Stable seed derived from the module name and a salt (never use UnityEngine.Random / System.Random without a seed).</summary>
         public int Seed(string salt = "")
         {

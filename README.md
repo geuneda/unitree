@@ -7,11 +7,11 @@
 Claude Code 같은 코딩 에이전트가 **Unity에서도 Three.js로 웹 3D를 만들 때와 같은 완성도**를 내도록 만드는 작업 환경입니다.
 하네스는 UPM 패키지(`com.geuneda.agentharness`)이고, **이미 있는 Unity 프로젝트에 설치 스크립트 한 번으로 붙였다 뗄 수 있습니다**(아래 "기존 프로젝트에 붙이기").
 이 저장소의 `AgentHarness/`는 그 패키지를 쓰는 샘플 프로젝트로, 하네스를 검증하는 스모크 씬(절차적 지형 + 손으로 쓴 HLSL + 라이트 + URP 후처리 +
-회전 오브젝트 + UI Toolkit HUD)만 들어 있습니다. 씬 파일도 에셋도 커밋돼 있지 않습니다 — 전부 코드에서 생성됩니다.
+회전 오브젝트 + 코드로 만든 파티클·애니메이션 + UI Toolkit HUD)만 들어 있습니다. 씬 파일도 에셋도 커밋돼 있지 않습니다 — 전부 코드에서 생성됩니다.
 
-| 오프스크린 캡처 (`harness_capture`) | Game 뷰 캡처 (UI 포함) |
+| 루프가 찍은 샷 (카메라 + HUD 합성) | 연속 캡처 시트 (코드로만 만든 링 애니메이션·불씨 파티클) |
 |---|---|
-| ![closeup](docs/images/smoke-closeup.jpg) | ![hud](docs/images/smoke-gameview-hud.jpg) |
+| ![closeup](docs/images/smoke-closeup.jpg) | ![motion](docs/images/smoke-motion.jpg) |
 | ![horizon](docs/images/smoke-horizon.jpg) | 위 이미지는 모두 루프가 자동으로 찍은 샷입니다. |
 
 ## 왜
@@ -20,10 +20,10 @@ Claude Code 같은 코딩 에이전트가 **Unity에서도 Three.js로 웹 3D를
 
 | Three.js 환경의 성질 | 이 하네스의 복원 방법 |
 |---|---|
-| 1. 모든 게 텍스트 | 씬은 `IBuildStep` 빌더 코드가 생성(YAML 직접 수정 금지), URP·Renderer 에셋과 품질 레벨별 파이프라인은 `ISettingsStep` 코드가 생성. HLSL `.shader`, UI Toolkit UXML/USS, 머티리얼·Volume·라이팅도 코드 |
+| 1. 모든 게 텍스트 | 씬은 `IBuildStep` 빌더 코드가 생성(YAML 직접 수정 금지), URP·Renderer 에셋과 품질 레벨별 파이프라인은 `ISettingsStep` 코드가 생성. HLSL `.shader`, UI Toolkit UXML/USS, 머티리얼·Volume·라이팅·파티클·애니메이션 클립도 코드 |
 | 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 메서드 본문만 고쳤으면 컴파일 없이 바꿔 넣는 핫 루프(`loop.ps1 -Hot`) |
 | 3. 눈으로 검증 | 캡처 PNG(화면의 카메라 스택·미니맵 + 스크린 공간 UI) + 이미지 통계, 연속 캡처 시트, 기준 이미지와의 diff 점수·바뀐 곳 PNG, 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로 |
-| 4. 에셋 없이 완성도 | 절차적 메시/노이즈/텍스처 베이크, 코드로 만든 URP 후처리, 라이팅 베이크 없는 스카이 반사·앰비언트, 키워드를 알아서 맞추는 `LitMaterial` |
+| 4. 에셋 없이 완성도 | 절차적 메시/노이즈/텍스처 베이크, 코드로 만든 URP 후처리, 라이팅 베이크 없는 스카이 반사·앰비언트, 키워드를 알아서 맞추는 `LitMaterial`, 설정 한 벌로 만드는 결정적 파티클(`ctx.Particles`), 키를 코드로 쓰는 애니메이션 클립을 Playables로 재생(`ctx.AnimationClip` + `ClipPlayer`, 틀린 경로·속성은 빌드 경고) |
 | 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 worktree + 트랜잭션 submit / land |
 
 ## 루프 한 방
@@ -39,12 +39,12 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 ```jsonc
 { "ok": true, "stage": "done",
   "compileErrors": [], "runtimeErrors": [],
-  "fps": { "avg": 145.7, "min": 87.3, "p95ms": 9.08 },
+  "fps": { "avg": 151.6, "min": 52.6, "p95ms": 7.99 },
   "shots": ["…/HarnessOut/latest/shot0_closeup.png", "…/shot1_horizon.png", "…/shot2_overview.png"],
-  "play": { "events": [{ "name": "SpinDirectionChanged", "count": 1 }, { "name": "SpinnerLap", "count": 2 }] },
-  "render": { "batches": 45.8, "setPassCalls": 42.7, "triangles": 594544 },
+  "play": { "events": [{ "name": "ClipEvent:HaloHalfTurn", "count": 1 }, { "name": "SpinDirectionChanged", "count": 1 }, { "name": "SpinnerLap", "count": 2 }] },
+  "render": { "batches": 50.9, "setPassCalls": 47.8, "triangles": 609129 },
   "golden": { "version": "6000.3.11f1", "same": 3, "changed": 0, "missing": 0 },
-  "durationSec": 3.4 }
+  "durationSec": 3.6 }
 ```
 
 실패하면 `stage`(compile / build / shader / play / runtime / lint / shots)와 함께 `{"file","line","msg","module"}`가 나옵니다.
@@ -53,10 +53,10 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 
 | 상황 (측정) | 한 바퀴 |
 |---|---|
-| 코드 변경 없음 | ~3.4 s |
+| 코드 변경 없음 | ~3.6 s |
 | 셰이더만 수정 | ~3.8 s |
-| 모듈 C# 1줄 수정 | ~9.2 s (Unity 컴파일 ~0.4 s + 도메인 리로드 ~2.5 s + 리로드 뒤 에디터 자체 작업 ~0.9 s 포함) |
-| 같은 수정이 `[CodeReload] Tick` 본문 안이면 `loop.ps1 -Hot` | **~3.1 s** (첫 캡처까지 ~1.3 s) |
+| 모듈 C# 1줄 수정 | ~9.0 s (Unity 컴파일 ~0.4 s + 도메인 리로드 ~2.5 s + 리로드 뒤 에디터 자체 작업 ~0.9 s 포함) |
+| 같은 수정이 `[CodeReload] Tick` 본문 안이면 `loop.ps1 -Hot` | **~3.3 s** |
 | C# 컴파일 에러 보고 | ~1.1 s |
 
 `-Hot`은 마지막 전체 루프가 컴파일한 소스와 Roslyn 토큰으로 비교해, 바뀐 것이 `[CodeReload]` 메서드 본문뿐이면 Unity Pipeline 패키지의 인터프리터로
@@ -234,8 +234,9 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
   docs/ROADMAP.md                          아직 남은 격차 (워크플로우별 작업 순서 + 성질 1~5 + 이식성) + 검증 매트릭스
   Packages/com.geuneda.agentharness/       하네스 = UPM 패키지 (git URL: ...unitree.git?path=/AgentHarness/Packages/com.geuneda.agentharness)
     Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioInput · ScenarioRunner ·
-                                           HarnessCapture(+CaptureCameras · CaptureUi · ContactSheet) · Procedural/
-    Editor/                                harness_* 에디터 커맨드(핫 루프 harness_hot 포함), BuildContext / IBuildStep, SettingsContext / ISettingsStep, 출시 빌드 필터
+                                           HarnessCapture(+CaptureCameras · CaptureUi · ContactSheet) · ClipPlayer(Playables 클립 재생) · Procedural/
+    Editor/                                harness_* 에디터 커맨드(핫 루프 harness_hot 포함), BuildContext(머티리얼·파티클·애니메이션 헬퍼) / IBuildStep,
+                                           SettingsContext / ISettingsStep, 출시 빌드 필터
     Tools~/                                loop · submit · land · uc · compile-check · open · quit · install · uninstall · attach-test ·
                                            fresh-clone-test · selftest (.ps1) + templates/ (Unity는 ~ 폴더를 임포트하지 않는다)
   ProjectSettings/AgentHarness.json        하네스 설정: 모듈 폴더, 플레이할 씬, setup 모드
@@ -247,7 +248,7 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
 ## 에이전트와 함께 쓰기
 
 `AgentHarness/CLAUDE.md`에 루프 사용법, report.json 해석, 규칙(YAML 직접 수정 금지, 텍스트 우선 형태, 모듈 폴더 밖 수정 금지,
-에디터 조작은 순서대로), 모듈·빌더 템플릿(`[CodeReload] Tick` 포함 — 본문만 고치면 `loop.ps1 -Hot`), 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
+에디터 조작은 순서대로), 모듈·빌더 템플릿(`[CodeReload] Tick` 포함 — 본문만 고치면 `loop.ps1 -Hot`), 머티리얼·파티클·애니메이션 클립 헬퍼, 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
 병렬 에이전트는 위의 worktree + `submit.ps1` + `land.ps1` 흐름을 씁니다(G5-2, G5-5). 남은 병렬 과제는 루프 직렬화(G5-1)와 `Contracts` 공유 지점(G5-4)입니다.
 
 ## 라이선스

@@ -162,6 +162,7 @@ namespace Harness.Editor
                 var enter = true;
                 while (it.Next(enter))
                 {
+                    if (Derived(o, it.propertyPath)) { enter = false; continue; }
                     // Only descend into containers: an ObjectReference's children are its (random) m_FileID/m_PathID.
                     enter = it.propertyType == SerializedPropertyType.Generic;
                     switch (it.propertyType)
@@ -183,6 +184,14 @@ namespace Harness.Editor
             }
         }
 
+        /// <summary>
+        /// Data Unity derives from what is hashed anyway and fills depending on the asset's history: an AnimationClip's binding
+        /// cache (m_ClipBindingConstant) holds its bindings right after AnimationUtility.SetEditorCurves (a newly created .anim)
+        /// and is empty after the clip was overwritten in place - the first build after a clean checkout differed from the next.
+        /// </summary>
+        static bool Derived(Object o, string path) =>
+            o is AnimationClip && path.StartsWith("m_ClipBindingConstant", StringComparison.Ordinal);
+
         internal static string Value(SerializedProperty p)
         {
             switch (p.propertyType)
@@ -202,12 +211,36 @@ namespace Harness.Editor
                 case SerializedPropertyType.Bounds: return p.boundsValue.ToString("R");
                 case SerializedPropertyType.ArraySize: return p.intValue.ToString();
                 case SerializedPropertyType.Character: return p.intValue.ToString();
-                case SerializedPropertyType.AnimationCurve: return p.animationCurveValue != null ? p.animationCurveValue.length.ToString() : "0";
+                case SerializedPropertyType.AnimationCurve: return CurveText(p.animationCurveValue);
+                case SerializedPropertyType.Gradient: return GradientText(p.gradientValue);
                 case SerializedPropertyType.Hash128: return p.hash128Value.ToString();
                 case SerializedPropertyType.Vector2Int: return p.vector2IntValue.ToString();
                 case SerializedPropertyType.Vector3Int: return p.vector3IntValue.ToString();
                 default: return null;
             }
+        }
+
+        /// <summary>Every key of a curve (particle curves, animation clips): a changed key value must change the fingerprint.</summary>
+        static string CurveText(AnimationCurve c)
+        {
+            if (c == null) return "null";
+            var sb = new StringBuilder();
+            sb.Append(c.preWrapMode).Append('/').Append(c.postWrapMode);
+            foreach (var k in c.keys)
+                sb.Append(';').Append(k.time.ToString("R")).Append(',').Append(k.value.ToString("R")).Append(',').Append(k.inTangent.ToString("R"))
+                  .Append(',').Append(k.outTangent.ToString("R")).Append(',').Append(k.inWeight.ToString("R")).Append(',').Append(k.outWeight.ToString("R"))
+                  .Append(',').Append((int)k.weightedMode);
+            return sb.ToString();
+        }
+
+        static string GradientText(Gradient g)
+        {
+            if (g == null) return "null";
+            var sb = new StringBuilder();
+            sb.Append(g.mode);
+            foreach (var k in g.colorKeys) sb.Append(";c").Append(k.time.ToString("R")).Append(',').Append(k.color.ToString("R"));
+            foreach (var k in g.alphaKeys) sb.Append(";a").Append(k.time.ToString("R")).Append(',').Append(k.alpha.ToString("R"));
+            return sb.ToString();
         }
 
         static string RefId(Object o, SortedSet<string> assets)

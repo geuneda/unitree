@@ -27,7 +27,7 @@
 | W3 | 시각 회귀와 움직임 | G3-4, G3-3, G3-7 | L | W1, W2 | 완료 (2026-09-30) |
 | W4 | 렌더 설정을 코드로 | G1-1, P-4, G4-3, G4-2 | L | W3 | 완료 (2026-09-30) |
 | W5 | 루프 속도 | G2-3, G2-1 | L | — | 완료 (2026-09-30) |
-| W6 | 콘텐츠 헬퍼(a/b/c로 나눠 진행) | G1-3, G1-4, G4-1, G4-4 | L | W3, W4 (W6b는 W2) | 대기 |
+| W6 | 콘텐츠 헬퍼(a/b/c로 나눠 진행) | G1-3, G1-4, G4-1, G4-4 | L | W3, W4 (W6b는 W2) | W6a 완료 (2026-09-30), W6b·W6c 대기 |
 | W7 | 에디터 밖·여러 에디터 | G2-2, G2-4, G1-2, G5-1 | L | — | 대기 |
 | W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 | L | W1 | 대기 |
 | W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 대기 |
@@ -91,7 +91,10 @@
 - 추가 검증: 모듈 Tick 본문 수정 → 2초 안에 반영된 캡처. "1차 버전 기준선" 표를 다시 재서 갱신.
 
 ### W6 콘텐츠 헬퍼 (W6a G1-3 · W6b G1-4 · W6c G4-1 → G4-4)
-- W6a 파티클·애니메이션: `ctx.Particles`, 코드로 만든 AnimationClip, Playables 재생 헬퍼. 스모크 씬에서 움직임을 W3 연속 캡처로 확인.
+- W6a 파티클·애니메이션 — 완료 (2026-09-30, 아래 "해결됨"): `ctx.Particles`(설정 한 벌 → 고정 시드 ParticleSystem), `ctx.ParticleMaterial`,
+  `ctx.AnimationClip`(키를 코드로 → .anim), `ctx.Animate` + 런타임 `ClipPlayer`(Playables, AnimatorController 에셋 없음, 크로스페이드, 이벤트 →
+  `play.events`의 `ClipEvent:<이름>`). 빌드 뒤 클립의 경로·컴포넌트·속성을 대상과 대조해 `build.warnings`. 스모크 씬에 매듭 주위를 도는 링 2개와
+  받침대에서 피어오르는 불씨를 넣었고 연속 캡처로 움직임(motion 25–28)을 확인했다. 타임라인 헬퍼는 넣지 않았다(해결됨의 "남은 것").
 - W6b UI 킷: `UI/`에 공용 USS 변수·버튼·게이지·토스트, 폰트, 바인딩 예제. HUD가 `"auto"` 캡처에 찍혀야 확인할 수 있으므로 W2 뒤.
 - W6c 절차적 생성: GPU 베이크 경로(Blit/Compute → RT → PNG)를 먼저 두고, 그 위에 SDF·스플라인/튜브·스캐터·데칼·절차적 스카이.
   GPU 베이크 결과는 GPU·드라이버마다 다를 수 있다 → fingerprint에 무엇을 넣을지 정한다.
@@ -154,18 +157,18 @@
 
 ## 기준선 (비교용)
 
-1차 버전(2026-09-28)과 W5 뒤(2026-09-30, 새로 연 에디터에서 각 3회, 이 머신). 워크플로우가 루프 시간을 바꾸면 열을 더한다.
+1차 버전(2026-09-28), W5 뒤와 W6a 뒤(2026-09-30, 새로 연 에디터에서 각 3회, 이 머신). 워크플로우가 루프 시간을 바꾸면 열을 더한다(W6a: 스모크 씬에 파티클·링 애니메이션; 잰 것만).
 
-| 항목 | 1차 버전 | W5 |
-|---|---|---|
-| 루프: 코드 변경 없음 | 3.5–3.8s (build 0.7s 캐시 적중, play 2.6s) | 3.47–3.68s (build 0.47s, play 2.4–2.6s, 첫 캡처 1.75s) |
-| 루프: 셰이더만 수정 | ~4s (도메인 리로드 없음) | 3.79–3.83s |
-| 루프: 모듈 C# 1줄 수정 | ~9.2s (compile+reload 4.1s, build 1.9s, play 2.8s) | 8.84–9.08s (compile 4.7–4.9s = Tundra 0.35s + 리로드 ~2.5s + 리로드 뒤 에디터 ~0.9s, build 0.93–1.0s, play 2.55s) |
-| 루프: `-Hot`(Tick 본문 1줄) | — | 3.00–3.06s (판정+교체 0.14s, 첫 캡처 1.27s); 도메인 리로드 뒤 첫 번째 3.81–3.89s (교체 0.9s) |
-| 루프: C# 컴파일 에러 보고 | ~1s | 0.94–1.14s |
-| 빌드 단계(lint + `harness_build` + 셰이더; 웜 / 리로드 직후) | ~0.9s / 1.9s | 0.47s / 0.93–1.0s (리로드 뒤 에디터 ~0.9s는 이제 compile 쪽에서 기다림) |
-| compile-check csc / msbuild | 어셈블리당 ~0.1s / 웜 0.5–2s, 콜드 10–75s | 어셈블리당 0.13–0.16s / 웜 0.45–0.63s, 콜드 4–13s |
-| 스모크 씬 렌더 | batches ~46, SetPass ~43, tris ~60만 | 같음 (45.8 / 42.8 / 59만) |
+| 항목 | 1차 버전 | W5 | W6a |
+|---|---|---|---|
+| 루프: 코드 변경 없음 | 3.5–3.8s (build 0.7s 캐시 적중, play 2.6s) | 3.47–3.68s (build 0.47s, play 2.4–2.6s, 첫 캡처 1.75s) | 3.52–3.64s (build 0.51–0.53s, play 2.39–2.51s) |
+| 루프: 셰이더만 수정 | ~4s (도메인 리로드 없음) | 3.79–3.83s | — |
+| 루프: 모듈 C# 1줄 수정 | ~9.2s (compile+reload 4.1s, build 1.9s, play 2.8s) | 8.84–9.08s (compile 4.7–4.9s = Tundra 0.35s + 리로드 ~2.5s + 리로드 뒤 에디터 ~0.9s, build 0.93–1.0s, play 2.55s) | 8.88–9.39s (compile 4.64–5.09s, build 0.97–1.03s, play 2.57–2.63s) |
+| 루프: `-Hot`(Tick 본문 1줄) | — | 3.00–3.06s (판정+교체 0.14s, 첫 캡처 1.27s); 도메인 리로드 뒤 첫 번째 3.81–3.89s (교체 0.9s) | 3.21–3.29s (교체 0.15s, play 2.42–2.50s); 리로드 뒤 첫 번째 3.97s (교체 0.94s) |
+| 루프: C# 컴파일 에러 보고 | ~1s | 0.94–1.14s | — |
+| 빌드 단계(lint + `harness_build` + 셰이더; 웜 / 리로드 직후) | ~0.9s / 1.9s | 0.47s / 0.93–1.0s (리로드 뒤 에디터 ~0.9s는 이제 compile 쪽에서 기다림) | 0.51–0.53s / 0.97–1.03s (FX 스텝 7.5–8 ms) |
+| compile-check csc / msbuild | 어셈블리당 ~0.1s / 웜 0.5–2s, 콜드 10–75s | 어셈블리당 0.13–0.16s / 웜 0.45–0.63s, 콜드 4–13s | — |
+| 스모크 씬 렌더 | batches ~46, SetPass ~43, tris ~60만 | 같음 (45.8 / 42.8 / 59만) | 50.9 / 47.8 / 61만 (링 2개 + 파티클) |
 
 ---
 
@@ -177,10 +180,7 @@
   - 현상: 빌더 결과(씬·생성 에셋)를 보려면 반드시 떠 있는 에디터와 루프가 필요하다. 에디터 없이 가능한 건 컴파일 체크까지다.
   - 방향: 조사 필요. 같은 프로젝트를 두 에디터가 열 수 없으므로(프로젝트 잠금) 복제 프로젝트 + batchmode 빌드 등을 검토.
 
-- [ ] **G1-3 파티클·애니메이션·타임라인용 코드 헬퍼가 없다**
-  - 현상: `BuildContext`에는 메시·머티리얼·텍스처·Volume·UI·샷 헬퍼만 있다. ParticleSystem, AnimationClip/Animator, Timeline은 Unity API로 직접 쓸 수 있지만 장황하고 틀리기 쉽다.
-  - 방향: `ctx.Particles(path, preset => ...)`, 코드로 AnimationClip 커브 생성, Animator 대신 Playables 기반 재생 헬퍼.
-  - 완료 기준: 스모크 씬에 코드로만 만든 파티클 1개 + 애니메이션 1개가 캡처에 보인다.
+- **G1-3 파티클·애니메이션·타임라인용 코드 헬퍼가 없다** → 2026-09-30 해결(W6a, 아래 "해결됨"). 타임라인은 넣지 않았다(클립 + `ClipEvent` + 모듈 코드로 대신).
 
 - [~] **G1-4 UI Toolkit 경로는 있지만 얇다**
   - 현상: UXML/USS + `ctx.UIDocument()` + 기본 테마(.tss)는 동작한다. 재사용 컴포넌트, 폰트, 바인딩 예제가 없다.
@@ -384,6 +384,10 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    `git status`가 같음(G1-1); 반사 큐브맵에 잘못된 텍셀이 없고 가장 밝은 텍셀이 태양 방향 2° 안(P-4); 앰비언트 = 생성된 라이팅 데이터의 큐브맵 SH,
    `AmbientProbe`가 균일 환경을 Flat 앰비언트와 같게·쓰레기 텍셀은 거부(G4-2); `ctx.Material`이 오타·옛 URP 이름·토글 없는 이미션을 경고,
    `ctx.LitMaterial`이 이미션·알파 클립을 켬(G4-3)
+   + 콘텐츠 헬퍼(G1-3): 빌드된 불씨가 고정 시드·`AlwaysSimulate`, Halo가 컨트롤러 없는 `ClipPlayer`로 재생; 편집 모드 픽스처(따로 연 씬, 지움)에서
+   경로·컴포넌트·머티리얼 속성·Transform 속성 오타가 각각 경고 한 줄(비슷한 이름 포함), 선형 회전이 1 s에 90°, 파티클이 같은 시드로 두 번 같은 입자,
+   가산 `ParticleMaterial`; 플레이 중 런타임 클립 두 개를 받은 `ClipPlayer`가 끝까지 재생·유지(`IsDone`)·이벤트(`ClipEvent:RiseEnd=1`)·크로스페이드(중간 x=2),
+   기본 루프의 `ClipEvent:HaloHalfTurn=1`
 2. C# 컴파일 에러 주입 → `stage=compile`, file/line/module 정확 → 원복 후 녹색
 3. 런타임 예외 주입 → `stage=runtime`, 정확한 줄 → 원복 후 녹색. 핫 루프(G2-1): `[CodeReload] Tick` 본문 수정 → `loop.ps1 -Hot`이 컴파일·빌드·도메인 리로드
    없이 반영(events 같음, golden `changed`) → 되돌리면 교체 해제·`same` → 필드 추가는 전체 루프(fallback에 그 줄) → 핫 본문의 예외는 전체 루프가 주입한 줄로 보고
@@ -417,6 +421,60 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G1-3 파티클·애니메이션·타임라인용 코드 헬퍼가 없다** (2026-09-30, W6a)
+  - 현상(전): `BuildContext`에는 메시·머티리얼·텍스처·Volume·UI·샷 헬퍼만 있었다. ParticleSystem은 모듈 구조체 수십 개를 하나씩 켜야 하고 기본값이
+    결정적이지 않으며(자동 시드), 애니메이션은 AnimatorController(창에서 만드는 상태 기계 에셋)가 있어야 돌았다. 스모크 씬의 움직임은 모듈 코드(매듭 회전)뿐이었다.
+  - 방법(파티클, `Editor/Build/BuildContext.Particles.cs`): `ctx.Particles(path, p => …)` + `ParticleSettings`(주 모듈·방출·버스트·형태·수명 동안의 색/크기/회전/
+    속도·드래그·노이즈·렌더러; 범위·커브는 Unity 타입 `MinMaxCurve`/`MinMaxGradient`/`Gradient`/`AnimationCurve` 그대로). 만들 때 멈춘 상태에서
+    `useAutoRandomSeed = false`, `randomSeed` = 모듈+경로의 해시(`ctx.Seed`), `cullingMode = AlwaysSimulate`(자동이면 화면 밖 루프 시스템이 멈춰 뒤 프레임이
+    카메라가 본 것에 달라진다), `playOnAwake`. 원뿔은 기본으로 위(+Y)로(메뉴로 만든 파티클과 같게). `ctx.ParticleMaterial(name, m => …)` = URP Particles/Unlit,
+    투명, `ParticleBlend`(Alpha/Premultiply/Additive/Multiply)·소프트 파티클·컬링을 설정하면 URP 검증이 블렌드·키워드·큐를 맞춘다. 텍스처가 없으면 생성한
+    부드러운 점(`ParticleDot.png`, 64²)이라 네모가 아니다. 파티클 색은 8비트라(HDR 시작 색이 1로 잘림) 발광은 머티리얼 색(HDR)으로 준다.
+  - 방법(애니메이션, `Editor/Build/BuildContext.Animation.cs`, `Runtime/ClipPlayer.cs`): `ctx.AnimationClip(name, c => …)` + `ClipBuilder` — `Position`/`Rotation`
+    (Euler 도, `localEulerAnglesRaw`라 0 → 360이 한 바퀴)/`Scale`/`Float`(직렬화 이름, 예: Light `m_Intensity`)/`Color`(`material._EmissionColor` 등, 값은
+    `SetColor`와 같은 의미)/`Active`/`Event`, 트랙마다 `.Linear()`·`.Constant()`(기본 Smooth = Clamped Auto), `Loop`. `AnimationUtility.SetEditorCurves`로 한 번에 넣고
+    `.anim`으로 저장. `ctx.Animate(go, clips)` = 컨트롤러 없는 Animator(루트 모션 끔, `AlwaysAnimate`; 아바타는 둠 — 휴머노이드 클립용; 기존 컨트롤러는 지우고 경고)
+    + `ClipPlayer`. `ClipPlayer`는 Animator에 출력하는 PlayableGraph(믹서 + 클립마다 입력, 게임 시간)로 `playOnEnable` 클립을 돌리고, `Play(name, fade)`(처음부터,
+    앞 클립에서 선형 크로스페이드), `Stop()`, `Current`/`Time`/`IsDone`, `speed`. `AddComponent` 뒤에 `clips`를 넣어도 `Play`가 그래프를 다시 만든다.
+    클립 이벤트는 `ClipPlayer.OnClipEvent` → `EventBus.Publish(new ClipEvent(name, go))`, 발행 수는 `play.events`에 `ClipEvent:<이름>`(EventBus에 이름을 따로 세는
+    internal `Publish(evt, key)`).
+  - 빌드 뒤 검사(`BuildContext.AfterSteps`, 빌드 스텝이 다 돈 뒤라 자식을 나중에 만들어도 된다): `Animate`한 클립의 바인딩마다 대상에서 경로·컴포넌트·속성을 찾는다.
+    `AnimationUtility.GetEditorCurveValueType`은 없는 경로·컴포넌트·Transform 속성에 null을 주지만 **머티리얼 속성(`material._X`)은 아무 이름이나 풀린다**
+    (`_BaseColr`도 Single) → 렌더러의 `GetAnimatableBindings`(셰이더가 가진 이름)와 대조. 트랙 단위로 경고 한 줄 + 공통 접두어가 긴 비슷한 이름
+    (`material._BaseColr` → `material._BaseColor`). 그리고 씬을 첫 클립의 0초 포즈로 저장한다(`SampleAnimation`) → 편집 모드 캡처가 플레이 시작 모습.
+  - 조사하며 확인한 것: HDR 머티리얼 색은 애니메이션 가능 목록에 `.x/.y/.z/.w`로, 보통 색은 `.r/.g/.b/.a`로 나온다. 둘 다 동작하지만 의미가 다르다 — `.r` 0.75는
+    감마 → 선형(0.52, `SetColor`와 같음), `.x` 0.75는 그대로 → `ClipBuilder.Color`는 `.r`(빌더의 `LitSettings` 값과 같은 숫자), 검사는 둘 다 받는다.
+    Playables(`AnimationClipPlayable`)도 애니메이션 이벤트를 부른다. `Playable.SetTime`을 한 번만 해서 0.78 s → 0으로 되감으면 그 사이 0.5 s 이벤트가 **다시 발행됐고**
+    (1 → 2), 두 번 하면 발행되지 않았다(3 → 3) → `Play`는 두 번 한다.
+  - fingerprint: `SerializedProperty`의 AnimationCurve는 키 개수만, Gradient는 아예 해시하지 않고 있었다 → 모든 키(시간·값·탄젠트·가중치)·wrap 모드, Gradient의 모드와
+    키. 기존 씬에는 해당 값이 없어 W5 값(`78354e2e…`) 그대로였다. 그리고 **생성물 폴더를 지운 뒤 첫 빌드만 fingerprint가 달랐다**(`8e716e45` → 이후 `d994680b`):
+    새로 만든 `.anim`은 파생 바인딩 캐시 `m_ClipBindingConstant`가 11개 채워져 있고 제자리 덮어쓰기 뒤에는 비어 있다 → 그 경로는 해시에서 뺐다(편집 커브는 해시함).
+    새 클론의 첫 루프가 다음 루프와 같아야 하므로(매트릭스 9) 놓쳤으면 빨갰다.
+  - 선택 모듈: `com.unity.modules.animation`·`particlesystem`을 끈 프로젝트에서도 컴파일되도록 `versionDefines`(`AGENTHARNESS_ANIMATION`·`AGENTHARNESS_PARTICLES`)로 가른다.
+    `ClipPlayer`는 `Harness.Runtime`(개발 빌드 전용)이라 출시 빌드에는 `GameRoot`처럼 `AGENTHARNESS_RUNTIME`이 필요하다.
+  - 샘플: `Assets/Game/Smoke/Builders/SmokeFxStep.cs` — 매듭 주위의 링 2개(`Halo/RingA`·`RingB`, 두께 0.03 토러스, 이미션 LitMaterial)를 `HaloOrbit` 클립
+    (4 s 루프: 두 링이 반대로 한 바퀴씩 선형 회전, 루트 크기 1 → 1.06 → 1, 링 이미션 청록 ↔ 자홍, 2 s에 이벤트 `HaloHalfTurn`)으로, 받침대 위 원판에서 피어오르는
+    불씨(`Embers`: 초당 40, 수명 2.5–4.5 s, 월드 공간, 노이즈, 수명 동안 노랑 → 빨강·페이드, 가산, Prewarm)를 모듈 코드 없이. 기본 루프의 `play.events`에
+    `ClipEvent:HaloHalfTurn=1`이 더해졌다.
+  - 검증(이 머신): 루프 3회 픽셀까지 같음(maxDiff 0)·fingerprint 같음. 연속 캡처(closeup 포즈, 15프레임마다 4장) motion 25.0/27.7/26.2 — 링 회전·색, 불씨 상승이 시트에 보임.
+    편집 모드 픽스처: 오타 4종 → 경고 4줄, 선형 0 → 360(4 s)이 1 s에 90.0°, 곡선 16개, 파티클 1 s 시뮬레이션 두 번 49개 같은 위치, 가산 머티리얼 SrcAlpha/One·큐 3000.
+    플레이 픽스처: `Rise`(0.5 s) 0.8 s에 `IsDone`·x=1.0, `Play("Hold", 0.4)` 0.2 s 뒤 x=2.00, 0.6 s 뒤 x=3.0, `ClipEvent:RiseEnd=1`, 그때 불씨 146개.
+    빌드: FX 스텝 7.5–8 ms, 같은 에디터에서 FX 스텝을 빼고 0.47–0.50 s / 넣고 0.50–0.53 s. 렌더 batches 45.8 → 50.8, SetPass 42.8 → 47.8.
+    샷 62.7/55.9/45.7(W5 60.3/55.6/45.7). 의도한 변경이라 6.3 기준 이미지를 갱신했다. 루프(새로 연 에디터, 위 "기준선"): 변경 없음 3.52–3.64 s,
+    C# 1줄 8.88–9.39 s, `-Hot` 3.21–3.29 s(W5 3.00–3.06 s — 플레이 구간 2.42–2.50 s).
+    - selftest 1–8 녹색 304.1 s(`1c6fa406…`, 1번 49.4 s에 G1-3 검사 8개).
+    - 9: 새 클론(커밋된 코드) 6000.3.11f1 녹색 408.7 s(`1c6fa406…` = 메인 트리, 새 Library의 첫 루프부터 기준 이미지 `same=3`), 6000.0.84f1 녹색 384.6 s
+      (`4ffb4440…`, 샷 62.7/55.9/45.7 = 6.3), 6000.6.3f1 녹색 444.6 s(`5ab10290…`, 62.8/56.0/45.8) — 세 버전 모두 selftest 1번의 G1-3 검사 8개 녹색(링·불씨가
+      6.3과 같게 보임), 루프 경고 0, `git status`는 버전 전환 파일뿐.
+    - 10(`-Source local`): BagelGame 녹색 60.5 s(`619be553…` = W5, 65.5, 출시 빌드 `Managed/` 132개·`Harness.*` 0개), Fluid-Sim 녹색 30.9 s(`54880f05…`,
+      23.0/14.9/22.2, 103개·0개), 사내 프로젝트 A 녹색 98.7 s(`6664b723…`, `brd-attach.json` 부트 대화상자 37.3/37.4). 사내 프로젝트 A의 로비 시나리오
+      (`brd-lobby-w3.json`)는 개발 서버 버튼을 눌러 원본과 공유하는 에디터 PlayerPrefs를 1로 바꾸는데, 이번 세션에서는 끝난 뒤 0으로 되돌리는 레지스트리 쓰기가
+      허용되지 않아 아무것도 누르지 않는 부트 시나리오로 돌렸다. 세 프로젝트 모두 fingerprint가 W5와 같다(붙인 프로젝트는 에셋 임포트 해시로 fingerprint를 낸다).
+  - 남은 것: 타임라인(TimelineAsset)을 코드로 만드는 헬퍼는 넣지 않았다 — Three.js의 `AnimationMixer`에 해당하는 것은 `ClipPlayer`이고, 여러 오브젝트의 순서는
+    클립 + `ClipEvent` + 모듈 코드로 된다. 컷신 편집이 필요해지면 다시 본다. `ClipPlayer`는 한 번에 한 클립(+ 크로스페이드)이다 — 레이어·가산 블렌드·아바타
+    마스크는 없고, 휴머노이드 클립은 아바타를 두기만 했지 검증하지 않았다. 편집 모드 캡처(`harness_capture`, `-NoPlay`)에는 파티클이 없다(시뮬레이션하지 않음).
+    서브 이미터·트레일·라이트 모듈은 `ParticleSettings`에 없어 반환된 ParticleSystem을 직접 고친다.
 
 - [x] **G2-3 도메인 리로드 직후 첫 `harness_build`가 ~2초 (JIT 워밍업)** · **G2-1 C# 1줄 수정에 ~9초** (2026-09-30, W5)
   - 재측정(G2-1 메모의 숙제, 에디터 1개): C# 1줄 루프 9.42 s = compile 4.18 s(Tundra 1.13 s + `Domain Reload Profiling` 2.53 s + 폴링) + build 2.12 s + play 2.55 s.
