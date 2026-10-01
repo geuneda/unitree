@@ -57,6 +57,9 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 같아서(URP의 DBuffer 데칼만 가장자리 몇 픽셀이 갈릴 수 있어 샘플은 Screen Space 데칼 — ROADMAP G3-15; 구름은 게임 시간으로 흐르고 빌드가 찍는 하늘·프로브
 큐브맵은 픽셀이 바뀐 때만 다시 쓴다), 셰이더 한 줄(스펙큘러 절반)도
 `changed` + 바뀐 곳을 칠한 diff PNG로 드러납니다(실패로 치지는 않음). 의도한 변경이면 `loop.ps1 -UpdateGolden`으로 갱신합니다.
+Windows에서도 FontEngine의 잘못된 커닝 플래그가 자간을 무시하고 있었습니다. W18의 캡처 정리는 Windows에도 적용되므로, 정리 전 글자를 담았던 Windows 기준 이미지
+3장을 W19에서 갱신했습니다(2026-10-02). 정리를 끄면 옛 이미지와, 켜면 새 에디터 세션끼리 픽셀까지 같고 커닝의 위치·전진 폭은 그대로입니다. 기준 이미지 갱신 후 Windows
+매트릭스 1–10을 통과했습니다. 런타임·도구 코드와 비교 허용치는 W18 그대로입니다.
 
 | 상황 (측정) | 창 에디터 | 창 없는 에디터 (`open.ps1 -Headless`) |
 |---|---|---|
@@ -173,13 +176,14 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
 
 - Windows 10/11(Windows PowerShell 5.1) 또는 **macOS**(Apple Silicon, PowerShell 7 `pwsh` 7.4+) — 도구 스크립트는 둘 다 같은 파일입니다. macOS에서는
   `powershell -ExecutionPolicy Bypass -File tools/x.ps1` 대신 `pwsh tools/x.ps1`. 기준 이미지는 OS별 폴더(`golden/<버전>-macos/`)이고 fingerprint도 OS마다 다릅니다
-  (같은 머신에서는 매번 같음). M4 Pro에서 루프·검증 매트릭스 1–8·새 클론(6.3·6.6)·기존 프로젝트 붙이기가 녹색이고, 코드 변경 없는 루프는 ~2.8 s입니다. 에디터 세션이
-  바뀌어도 같은 코드면 샷이 픽셀까지 같고 Mac 기준 이미지도 커밋돼 있습니다 — Mac의 FontEngine이 커닝 쌍에 남기는 쓰레기 플래그 때문에 자간 있는 UI Toolkit 글자가 세션마다
+  (같은 머신에서는 매번 같음). M4 Pro의 6.3은 루프·검증 매트릭스 1–8·새 클론·Fluid-Sim 붙이기가 녹색이고, 코드 변경 없는 루프는 ~2.8 s입니다. 6.6 Mac은 기본 루프는
+  녹색이지만 씬 반사 프로브의 빌드 간 결정성 검사가 아직 빨갛습니다(ROADMAP G4-6, Windows 6.6과 별개). 6.3은 에디터 세션이 바뀌어도 샷이 픽셀까지 같고 Mac 기준 이미지도
+  커밋돼 있습니다 — Mac의 FontEngine이 커닝 쌍에 남기는 쓰레기 플래그 때문에 자간 있는 UI Toolkit 글자가 세션마다
   달라지던 것(ROADMAP G3-17)을 캡처가 지웁니다(자세한 것: `AgentHarness/CLAUDE.md` "macOS").
   pwsh는 관리자 권한 없이 GitHub 릴리스의 `powershell-<버전>-osx-arm64.tar.gz`를 풀어 `~/.local/bin/pwsh`로 링크하면 됩니다.
-- Unity **6.0 LTS 이상** + URP. 샘플 프로젝트는 **6000.3.11f1**(Unity 6.3 LTS)로 고정돼 있고, 새 클론에서 6000.0.84f1·6000.3.11f1·6000.6.3f1 모두
-  검증 매트릭스가 전부 녹색입니다(6.6의 검은 조명은 W4에서 고침, ROADMAP P-4; 6.0에서는 6.3이 저장한 URP 에셋을 URP 17.0이 빌드에 받지 않아 플레이어 단계만
-  건너뜁니다). 다른 설치 버전으로 열 때는 `tools/open.ps1 -UnityVersion <버전>`.
+- Unity **6.0 LTS 이상** + URP. 샘플 프로젝트는 **6000.3.11f1**(Unity 6.3 LTS)로 고정돼 있고, **Windows**에서 6000.0.84f1·6000.3.11f1·6000.6.3f1의 새 클론과
+  selftest 1–8을 모두 다시 통과했습니다(W19, 2026-10-02; 6.6의 검은 조명은 W4에서 고침, ROADMAP P-4). 6.0에서는 6.3이 저장한 URP 에셋을 URP 17.0이 빌드에 받지 않아
+  플레이어 단계만 건너뜁니다. 다른 설치 버전으로 열 때는 `tools/open.ps1 -UnityVersion <버전>`.
 - `tools/player.ps1`: 에디터와 같은 버전의 그 OS용 Standalone 빌드 지원(에디터에 기본 포함 — Windows `.exe`, macOS `.app`). 개발 빌드는
   `AgentHarness/HarnessOut/player-build/`(샘플 Windows ~190 MB, macOS ~350 MB).
 - Unity CLI (`unity`, beta): Windows `$env:UNITY_CLI_CHANNEL='beta'; irm https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.ps1 | iex`,
@@ -216,6 +220,11 @@ pwsh tools/quit.ps1
 위 과정 전체(클론 → 열기 → 설정 → 루프 3회 → 종료 → 삭제)를 `tools/fresh-clone-test.ps1` 하나로 검증할 수 있습니다(이 머신에서 ~110 s).
 하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·실제 입력 격리(포커스 있음·없음)·동시 루프·worktree 전용 에디터·worktree submit/land·계약 규칙·프로젝트 설정 드리프트·두 worktree가 같은 ProjectSettings 파일을 바꾼 land·에디터 창을 계속 다시 그려도 픽셀까지 같은 샷·커닝 쌍을 오염시켜도 픽셀까지 같은 글자·흐르는 구름과 씬을 비추는 반사 프로브)는 `tools/selftest.ps1`이 한 번에 돌리고(~9–14분),
 `fresh-clone-test.ps1 -UnityVersion <버전> -SelfTest`는 그것을 다른 Unity 버전의 새 클론에서 돌립니다.
+
+**최근 Windows 검증(W19, 2026-10-02)**: 현재 트리 selftest 1–8 **642 s(215개 검사)**, 새 클론(+ selftest) 6.0 **655 s** / 6.3 **868 s** / 6.6 **918 s**.
+기존 프로젝트 붙이기는 BagelGame(`-Player`, 출시 빌드 포함) **93 s**, Fluid-Sim(출시 빌드 포함) **30 s**, 사내 프로젝트 A(Android 부트 화면, `-NoBuild`) **81 s**로 모두 통과했습니다.
+6.0 샘플의 Player 단계는 위 URP 하위 호환 제한으로 생략했고, 사내 프로젝트 A의 로그인·로비·Android 출시 빌드는 이번 범위가 아닙니다. 세 클론은 제거 후 원래 커밋과 깨끗한 작업 트리로 복원됐습니다.
+세부 측정값·Windows 커닝 기준 이미지 수정 근거·메모리 부족으로 중단됐다가 재시도한 6.6 기록은 [`ROADMAP.md`](AgentHarness/docs/ROADMAP.md)의 W19에 있습니다.
 
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)
 또는 `unity command harness_capture --preset all --format json`.

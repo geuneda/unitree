@@ -12,7 +12,7 @@ ROADMAP "상시"의 신고 항목을 바로 낼 수 있게 정리한 것이다. 
 
 | ID | 대상 | 제목 | 상태 | 하네스 우회 |
 |---|---|---|---|---|
-| U1 | Unity (TextCore) | Kerning pairs from FontEngine carry uninitialized featureLookupFlags | 재현 확인 — [`upstream/KerningFlagsRepro.cs`](upstream/KerningFlagsRepro.cs), 6.3·6.6 Mac에서 매번 재현 | `Runtime/KerningFlags.cs` (W18, G3-17) |
+| U1 | Unity (TextCore) | Kerning pairs from FontEngine carry uninitialized featureLookupFlags | 재현 확인 — [`upstream/KerningFlagsRepro.cs`](upstream/KerningFlagsRepro.cs), 6.3·6.6 Mac 독립 배치; W19 Windows 6.3은 같은 본문을 Editor에서 확인(독립 배치는 남음) | `Runtime/KerningFlags.cs` (W18, G3-17; Windows 기준 이미지 W19) |
 | U2 | Unity | `Camera.RenderToCubemap(Cubemap)` leaves CPU pixels unfilled (6.6) / sRGB-encoded (6.3) | 원인 확인 | 큐브 RT + `AsyncGPUReadback` (W4, P-4) |
 | U3 | URP 17.3 | Screen Space decal pass throws in `RenderingUtils.SetScaleBiasRt` for a camera without an intermediate texture | 원인 확인 | `CaptureUi.RenderWithoutFeatures` (W13) |
 | U4 | URP 17.3 | DBuffer decal edge pixels differ depending on whether the Editor GUI drew first | 재현 필요 | 샘플은 ScreenSpace 데칼 (W13, G3-15) |
@@ -30,12 +30,12 @@ ROADMAP "상시"의 신고 항목을 바로 낼 수 있게 정리한 것이다. 
 
 ---
 
-## U1. Kerning pairs from FontEngine carry uninitialized featureLookupFlags (TextCore, macOS)
+## U1. Kerning pairs from FontEngine carry uninitialized featureLookupFlags (TextCore, macOS and Windows)
 
-**Environment**: Unity 6000.3.11f1 and 6000.6.3f1, macOS 26.7, Apple M4 Pro (Metal Editor).
+**Environment**: Unity 6000.3.11f1 and 6000.6.3f1, macOS 26.7, Apple M4 Pro (Metal Editor); Unity 6000.3.11f1, Windows 11 (D3D11 Editor).
 
 **What happens**: The `GlyphPairAdjustmentRecord`s that a dynamic `FontAsset` gets from `FontEngine.GetPairAdjustmentRecords`
-(`FontAsset.UpdateGlyphAdjustmentRecords`, used for glyphs added at runtime) have garbage in `featureLookupFlags`: about a
+(`FontAsset.UpdateGlyphAdjustmentRecords`, used for glyphs added at runtime) have garbage in `featureLookupFlags`. On macOS, about a
 quarter of the records hold values such as `0x100B6`, `0x10588`, `0x470`, `0x7261`, different in every Editor session. The
 text generator honours `FontFeatureLookupFlags.IgnoreSpacingAdjustments` (0x100) of a pair (`TextGenerator`: the character
 spacing of the pair becomes 0), so text with `letter-spacing` loses its spacing after random pairs, differently from session
@@ -46,7 +46,13 @@ does not read these records.
 Observed in a UI Toolkit runtime panel with the default runtime font (NotInter): a 13 px bold label with `letter-spacing: 3px`
 ("AGENT HARNESS / SMOKE") was 0.27 px narrower after "AG" and after "GE" in some Editor sessions and not in others (the
 "AG" record's flags were 0x100B6 in one session, 0x10588 in the next). Pixel comparisons of screenshots between sessions fail
-on every label with letter spacing. Not seen on Windows (D3D12), where the flags came out zero.
+on every label with letter spacing.
+
+Windows follow-up (2026-10-02, 6000.3.11f1): all 5,492 pairs of a dynamic NotInter lookup held `0x9E41433F`, including
+IgnoreSpacingAdjustments. The previous Windows golden images consistently contained that incorrect spacing. In fresh
+Editor sessions, disabling the workaround reproduced those images pixel for pixel; flushing the font queue and marking
+all text dirty without clearing flags also reproduced them. Restoring the workaround reproduced the corrected images
+pixel for pixel across sessions. The AG/LA/PA/AC records changed only in flags (to None); placement and advance were unchanged.
 
 **Expected**: Pair adjustment records that come from a font file have `featureLookupFlags == None` (the font has no such flag;
 it is set by hand on a font asset).
@@ -64,7 +70,11 @@ it is set by hand on a font asset).
 | 6000.3.11f1 | 96 | 48, 50, 58 | 21, 20, 14 | `0x1503D5`, `0x65006E6F`, `0x6E006374`, `0x29`, `0x1` |
 | 6000.6.3f1 | 96 | 40, 41, 54 | 5, 16, 24 | `0x5A5D0091`, `0x370006`, `0xFFFFFFFF`, `0x66002000`, `0x2` |
 
-(`0x6E69676E` = "ngin" and `0x65006E6F` look like string memory.) Not run on Windows yet.
+(`0x6E69676E` = "ngin" and `0x65006E6F` look like string memory.)
+
+**Windows follow-up**: running the same Arial creation/inspection body once via `eval_file` in the sample Editor
+(6000.3.11f1) returned 353 pairs, all 353 nonzero and all 353 with IgnoreSpacingAdjustments, all `0x9E41433F`.
+The Windows empty-project, independent batch-process reproduction has not been run yet.
 
 **Expected**: `flagsNotNone=0` every run.
 

@@ -17,10 +17,11 @@
 - 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태·워크플로우 절 갱신 → 새로 드러난 항목 추가 →
   **저장소 루트 `README.md`와 `AgentHarness/CLAUDE.md`(필요하면 `Tools~/templates/AgentHarness.md`)에 바뀐 기능·측정값 반영** → 커밋(메시지에 항목 ID).
   README·ROADMAP 갱신은 워크플로우마다 빠뜨리지 않는다(W2 커밋은 README를 건드리지 않았고, W4 뒤에도 README "요구 사항"에 6.6의 옛 상태가 남아 있었다).
-- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W16·W18은 끝났고 W17(macOS)은 부분 완료다(2026-10-01).
-  남은 것: 상시(업스트림 — G2-4의 남은 Unity 쪽 비용, 신고서 초안 [`docs/upstream-reports.md`](upstream-reports.md)의 제출, W17·W18이 바꾼 스크립트의 Windows 매트릭스
-  재확인), W17의 남은 것(Mac의 BagelGame·사내 프로젝트 A — 거기서 G3-18 TMP 커닝 확인), G4-6(6.6 Mac의 씬 반사 프로브가 빌드마다 다름 — 6.6 Mac 매트릭스 9의
-  selftest 1번이 빨감, 다음 워크플로우 후보), O-15(selftest가 빨갛게 멈추면 submit된 모듈이 에디터 트리에 남음).
+- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W16·W18·W19는 끝났고 W17(macOS)은 부분 완료다(2026-10-02 갱신).
+  W17·W18의 Windows 매트릭스 재확인은 W19에서 완료했다(`56a65a0`의 코드·허용치는 그대로, Windows golden 3장을 교정한 뒤 1–10 녹색; 생략 범위는 W19).
+  남은 것: 상시(업스트림 — G2-4의 남은 Unity 쪽 비용, 신고서 초안 [`docs/upstream-reports.md`](upstream-reports.md)의 제출), W17의 남은 것(Mac의 BagelGame·사내 프로젝트 A —
+  거기서 G3-18 TMP 커닝 확인, 6.0 Mac), G4-6(6.6 Mac의 씬 반사 프로브가 빌드마다 다름 — 6.6 Mac 매트릭스 9의 selftest 1번이 빨감, 다음 워크플로우 후보),
+  O-15(selftest가 빨갛게 멈추면 submit된 모듈이 에디터 트리에 남음).
 - 크기: S = 파일 1–2개 · M = 여러 파일 또는 새 커맨드 · L = 조사가 필요하거나 새 하위 시스템.
 
 | 순서 | 워크플로우 | 항목 | 크기 | 선행 | 상태 |
@@ -41,9 +42,10 @@
 | W14 | 여러 worktree의 ProjectSettings | G5-6 | M | — | 완료 (2026-10-01) |
 | W15 | 하늘과 씬 반사 | G4-5 | L | W13 | 완료 (2026-10-01) |
 | W16 | 사내 프로젝트 A의 플레이어 화면 | G3-8 (+G3-16) | S | — | 완료 (2026-10-01) |
-| W17 | macOS | P-3 (+G3-17) | L | 실제 Mac | 부분 완료 (2026-10-01; Mac에서 도구·매트릭스가 돈다. Windows 재확인·Mac의 BagelGame·사내 프로젝트 A(+G3-18)가 남음; G3-17은 W18) |
+| W17 | macOS | P-3 (+G3-17) | L | 실제 Mac | 부분 완료 (2026-10-02 갱신; Windows 재확인은 W19 완료. Mac의 BagelGame·사내 프로젝트 A(+G3-18)·6.0·G4-6이 남음; G3-17은 W18) |
 | W18 | Mac의 UI Toolkit 글자 결정성 | G3-17 | M | W17, 실제 Mac | 완료 (2026-10-01; 원인은 FontEngine의 커닝 플래그 — 신고는 상시, TMP는 G3-18; 6.6 Mac 매트릭스 9에서 G4-6 발견) |
-| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13(URP 데칼)·W15(카메라 상태)·W18(커닝 플래그) 신고([`docs/upstream-reports.md`](upstream-reports.md)), G2-4 재측정, W17·W18의 Windows 재확인 | S | 새 버전이 나올 때 | — |
+| W19 | W17·W18의 Windows 재검증·커닝 기준 이미지 | P-3, G3-17 후속 | S | W18, 실제 Windows | 완료 (2026-10-02; Windows에도 비정상 커닝 플래그가 있었음 — 코드·허용치 변경 없이 golden 3장 교정 후 매트릭스 1–10 녹색, 생략 범위는 아래) |
+| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13(URP 데칼)·W15(카메라 상태)·W18(커닝 플래그) 신고([`docs/upstream-reports.md`](upstream-reports.md)), G2-4 재측정 | S | 새 버전이 나올 때 | — |
 
 ### W1 시나리오 입력 격리 (G3-6) — 완료 (2026-09-29, 아래 "해결됨")
 - 왜 먼저: `play.events`가 매번 같아야 매트릭스 1과 W3의 기준 이미지가 의미 있다. 지금은 루프 ~25회에 1회 어긋난다.
@@ -230,7 +232,7 @@
 - 끝: 공식 `attach-test.ps1 -Player`(출시 빌드 포함) 녹색 202 s → 클론을 Android로 되돌리고(배치 모드 73 s) 테스트 커밋을 버려 원래 HEAD, 매트릭스 10은 원래 절차
   (`brd-attach.json`, `-NoBuild`).
 
-### W17 macOS (P-3 + G3-17) — 부분 완료 (2026-10-01, 아래 이식성 P-3)
+### W17 macOS (P-3 + G3-17) — 부분 완료 (2026-10-01; Windows 재확인은 W19에서 완료, 아래 이식성 P-3)
 - 결과: Apple Silicon Mac(M4 Pro, macOS 26.7)에서 같은 도구·패키지로 돈다. 도구는 **PowerShell 7**(`pwsh tools/x.ps1`), Windows는 그대로 5.1(같은 스크립트: ASCII,
   pwsh 전용 문법 없음). selftest 1–8이 에디터 트리에서 한 번 전부 녹색(588 s), 새 클론(6.3)의 루프 3회 녹색·fingerprint 같음 — 처음 돌렸을 때 이미 `open.ps1`·루프·
   selftest 2–5는 그대로 돌았고(O-4·O-7·O-8에서 `/` 경로·`unity editors --installed`·현재 호스트로 써 둔 덕), 깨진 것은 실제로 돌려 보고서야 드러났다.
@@ -245,8 +247,9 @@
   커닝 쌍에 남긴 쓰레기 플래그)이었고 고친 뒤 Mac 기준 이미지를 커밋했다.
 - 결정: Windows는 PowerShell 5.1을 계속 쓴다(요구 사항을 늘리지 않음); macOS·Linux는 pwsh 7.4+. 기준 이미지 보장은 "같은 머신·같은 버전이면 픽셀까지 같다"를 OS별 폴더로
   지킨다(다른 OS와의 허용치는 넓히지 않음 — HUD 글자·데칼 가장자리를 놓치게 된다). fingerprint는 OS마다 다르다(같은 Mac 안에서는 같음).
-- 남은 것: 같은 스크립트로 **Windows 매트릭스 재확인**(상시), Mac의 BagelGame(Git LFS라 `git clone`이 필요 — 사람이 클론)·사내 프로젝트 A(이 머신에 없음; 붙이면 G3-18도
-  확인) 붙이기, 6.0 Mac(설치 안 됨).
+- Windows 후속(2026-10-02, W19): 같은 코드·도구·허용치로, 비정상 커닝 플래그의 자간 무시가 반영됐던 Windows golden 3장만 교정한 뒤 매트릭스 1–10 재확인 완료. 원본 `56a65a0`의
+  golden 비교 실패와 교정 후 측정값·생략 범위는 W19에 기록했다.
+- 남은 것: Mac의 BagelGame(Git LFS라 `git clone`이 필요 — 사람이 클론)·사내 프로젝트 A(이 머신에 없음; 붙이면 G3-18도 확인) 붙이기, 6.0 Mac(설치 안 됨), G4-6.
 
 ### W18 Mac의 UI Toolkit 글자 결정성 (G3-17) — 완료 (2026-10-01, 아래 "해결됨")
 - 결과: 원인은 GPU가 아니라 **FontEngine이 동적 폰트 에셋에 주는 커닝 쌍 레코드의 초기화되지 않은 `featureLookupFlags`**였다(레코드의 ~25%, 세션마다 다른 값). 텍스트
@@ -262,7 +265,40 @@
   오염을 요구한다. 6.6 Mac 매트릭스 9에서 무관한 G4-6(씬 반사 프로브가 빌드마다 다름)을 찾았다.
 - 남은 것: TMP(G3-18 — 같은 플래그 검사), G4-6, Unity가 고치면 `KerningFlags`와 selftest 1번의 커닝 루프를 걷어낸다(상시).
 
-### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13·W15·W18 신고, G2-4 재측정, W17·W18의 Windows 재확인)
+### W19 W17·W18의 Windows 재검증·커닝 기준 이미지 (P-3, G3-17 후속) — 완료 (2026-10-02)
+- 시작점: Mac에서 검증한 `56a65a0`을 Windows PowerShell 5.1로 검증. 첫 selftest는 128.68 s, 1번의 90개 검사 중 89개 통과하고 커밋된 Windows golden 비교만 실패했다
+  (제목·라벨·힌트·토스트 글자, 바뀐 픽셀 0.077–0.098%). fingerprint는 `609b54d2`, 루프끼리·repaint·커닝 오염은 `maxDiff` 0, 마지막 복원 루프와 `git status`는 깨끗했다.
+- 원인: Windows 6.3에서도 동적 NotInter 커닝 테이블 5,492쌍 모두 `featureLookupFlags=0x9E41433F`(`IgnoreSpacingAdjustments` 켜짐)였다. 기존 golden은 그 플래그로 자간을
+  무시한 출력이었다. Mac에서 고친 정리가 Windows에도 적용되지만 Windows 기준 이미지는 갱신되지 않았다.
+- 분리 검사(진단용 소스 변경은 모두 복원): (1) 정리 함수 전체를 끈 새 Editor → 기존 golden 3장과 `maxDiff` 0. (2) 플래그는 그대로 두고 큐 flush + 모든 텍스트 dirty만
+  실행한 새 Editor → 역시 0. (3) W18 원본 코드 복원 → 처음의 정리된 샷과 새 세션도 0. NotInter의 `AG/LA/PA/AC`는 플래그만 0이고 placement·advance 값은 같았다.
+  따라서 큐·재생성만의 부작용이 아니라 비정상 자간 플래그를 지운 결과다. `KerningFlagsRepro.cs`와 같은 Arial 생성 본문을 Windows Editor의 `eval_file`로 실행해도
+  353쌍 전부 `0x9E41433F`(0x100 포함) — Windows 빈 프로젝트의 독립 배치 재현은 아직 하지 않았다.
+- 변경: 런타임·도구 동작과 비교 허용치는 `56a65a0`과 동일하다. `golden/6000.3.11f1/default/` 3장을 정상화된 글자로 갱신했고(검증용 커밋 `3c9bf42`), W19의 변경은
+  **Windows golden 3장과 문서뿐**이다. 아래 녹색 결과는 원본 `56a65a0` 그대로가 아니라 **golden 3장 교정 후의 트리**에서 얻었다.
+- 검증 완료: 매트릭스 1–8 → 9(6.3·6.0·6.6, 각각 `-SelfTest`) → 10(BagelGame `-Player`, Fluid-Sim, 사내 프로젝트 A Android `-NoBuild`). 시간은 초, fps는 개발 Player와
+  같은 실행의 Editor 비교다. 기존의 정상 건너뜀과 실행하지 않은 범위는 표와 아래에 따로 적었다.
+
+| 매트릭스 | 대상·실행 범위 | 총 시간 / selftest 1–8 | fingerprint | 결과·측정 |
+|---|---|---|---|---|
+| 1–8 | 현재 트리, 6000.3.11f1 | 642.04 s (selftest) | `609b54d2` | 215 checks 통과, 항목 1·2·3·4·5·6·7·8 각각 녹색. 오류 줄 64/71/77/99. Player 456.2 fps vs Editor 130.2 fps, 실제 화면 vs 캡처 `same` |
+| 9 | 새 클론 6000.3.11f1, `-SelfTest` | 868.09 / 760.09 s | `609b54d2` | 루프 3회 각각 커밋된 Windows golden `same=3`, selftest 1–8 녹색, 종료 뒤 git clean |
+| 9 | 새 클론 6000.0.84f1, `-SelfTest` | 655.49 / 563.39 s | `a0df2fa8` | 루프 3회·selftest 1–8 녹색. Player는 기존 URP newer asset(에셋 버전 10 > 8) 사전 거부로 정상 건너뜀 |
+| 9 | 새 클론 6000.6.3f1, `-SelfTest` (최종 재시도) | 917.72 / 802.11 s | `cadaeca6` | 루프 3회·selftest 1–8 녹색, Player 426.6 fps. 루프 2·3 및 repaint `maxDiff` 0, 루프 2·3의 하늘·프로브 재기록 0. Advanced Text의 커닝 검사 `0/0` 정상 |
+| 10 | BagelGame, `-Player` + 출시 빌드 | 92.65 s / — | `619be553` | 녹색. 개발 Player 396.9 fps vs Editor 140.8 fps, 실제 `screen.vsShot` 3/3 `same`. 출시 `Managed/` 132개, Harness/Pipeline 0개 |
+| 10 | Fluid-Sim, 기본 attach + 출시 빌드 | 30.05 s / — | `54880f05` | 녹색. 출시 `Managed/` 103개, Harness/Pipeline 0개 |
+| 10 | 사내 프로젝트 A, Android·`brd-attach.json`·`-NoBuild` | 81.24 s / — | `6664b723` | 부트 대화상자까지 루프 3회 녹색. 매 루프 `knownErrors` 1건(Firebase 미포함 DLL), `teardownErrors` 1건(`MissingReference` 또는 `OperationCanceled`), `runtimeErrors` 0 |
+
+- 생략 범위: 6.0 Player는 위의 기존 버전 호환성 검사에 따른 건너뜀이고, Fluid-Sim은 개발 Player 실행 없이 기본 attach·출시 빌드를 검증했다. 사내 프로젝트 A는 활성 타깃
+  Android를 유지하고 `brd-attach`만 실행했다 — 로그인·로비·타깃 전환·개발 Player·출시 빌드는 하지 않았다(W16의 별도 승인 범위를 이번 검증에 포함하지 않음).
+  Windows Arial의 재현 본문은 `eval_file`로 확인했지만 빈 프로젝트의 독립 batch 재현은 아직 남아 있다. Mac의 G3-18·G4-6, O-15, 업스트림 제출은 이번 통과로 해결된 것이 아니다.
+- 중단·재시도 기록(6.6): 첫 시도는 환경의 **메모리 부족으로 background command가 중단**되어 최종 report가 없었다. 테스트 실패로 판정한 실행이 아니다. 남아 있던 검증용
+  Editor 2개를 정상 종료한 뒤 사용자가 재시도를 승인했고, `fresh-6.6-retry`에서 위 최종 수치로 완료했다.
+- 복원·정리: 6.0·6.6 새 클론의 git 변경은 버전 전환 파일뿐이었고 클론 폐기는 정상 완료했다. attach 3개 모두 원래 커밋·clean 상태로 복원했으며, 검증용 Editor·worktree·새 클론은
+  남지 않았다. 기본 PNG 각 3장·시각 검사 대표 10장·attach 결과 PNG를 모두 Read로 열어 확인했다.
+- 결과 보관: `HarnessOut/windows-56a65a0/`(gitignore), 6.6 최종 결과는 그 아래 `fresh-6.6-retry/`.
+
+### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13·W15·W18 신고, G2-4 재측정)
 - **신고서 초안**: [`docs/upstream-reports.md`](upstream-reports.md) — 항목별 제목·환경·재현·기대 결과(영어 본문)와 상태(재현 확인 1 — W18의 커닝 플래그 / 원인 확인 7 / 재현 필요 7). Unity는 에디터의
   Help > Report a Bug(이메일 + 재현 프로젝트), Pipeline은 공개 저장소가 없어 Unity Discussions(로그인). 사람이 제출한다(계정·이메일이 필요).
 - 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존)과 G2-5의 인터프리터 2건(`try/catch` 미지원,
@@ -286,11 +322,12 @@
   W8: Unity에 증분 플레이어 빌드가 앞선 빌드의 `ScriptingAssemblies.json`을 쓰는 것(출시 빌드 → 다른 폴더로 개발 빌드, define 제약으로 어셈블리 집합이
   달라짐; 6.0 Fluid-Sim에서 재현 — 고쳐지면 `player.ps1`의 `CleanBuildCache` 재빌드를 걷어낸다), 플레이어 첫 씬 파티클의 로드 시점 한 스텝(의도인지 문의).
   W16: Pipeline에 O-14(`build_status`의 에러가 줄을 파싱하고도 버림). 고쳐지면 `player.ps1`은 그대로 둬도 된다(빌드 단계 메시지를 먼저 읽음).
-  W17: **Windows에서 매트릭스 1–10 재확인**(W17은 Mac에서만 돌렸다 — 바뀐 `Harness.psm1`·`open.ps1`(Windows는 `Start-Process` 그대로)·`player.ps1`·`compile-check`·
-  `install.ps1`·`attach-test.ps1`·`selftest.ps1`·`HarnessGolden.cs`(Windows 폴더 이름은 그대로 `<버전>`)).
+  W17·W18의 **Windows 매트릭스 1–10 재확인은 W19에서 완료**(2026-10-02, 코드·허용치 그대로 Windows golden 3장 교정 후): `Harness.psm1`·`open.ps1`(Windows는
+  `Start-Process` 그대로)·`player.ps1`·`compile-check`·`install.ps1`·`attach-test.ps1`·`selftest.ps1`·`HarnessGolden.cs`(Windows 폴더 이름은 그대로 `<버전>`). 측정값·생략 범위는 W19.
   W18: Unity에 FontEngine 커닝 쌍의 초기화되지 않은 `featureLookupFlags`(신고서 U1, 재현 `docs/upstream/KerningFlagsRepro.cs` — 6.3·6.6 Mac에서 매번 재현). 고쳐지면
-  `KerningFlags`와 selftest 1번의 커닝 루프를 걷어낸다(그 루프는 플래그를 일부러 넣으므로 정리 없이는 빨갛다). Windows에서도 재현 스크립트를 한 번 돌려 볼 것(Windows
-  매트릭스에서는 한 번도 나오지 않았다). Mac에서 매트릭스 10을 BagelGame(`git clone` + Git LFS를 사람이 받아 `../ah-p2/bagel`)으로. Mac의 핫 루프 인터프리터 비용이 Windows의 ~3배(0.151 vs 0.056–0.063 ms/프레임)인 것은 보고만.
+  `KerningFlags`와 selftest 1번의 커닝 루프를 걷어낸다(그 루프는 플래그를 일부러 넣으므로 정리 없이는 빨갛다). W19에서 Windows의 native NotInter 쌍과 Arial 재현 본문
+  (`eval_file`, 353쌍 모두 비정상·0x100 포함)도 확인했다. Windows에 남은 재현은 **빈 프로젝트의 독립 batch 실행**이다(업스트림 제출도 미완료).
+  Mac에서 매트릭스 10을 BagelGame(`git clone` + Git LFS를 사람이 받아 `../ah-p2/bagel`)으로. Mac의 핫 루프 인터프리터 비용이 Windows의 ~3배(0.151 vs 0.056–0.063 ms/프레임)인 것은 보고만.
 - 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
   install의 Input System 추가, `HarnessReleaseBuild`)를 걷어낼 수 있는지 본다. O-9: 새 버전에서 selftest 1번의 HUD 검사(`uiError` 없음)를 보고,
   UI Toolkit에 패널을 지금 그리는 공개 API가 생기면 리플렉션을 걷어낸다.
@@ -411,6 +448,7 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 
 - **G3-17 Mac에서 같은 코드의 루프끼리 UI Toolkit의 작은 글자가 소수 픽셀 다르게 찍힌다** → 2026-10-01 해결(W18, 아래 "해결됨"): FontEngine이 동적 폰트 에셋의
   커닝 쌍에 남긴 쓰레기 플래그(`IgnoreSpacingAdjustments`)가 그 쌍의 자간을 버리게 했다. 캡처 전에 지운다(`KerningFlags`). 6.6의 기본 텍스트 생성기(Advanced)는 영향 없음.
+  W19(2026-10-02)에서 Windows에도 비정상 플래그를 확인했고, 코드 변경 없이 정리된 샷 3장으로 Windows golden을 교정한 뒤 재검증을 마쳤다.
 
 - [ ] **G3-18 Mac에서 TextMesh Pro의 자간 있는 글자도 세션마다 다를 것이다** (2026-10-01, W18에서 발견, 확인 안 됨)
   - 현상(예상): TMP(`TMP_Text`·`TextMeshPro`)도 커닝 쌍의 `IgnoreSpacingAdjustments`면 그 쌍의 자간을 버리고, 동적 `TMP_FontAsset`은 같은 `FontEngine.GetPairAdjustmentRecords`로
@@ -436,7 +474,8 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
   - 현상: 새 클론을 6000.6.3f1(Mac, Metal)로 연 selftest 1번에서 루프 2·3이 `Assets/Generated/Smoke/Reflection_Probe.asset`(빌드 뒤 씬을 찍는 프로브, W15)을 다시 썼다 —
     큐브맵 픽셀이 빌드마다 달라 쓰기를 건너뛰지 못했다(하늘 큐브맵 `SkyReflection.asset`은 루프 1만). 그 프로브를 비추는 샷이 루프끼리 maxDiff 7(허용치 안의 `same`)이라
     "루프 2·3이 픽셀까지 같음"·"G3-15 다시 그리기 루프"·"큐브맵을 다시 쓰지 않음" 검사가 빨갰다. 6.3 Mac·6.6 Windows(W15 매트릭스 9)에서는 없었다. G3-17과는 무관하다
-    (커닝 정리는 캡처 경로만, 프로브는 빌드의 `RenderEnvironment`).
+    (커닝 정리는 캡처 경로만, 프로브는 빌드의 `RenderEnvironment`). W19(2026-10-02)의 Windows 6.6 재검증도 루프 2·3 및 repaint `maxDiff` 0, 루프 2·3의 하늘·프로브 재기록 0이었다.
+    이는 Windows 관측이며 6.6 Mac의 G4-6은 여전히 미해결이다.
   - 방향: 6.6 Mac에서 프로브 렌더를 두 번 연속 찍어 어느 면·텍셀이 다른지 본다(W15의 "카메라의 첫 렌더가 앞 카메라 상태를 이어받음"·O-11과 같은 종류인지 — 같은 카메라로
     한 번 더 그리면 같아지는지). 그 전까지 6.6 Mac의 매트릭스 9는 selftest 1번의 이 세 검사가 빨갛다.
 
@@ -461,9 +500,10 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
 이 하네스는 이제 UPM 패키지(`com.geuneda.agentharness`, git URL `?path=`)이고 **설치 스크립트 한 번으로 기존 프로젝트에 붙였다 뗄 수 있다**(P-2).
 붙인 뒤의 격차(구 Input Manager 입력, `Assembly-CSharp` 검사, 부트 → 메뉴 → 레벨 흐름, 캡처 포즈, 머신 간 제거)는 P-5에서 메웠고, 공개 프로젝트 2개와
 사내 대형 프로젝트 1개에서 검증했다.
-Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 전부 녹색 — P-1, P-4), OS는 Windows와 macOS(Apple Silicon, W17 — P-3).
+Unity는 6.0 LTS 이상(Windows의 6000.0.84f1·6000.3.11f1·6000.6.3f1 재검증은 W19 완료 — P-1, P-4; golden 교정·생략 범위는 W19), OS는 Windows와 macOS
+(Apple Silicon, W17 — P-3; 6.6 Mac의 G4-6은 미해결).
 
-순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트, 2026-09-29 해결) → P-5(붙인 뒤의 격차, 2026-09-29 해결) → P-3(macOS, 2026-10-01 부분 해결 — Windows 재확인 남음; G3-17은 W18에서 해결)**.
+순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트, 2026-09-29 해결) → P-5(붙인 뒤의 격차, 2026-09-29 해결) → P-3(macOS, 2026-10-01 부분 해결 — Windows 재확인은 2026-10-02 W19 완료; Mac 추가 검증·G4-6 남음, G3-17은 W18에서 해결)**.
 버전은 `tools/fresh-clone-test.ps1 -SelfTest -UnityVersion <v>`, 기존 프로젝트는 `tools/attach-test.ps1 -Project <클론>`으로 검증한다.
 
 - **P-1 Unity 버전이 6000.3.11f1로 고정돼 있다** → 2026-09-29 해결(아래 "해결됨"). 6.6에서 남은 렌더링 문제는 P-4.
@@ -474,7 +514,7 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 - **P-4 Unity 6.6(URP 17.6)에서 샘플 씬의 조명이 검게 나온다** → 2026-09-30 해결(W4, 아래 "해결됨"). 원인은 그림자가 아니라
   `Camera.RenderToCubemap(Cubemap)`이 6.6에서 CPU 픽셀을 채우지 않는 것(반사 큐브맵에 초기화 안 된 메모리가 저장됨)이었다. Unity 신고는 "상시".
 
-- [~] **P-3 Windows에서만 동작한다** (2026-10-01, W17: Mac에서 돈다; Windows 재확인이 남음 — G3-17은 W18에서 해결)
+- [~] **P-3 macOS 이식 — 추가 검증이 남음** (2026-10-01 W17 부분 해결; Windows 재확인은 2026-10-02 W19 완료, G3-17은 W18에서 해결)
   - 머신: Apple M4 Pro, macOS 26.7, Retina 화면 하나, Unity 6000.3.11f1·6000.6.3f1(6.0은 설치 안 됨), PowerShell 7.6.6(관리자 권한 없이 `~/.local/bin/pwsh`), 다른 프로젝트의
     에디터 2개가 같이 떠 있었다. 이 체크아웃은 처음 열었다(Library 없음).
   - 그대로 된 것: `open.ps1`(새 체크아웃 첫 임포트 57.7 s), `harness_setup`, 루프(첫 루프부터 녹색), selftest 2·4·5(HLSL 에러의 Metal 형식 포함)·3의 핫 루프, `-automated`·
@@ -506,7 +546,9 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
     440.3 s: 2·4·5·7·8 녹색, 1(드리프트 뒤 제목 줄 `44,35,127,9`)·3(핫 되돌림 뒤 토스트 `652,34,62,10`)·6(전용 에디터 첫 샷의 글자 영역) 빨강 — 모두 G3-17. 9: 새 클론 6.3 763.7 s — 루프 3회 녹색·
     `4bb3e16d`·종료 뒤 `git status` 깨끗, selftest는 1·2·4·5·8 녹색, 3·6 빨강(G3-17), 7 빨강(위 9번, 고침). 새 클론 6.6 녹색 116.6 s(루프 3회 `7c9005e6…` — Windows 6.6은 `cadaeca6…`, 2.41–2.58 s, 샷 정상; `git status`는 버전 전환 파일뿐). 10: Fluid-Sim(아카이브 + `git init`, 기준선 = 6000.3.11f1 배치 업그레이드) 녹색 49.4 s·28.5 s(루프 3회 `cb45f371…`, 출시 빌드 `.app` `Managed/` 106개·`Harness.*` 0개, 제거 뒤 `git status` 비어 있음).
   - W18 뒤(이 Mac): 매트릭스 1–8 에디터 트리 녹색 582.4 s, 9: 새 클론 6.3 녹색(selftest 703.7 s, Mac 기준 이미지 same 3/3), 6.6은 selftest 1번이 G4-6으로 빨강(2–8 녹색).
-  - 남은 것: 같은 스크립트로 Windows 매트릭스 1–10 재확인(상시), Mac의 BagelGame(Git LFS — 사람이 클론)·사내 프로젝트 A(+G3-18), 6.0 Mac, G4-6. G3-17은 W18에서 해결.
+  - W19 Windows 후속(2026-10-02): `56a65a0`의 코드·도구·허용치는 그대로 두고 Windows golden 3장을 교정한 뒤 매트릭스 1–10 재확인 완료. 현재 트리 selftest 1–8
+    642.04 s·215 checks 녹색, 새 클론 6.3·6.0·6.6의 `-SelfTest`와 attach 3개도 녹색(6.0 Player의 정상 건너뜀·사내 프로젝트 A의 `-NoBuild` 등 생략 범위와 상세 수치는 W19).
+  - 남은 것: Mac의 BagelGame(Git LFS — 사람이 클론)·사내 프로젝트 A(+G3-18), 6.0 Mac, G4-6. G3-17은 W18에서 해결.
 
 ## 하네스 자체
 
@@ -586,12 +628,16 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 (새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~12–17분(O-12 포함)), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
 
+**최신 Windows 완료 기록은 위 W19(2026-10-02)**다. 원본 `56a65a0`은 커밋된 Windows golden 비교가 실패했고, 코드·도구·허용치를 바꾸지 않고 golden 3장을 교정한 뒤
+1–10이 녹색이었다. 현재 트리·버전별 새 클론·attach의 상세 측정값, 6.0 Player 정상 건너뜀과 사내 프로젝트 A의 `-NoBuild` 범위, 6.6 메모리 중단 후 승인된 재시도는 W19를 본다.
+6.6 Mac의 매트릭스 9는 여전히 G4-6으로 미해결이다.
+
 1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark·magenta 샷 없음, 모든 샷 1280x720에
    HUD 합성(`ui`) + `compile-check -IncludeHarness`
    + 기준 이미지(G3-4): 루프 1이 임시 폴더에 쓰고(`-UpdateGolden`) 2·3이 픽셀까지 같음(maxDiff 0 — 허용치 안의 `same`이 아니라), 모든 에디터 창을 매 업데이트마다
    다시 그리는 플레이의 루프도 픽셀까지 같음(G3-15: 그 앞에 에디터 GUI가 그리면 DBuffer 데칼 가장자리가 달라졌다), 커밋된 이 버전·이 OS의 기준 이미지와 같음(있을 때;
    macOS는 `<버전>-macos`), 플레이 동안 동적 폰트의 커닝 쌍을 모두 `IgnoreSpacingAdjustments`로 오염시키고 글자를 다시 만든 루프도 픽셀까지 같음(G3-17: FontEngine이
-   Mac에서 남긴 쓰레기 플래그를 캡처가 지운다 — Windows에서도 회귀를 잡는다), `harness_golden`의 `ignore`(왼쪽 위 기준)와 같은 major.minor·같은 OS의 다른 패치 폴더 대체
+   Mac·Windows에서 남긴 쓰레기 플래그를 캡처가 지운다 — W18·W19), `harness_golden`의 `ignore`(왼쪽 위 기준)와 같은 major.minor·같은 OS의 다른 패치 폴더 대체
    + 시나리오 도구 루프 한 번: `waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처
    + uGUI 합성(G3-1, 편집 모드 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·스택 UI 카메라의 캔버스 → 순서, 색 공간 블렌드 오차 ≤ 2, 되돌림)
    + 카메라(G3-7, 편집 모드 픽스처: 메인 카메라 자식인 스택 Overlay 카메라의 쿼드가 메인·다른 포즈 모두 화면 중앙, 미니맵 Base 카메라가 viewport에,
@@ -690,7 +736,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 - [x] **G3-17 Mac에서 같은 코드의 루프끼리 UI Toolkit의 작은 글자가 소수 픽셀 다르게 찍힌다** (2026-10-01, W18; 발견은 W17)
   - 현상(전): 샘플 HUD의 제목(13 px 굵게, 자간 3)·힌트(자간 1)·토스트(굵게, 자간 1)가 요소마다 따로 두 상태 중 하나로 찍혔다(제목 ~490픽셀 = 0.05%, 글자 세로 가장자리만).
     새 에디터 세션의 첫 플레이와 다음 플레이가 다르고 세션마다 정착하는 상태가 달라, Mac selftest 1·3·6번이 세션에 따라 빨갰고 Mac 기준 이미지를 커밋하지 못했다.
-    Windows 매트릭스에서는 한 번도 나오지 않았다.
+    W18 당시 Windows 매트릭스에서는 세션 간 흔들림이 관측되지 않았다. W19(2026-10-02)에서 Windows에도 비정상 플래그가 있고 기존 golden은 자간을 무시한 출력이었음을 확인했다
+    (아래 Windows 후속 검증).
   - 원인: **FontEngine이 동적 폰트 에셋에 주는 커닝 쌍 레코드(`GlyphPairAdjustmentRecord`)의 `featureLookupFlags`가 초기화되지 않은 값이다**(`FontAsset.UpdateGlyphAdjustmentRecords`
     → `FontEngine.GetPairAdjustmentRecords`). 런타임 NotInter 폰트에서 5,490쌍 중 1,337–1,433쌍에 값이 있었고(정확히 0x100인 것 5개 포함), "AG" 쌍은 세션마다
     `0x100B6`·`0x10588`·`0x10457`·`0x109D1`·`0x1075C`. TextCore 생성기(`TextGenerator`, 6.3·6.6 같음)는 쌍의 플래그에 `IgnoreSpacingAdjustments`(0x100)가 있으면 그 쌍의
@@ -714,9 +761,13 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
     있을 때만 오염을 요구하게 고침: 6.6 클론 `0/0`, 6.3 `129686/8`·selftest 1번 녹색), 나머지는 G4-6(새 항목, 무관).
     재현 스크립트(`docs/upstream/KerningFlagsRepro.cs`, OS 폰트 Arial의 동적 폰트 에셋에 A–Z·a–z): 6.3 3회 쌍 96개 중 48/50/58개에 플래그(0x100 21/20/14개), 6.6 3회
     40/41/54개(5/16/24개). 신고서 초안 [`upstream-reports.md`](upstream-reports.md) U1.
+  - Windows 후속 검증(W19, 2026-10-02): Windows 6.3의 native NotInter 5,492쌍 모두 `0x9E41433F`(0x100 포함). 정리 전체를 끈 새 세션과 flush·dirty만 한 새 세션은 각각
+    옛 golden 3장과 `maxDiff` 0, W18 원본 복원 뒤 정리된 샷은 새 세션끼리 `maxDiff` 0이었다(`AG/LA/PA/AC`의 placement·advance는 같고 플래그만 0). 원본 `56a65a0`의
+    커밋된 Windows golden 비교 실패를 런타임·도구·허용치 변경 없이 golden 3장 교정으로 바로잡은 뒤 매트릭스 1–10 녹색(상세 수치·생략 범위는 W19). Arial 재현 본문도
+    Windows Editor의 `eval_file`에서 353쌍 모두 비정상·0x100 포함으로 확인했다(빈 프로젝트의 독립 batch 실행은 아님).
   - 영향 범위: FontEngine의 레코드는 6.3·6.6 모두 쓰레기지만, 그것을 읽는 것은 TextCore의 managed 생성기(UI Toolkit의 Standard 생성기 — 6.0–6.4의 기본, 6.5는 확인 안 함)와 TMP다. 6.6의
     기본(Advanced Text Generator)으로 그리는 UI Toolkit 글자는 영향이 없다.
-  - 남은 것: Unity 신고(상시), TMP의 같은 검사(G3-18), Windows에서 재현 스크립트 한 번(상시).
+  - 남은 것: Unity 신고(상시), TMP의 같은 검사(G3-18), Windows 빈 프로젝트의 독립 batch 재현(상시; W19의 `eval_file` 관측과 구분).
 
 - [x] **G3-8 에디터 캡처의 UI가 게임의 화면 크기 코드와 어긋날 수 있다**(사내 프로젝트 A 확인) · **G3-16 오버레이 캔버스의 TextMesh Pro 글자를 캡처가 더 날카롭게
   그렸다** (2026-10-01, W16; 경로는 W8)

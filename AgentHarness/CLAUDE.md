@@ -771,7 +771,7 @@ result.json을 쓰고 종료 → 에디터 샷과 비교 → `HarnessOut/player/
 - **빌드**: 첫 빌드는 셰이더를 컴파일해서 길고(샘플 ~2분), 그 뒤는 증분(스크립트만 바뀌면 ~10 s, 아무것도 안 바뀌면 ~3–5 s). 한 바퀴 ~16 s(에디터 루프 ~4.5 s +
   증분 빌드 ~5 s + 플레이어 ~6 s), `-NoBuild` ~11 s. 출력은 `HarnessOut/player-build/`
   (Unity는 `Library/` 안으로 빌드를 거부한다; HarnessOut은 git이 무시). 플레이할 씬이 첫 씬, 이어서 Build Settings의 나머지 활성 씬. 데스크톱(Standalone) 활성
-  타깃만 — 안드로이드 같은 타깃이면 전환(프로젝트 전체 재임포트)하지 않고 `stage=playerBuild`로 알린다. 지금은 Windows만 검증(P-3).
+  타깃만 — 안드로이드 같은 타깃이면 전환(프로젝트 전체 재임포트)하지 않고 `stage=playerBuild`로 알린다. Windows·macOS에서 검증(P-3).
   URP 에셋이 이 에디터의 URP보다 새 버전이면(더 새 Unity가 저장, URP는 내려 쓰지 않음) URP가 빌드를 거부하므로 빌드 전에 `urpStale`로 알린다 —
   6.3 샘플을 6.0으로 연 새 클론이 그 경우다(전역 설정 에셋 버전 10, URP 17.0의 마지막 8; selftest는 그때만 플레이어 단계를 건너뛴다).
 - **빌드가 프로젝트 설정을 다시 쓴다**(하네스와 무관하게 Unity·URP·Input System이): 빌드 뒤 `AssetDatabase.SaveAssets`(`harness_player_built`)로 메모리의 상태를
@@ -994,7 +994,8 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-10-01 W15, W16에서 다시 — 같은 fingerprint, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W15에서 샘플의 하늘(`Harness/Sky`)·반사 프로브·받침대·매듭 재질이 바뀌어 새 값
+- Windows에서 검증한 버전(2026-10-02 W19에서 6.0·6.3·6.6 새 클론 + selftest 1–8 재검증 — W15·W16과 같은 fingerprint, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`;
+  W19는 W18의 커닝 플래그 정리에 맞춰 Windows 기준 이미지 3장만 갱신했다. fingerprint는 W15에서 샘플의 하늘(`Harness/Sky`)·반사 프로브·받침대·매듭 재질이 바뀌어 새 값
   — 6.6은 에디터 창이 있는 화면의 DPI에 따라 fingerprint가 달랐는데(150% 화면, ROADMAP G1-6) W11에서 고정했다. 세 버전 모두 selftest 1번의 루프끼리 `maxDiff` 0,
   하늘·프로브 큐브맵을 루프 2·3이 다시 쓰지 않음, 매듭이 프로브를 비춤(6.0은 `_FORWARD_PLUS`, 6.3·6.6은 `_CLUSTER_LIGHT_LOOP`)):
 
@@ -1002,7 +1003,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   |---|---|---|---|---|
   | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `a0df2fa8…` | 64 / 71 / 99 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크·`-automated`·창 없는 전용 에디터·하늘·반사 프로브 포함), 샷 81.8/66.1/50.6(6.3과 같음). 플레이어 단계는 건너뜀 — 6.3이 저장한 URP 전역 설정(에셋 버전 10)을 URP 17.0(8)이 빌드에 거부 |
   | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `609b54d2…` | 64 / 71 / 99 | 1–9 녹색(같음, 플레이어 실행 포함), 커밋된 기준 이미지와 같음(새 클론은 루프 2부터 픽셀까지) |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `cadaeca6…` | 64 / 71 / 99 | 1–9 녹색(같음, 플레이어 408 fps), 샷 81.8/66.1/50.6. `render.batches`는 null(6.6엔 그 카운터가 없다, 아래 "함정") |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `cadaeca6…` | 64 / 71 / 99 | 1–9 녹색(같음, W19 플레이어 427 fps), 샷 81.8/66.1/50.6. `render.batches`는 null(6.6엔 그 카운터가 없다, 아래 "함정") |
 
   `-automated`·`-debugCodeOptimization`·`-batchmode -ignoreCompilerErrors`와 창 없는 에디터의 렌더(O-11 우회 포함)는 세 버전에서 같게 동작했다.
 
@@ -1374,9 +1375,10 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   있을 수도 없을 수도 있는 키는 `$h['text']`. `git status --porcelain` 경로는 저장소 루트 기준, `git ls-tree`·`hash-object`·`show <rev>:./x`는 `-C` 폴더 기준이다.
 - `CompilationPipeline.GetAssemblies(AssembliesType.Editor)`를 도메인 리로드 뒤 처음 부르면 ~60 ms다(Player 목록과 따로 캐시) — lint의 계약 검사가 그것과 Builders
   어셈블리까지 훑어 리로드 직후 83–158 ms였다 → static-reset이 이미 받은 Player 목록으로 21–30 ms.
-- **동적 폰트 에셋의 커닝 쌍이 macOS에서 쓰레기 플래그를 받는다**(W18, G3-17): FontEngine이 동적 `FontAsset`에 주는 `GlyphPairAdjustmentRecord`의 `featureLookupFlags`가
-  초기화되지 않은 값이다(레코드의 ~25%, 에디터 세션마다 다름; 6.3·6.6 Mac — Windows 매트릭스에서는 나오지 않았다). 텍스트 생성기는 그 값에 `IgnoreSpacingAdjustments`(0x100)가
-  있으면 그 쌍의 자간을 버린다 → **자간(`letter-spacing`) 있는 글자만** 쌍마다 소수 픽셀 밀리고(HUD 제목 "AG"·"GE" 0.27 px), 어느 쌍이 밀리는지가 세션마다 달라 기준 이미지가
+- **동적 폰트 에셋의 커닝 쌍이 macOS와 Windows에서 쓰레기 플래그를 받는다**(W18·W19, G3-17): FontEngine이 동적 `FontAsset`에 주는 `GlyphPairAdjustmentRecord`의 `featureLookupFlags`가
+  초기화되지 않은 값이다(Mac 6.3·6.6은 레코드의 ~25%, 세션마다 다름; W19 Windows 6.3의 NotInter는 5,492쌍 모두 `0x9E41433F` — 기존 golden도 자간을 무시한 상태였다).
+  W19는 정리된 Windows 샷 3장으로 기준 이미지를 갱신했다(같은 코드, 새 세션끼리 `maxDiff` 0; 커닝 위치·전진 폭은 바뀌지 않음). 텍스트 생성기는 그 값에 `IgnoreSpacingAdjustments`(0x100)가
+  있으면 그 쌍의 자간을 버린다 → **자간(`letter-spacing`) 있는 글자만** 쌍마다 소수 픽셀 밀리고(Mac HUD 제목 "AG"·"GE" 0.27 px), Mac에서는 어느 쌍이 밀리는지가 세션마다 달라 기준 이미지가
   `changed`였다. 그 레코드를 읽는 것은 UI Toolkit의 Standard 텍스트 생성기(6.0–6.4의 기본, 6.5는 확인 안 함)와 TMP다 — 6.6의 기본인 Advanced 생성기(`-unity-text-generator`)로 그리는 글자는
   영향이 없다. 캡처는 그 전에 글자를 그린 동적 폰트 에셋의 플래그를 지우고 UI Toolkit 글자를 다시 만든다(`Runtime/KerningFlags.cs`, 동적 폰트 에셋 2,400개가 쌓인 세션에서 캡처당 4 ms) — **게임 자신의 화면(Game 뷰·
   플레이어)은 첫 캡처 전까지 그대로다**. 세션마다 달라지는 글자를 보면 먼저 자간을 의심한다. TextMesh Pro도 같은 플래그를 검사한다(G3-18, 확인 안 됨). 찾은 방법: 캡처 순간의 UIR
