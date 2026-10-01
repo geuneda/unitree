@@ -253,13 +253,42 @@ namespace Harness
                     l.canvas.planeDistance = PlaneDistance;
                 }
                 Canvas.ForceUpdateCanvases();
-                cam.Render();
+                RenderWithoutFeatures(cam);
             }
             finally
             {
                 cam.targetTexture = null;
                 RestoreCanvases();
             }
+        }
+
+        /// <summary>
+        /// Render the UI camera with its renderer's features off for that render: the game draws overlay canvases after the
+        /// cameras, without them (a full-screen feature would paint over the UI layer; SSAO and decals have nothing to draw).
+        /// URP 17.3's screen space decal pass also throws (NullReferenceException in RenderingUtils.SetScaleBiasRt) for a camera
+        /// that renders straight into its target without an intermediate texture, as this one does (W13).
+        /// </summary>
+        static void RenderWithoutFeatures(Camera cam)
+        {
+#if AGENTHARNESS_URP
+            var off = new List<ScriptableRendererFeature>();
+            if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset asset)
+            {
+                var renderer = cam.GetUniversalAdditionalCameraData().scriptableRenderer;
+                var renderers = asset.rendererDataList;
+                for (var i = 0; i < renderers.Length; i++)
+                {
+                    if (renderers[i] == null || asset.GetRenderer(i) != renderer) continue;
+                    foreach (var f in renderers[i].rendererFeatures)
+                        if (f != null && f.isActive) { f.SetActive(false); off.Add(f); }
+                    break;
+                }
+            }
+            try { cam.Render(); }
+            finally { foreach (var f in off) f.SetActive(true); }
+#else
+            cam.Render();
+#endif
         }
 
         Camera UiCamera()

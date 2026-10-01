@@ -43,7 +43,10 @@ namespace Game.Stage.Builders
                     SettingsContext.Set(ssao, "m_Settings.Intensity", 0.4f);
                     SettingsContext.Set(ssao, "m_Settings.Radius", 0.3f);
                 });
-                SettingsContext.AddRendererFeature<DecalRendererFeature>(renderer);   // ctx.Decal (the rune circle, StagePropsStep)
+                // ctx.Decal (the rune circle, StagePropsStep). Screen space, not the desktop default DBuffer: DBuffer decals came out
+                // different on a few edge pixels when the Editor's GUI drew before the capture (ROADMAP G3-15). 2 = ScreenSpace
+                // (DecalTechniqueOption is internal).
+                SettingsContext.AddRendererFeature<DecalRendererFeature>(renderer, decals => SettingsContext.Set(decals, "m_Settings.technique", 2));
             });
 
             // The URP template's mobile values: lower resolution, one hard-shadow cascade, no SSAO.

@@ -5,9 +5,11 @@
 
   1 loop x3: green, same build.fingerprint and play.events (-ExpectFingerprint), no blank/dark/magenta shots, every
     shot 1280x720 with the HUD composited (G3-1); golden images (G3-4): loop 1 writes them (-UpdateGolden, to
-    HarnessOut), loops 2-3 are the same pixel for pixel, the committed goldens of this Unity version (if any) are the
-    same, and harness_golden leaves "ignore" regions (from the top left) out and falls back to another patch of the
-    same major.minor; compile-check of every assembly (csc, the Editor's response files);
+    HarnessOut), loops 2-3 are the same pixel for pixel (largest channel difference 0), so is a loop with every Editor
+    window repainted on every Editor update of the play (G3-15: the Editor's GUI drawn before the captures flipped DBuffer
+    decal edges), the committed goldens of this Unity version (if any) are the same, and harness_golden leaves "ignore"
+    regions (from the top left) out and falls back to another patch of the same major.minor; compile-check of every
+    assembly (csc, the Editor's response files);
     one more loop with the scenario tools of P-5 (waitScene, waitTarget, a UI Toolkit click by name, KeyCode key names,
     a capture from a pose and one from a named camera); screen-space uGUI (G3-1) on a fixture that is never saved: an
     overlay, a Screen Space - Camera canvas of the main camera and one of a UI camera in its stack composited in order,
@@ -873,6 +875,42 @@ UnityEditor.EditorApplication.playModeStateChanged += onChange;
 return "armed";
 '@
 
+# Item 1's repaint check (G3-15), eval_file bodies: every Editor window repainted on every Editor update of the next play
+# session - the Editor's GUI drawn between the frames' camera renders and the captures, which made URP's DBuffer decals come
+# out different on a few edge pixels (the sample's closeup, 10 loops out of 10). It disarms itself when play mode exits (or
+# unused, after 120 s). The state body: how many repaints it asked for.
+$RepaintArmText = @'
+const string key = "AgentHarness.selftest.repaints";
+UnityEditor.SessionState.SetInt(key, 0);
+var deadline = System.DateTime.UtcNow.AddSeconds(120);
+var repaints = 0;
+UnityEditor.EditorApplication.CallbackFunction repaint = () =>
+{
+    if (!UnityEngine.Application.isPlaying) return;
+    UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+    UnityEditor.SessionState.SetInt(key, ++repaints);
+};
+System.Action<UnityEditor.PlayModeStateChange> onChange = null;
+onChange = c =>
+{
+    if (c == UnityEditor.PlayModeStateChange.EnteredPlayMode)
+    {
+        if (System.DateTime.UtcNow > deadline) { UnityEditor.EditorApplication.playModeStateChanged -= onChange; return; }
+        UnityEditor.EditorApplication.update += repaint;
+    }
+    else if (c == UnityEditor.PlayModeStateChange.ExitingPlayMode)
+    {
+        UnityEditor.EditorApplication.update -= repaint;
+        UnityEditor.EditorApplication.playModeStateChanged -= onChange;
+    }
+};
+UnityEditor.EditorApplication.playModeStateChanged += onChange;
+return "armed";
+'@
+$RepaintStateText = @'
+return UnityEditor.SessionState.GetInt("AgentHarness.selftest.repaints", -1);
+'@
+
 # The real devices, the disabled ones among them, how many Space events the armed play queued (and had queued when it gave
 # focus back), UI Toolkit's "ignore input while unfocused" during that play and now (1 = ignores, 0 = takes input, -1 = none).
 $RealInputStateText = @'
@@ -1405,8 +1443,21 @@ function Invoke-Item1 {
     Test-Check 'golden: loop 1 wrote its shots (-UpdateGolden)' ($written.Count -gt 0 -and $written.Count -eq @($runs[0].shots).Count -and -not $runs[0].golden.error) "$($written -join ',') $($runs[0].golden.error)"
     $notSame = @($runs[1..2] | ForEach-Object { Get-Golden $_ } | Where-Object { $_ -notlike '*:same' })
     $diffs = @($runs[1..2] | ForEach-Object { @($_.shotStats) } | ForEach-Object { if ($_.golden) { [double]$_.golden.maxDiff } })
-    Test-Check 'golden: loops 2-3 same as loop 1' ($notSame.Count -eq 0 -and $diffs.Count -eq 2 * $written.Count) "$((@($runs[1..2] | ForEach-Object { Get-Golden $_ }) -join ',')) maxDiff=$(($diffs | Measure-Object -Maximum).Maximum)"
-    $state.item['goldenMaxDiff'] = ($diffs | Measure-Object -Maximum).Maximum
+    # Pixel for pixel, not only within the tolerance (G3-15: 6-7 closeup pixels used to flip and stayed "same").
+    $maxDiff = ($diffs | Measure-Object -Maximum).Maximum
+    Test-Check 'golden: loops 2-3 pixel for pixel as loop 1 (maxDiff 0)' ($notSame.Count -eq 0 -and $diffs.Count -eq 2 * $written.Count -and $maxDiff -eq 0) "$((@($runs[1..2] | ForEach-Object { Get-Golden $_ }) -join ',')) maxDiff=$maxDiff"
+    $state.item['goldenMaxDiff'] = $maxDiff
+    # The Editor's GUI drawn between the frames' camera renders and the captures (G3-15).
+    $repaintFiles = @{ arm = (Join-Path $outAbs 'repaint-arm.cs').Replace('\', '/'); state = (Join-Path $outAbs 'repaint-state.cs').Replace('\', '/') }
+    Write-TextFile $repaintFiles.arm $RepaintArmText
+    Write-TextFile $repaintFiles.state $RepaintStateText
+    [void](Invoke-Eval $repaintFiles.arm)
+    $r = Invoke-Loop '1-loop-repaint' @('-Golden', $gold)
+    $repaints = Invoke-Eval $repaintFiles.state
+    $rd = @($r.shotStats | ForEach-Object { if ($_.golden) { [double]$_.golden.maxDiff } })
+    $rdMax = ($rd | Measure-Object -Maximum).Maximum
+    Test-Check 'golden: a loop with every Editor window repainted on every update, pixel for pixel as loop 1' ([bool]$r.ok -and [int]$repaints -gt 0 -and $rd.Count -eq $written.Count -and $rdMax -eq 0 -and (Get-Events $r) -eq (Get-Events $runs[0])) "repaints=$repaints $((Get-Golden $r) -join ',') maxDiff=$rdMax $(Get-Summary $r)"
+    $state.item['repaintLoop'] = "repaints=$repaints maxDiff=$rdMax"
     # The goldens committed with the project, for this Unity version (another patch of it) if any.
     $items3 = @($runs[2].shots | ForEach-Object { [ordered]@{ path = $_; name = [IO.Path]::GetFileNameWithoutExtension($_) } })
     $committed = Invoke-GoldenCommand @{ shots = (ConvertTo-Json -InputObject $items3 -Depth 5 -Compress); key = 'default'; out = (Join-Path $outAbs 'golden-committed') }

@@ -52,8 +52,8 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 ```
 
 실패하면 `stage`(compile / build / shader / play / runtime / lint / shots)와 함께 `{"file","line","msg","module"}`가 나옵니다.
-샷은 커밋된 기준 이미지(`golden/<Unity 버전>/<시나리오>/`)와 비교됩니다. 같은 머신·같은 에디터 모드면 픽셀까지 같아서(받침대 모서리의 픽셀 몇 개만 실행마다
-두 값 중 하나 — ROADMAP G3-15, 허용치 안), 셰이더 한 줄(스펙큘러 절반)도
+샷은 커밋된 기준 이미지(`golden/<Unity 버전>/<시나리오>/`)와 비교됩니다. 같은 머신·같은 에디터 모드면 플레이 중 에디터 창이 계속 다시 그려져도 픽셀까지
+같아서(URP의 DBuffer 데칼만 가장자리 몇 픽셀이 갈릴 수 있어 샘플은 Screen Space 데칼 — ROADMAP G3-15), 셰이더 한 줄(스펙큘러 절반)도
 `changed` + 바뀐 곳을 칠한 diff PNG로 드러납니다(실패로 치지는 않음). 의도한 변경이면 `loop.ps1 -UpdateGolden`으로 갱신합니다.
 
 | 상황 (측정) | 창 에디터 | 창 없는 에디터 (`open.ps1 -Headless`) |
@@ -191,7 +191,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1               # 끝낼 �
 들어가는데, `open.ps1`과 루프가 그 에러(file·line)를 로그에서 읽어 보고합니다(창 없는 에디터는 마지막으로 성공한 어셈블리로 떠서 루프가 에러를 보고).
 
 위 과정 전체(클론 → 열기 → 설정 → 루프 3회 → 종료 → 삭제)를 `tools/fresh-clone-test.ps1` 하나로 검증할 수 있습니다(이 머신에서 ~110 s).
-하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·실제 입력 격리(포커스 있음·없음)·동시 루프·worktree 전용 에디터·worktree submit/land·계약 규칙·프로젝트 설정 드리프트)는 `tools/selftest.ps1`이 한 번에 돌리고(~11–14분),
+하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·실제 입력 격리(포커스 있음·없음)·동시 루프·worktree 전용 에디터·worktree submit/land·계약 규칙·프로젝트 설정 드리프트·에디터 창을 계속 다시 그려도 픽셀까지 같은 샷)는 `tools/selftest.ps1`이 한 번에 돌리고(~9–14분),
 `fresh-clone-test.ps1 -UnityVersion <버전> -SelfTest`는 그것을 다른 Unity 버전의 새 클론에서 돌립니다.
 
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)

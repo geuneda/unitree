@@ -17,9 +17,9 @@
 - 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태·워크플로우 절 갱신 → 새로 드러난 항목 추가 →
   **저장소 루트 `README.md`와 `AgentHarness/CLAUDE.md`(필요하면 `Tools~/templates/AgentHarness.md`)에 바뀐 기능·측정값 반영** → 커밋(메시지에 항목 ID).
   README·ROADMAP 갱신은 워크플로우마다 빠뜨리지 않는다(W2 커밋은 README를 건드리지 않았고, W4 뒤에도 README "요구 사항"에 6.6의 옛 상태가 남아 있었다).
-- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W12는 모두 끝났다(2026-10-01). 남은 항목은 W13–W16으로 묶었다
-  (2026-10-01): G3-15(픽셀 몇 개의 깜빡임) → G5-6(여러 worktree의 ProjectSettings) → G4-5(하늘·반사), G3-8의 사내 프로젝트 확인(타깃 전환 허락받음 — 언제든).
-  그 뒤에 남는 것은 상시(업스트림 — G2-4의 남은 Unity 쪽 비용 포함)와 마지막(macOS)이다.
+- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W13은 모두 끝났다(2026-10-01). 남은 항목은 W14–W16으로 묶었다
+  (2026-10-01): G5-6(여러 worktree의 ProjectSettings) → G4-5(하늘·반사), G3-8의 사내 프로젝트 확인(타깃 전환 허락받음 — 언제든).
+  그 뒤에 남는 것은 상시(업스트림 — G2-4의 남은 Unity 쪽 비용, W13의 URP 데칼 신고 포함)와 마지막(macOS)이다.
 - 크기: S = 파일 1–2개 · M = 여러 파일 또는 새 커맨드 · L = 조사가 필요하거나 새 하위 시스템.
 
 | 순서 | 워크플로우 | 항목 | 크기 | 선행 | 상태 |
@@ -36,11 +36,11 @@
 | W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 완료 (2026-09-30; 여러 worktree가 같은 ProjectSettings 파일을 바꾸는 경우는 G5-6) |
 | W11 | 백그라운드 에디터의 실제 입력 격리 | G3-9 (+G3-14, G1-6) | S | — | 완료 (2026-10-01) |
 | W12 | 핫 루프 넓히기 | G2-5 | M | W5 | 완료 (2026-10-01; `try/catch`·예외 줄·새 필드는 Pipeline — 상시) |
-| W13 | 같은 코드면 픽셀까지 같은 샷 | G3-15 | M | — | 대기 |
+| W13 | 같은 코드면 픽셀까지 같은 샷 | G3-15 | M | — | 완료 (2026-10-01; URP DBuffer 데칼의 흔들림·ScreenSpace 데칼의 NRE는 신고 — 상시) |
 | W14 | 여러 worktree의 ProjectSettings | G5-6 | M | — | 대기 |
 | W15 | 하늘과 씬 반사 | G4-5 | L | W13 | 대기 |
 | W16 | 사내 프로젝트 A의 플레이어 화면 | G3-8 | S | — | 대기 (타깃 전환 허락받음, 2026-10-01) |
-| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5 신고, G2-4 재측정 | S | 새 버전이 나올 때 | — |
+| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5·W13(URP 데칼) 신고, G2-4 재측정 | S | 새 버전이 나올 때 | — |
 | 마지막 | macOS | P-3 | L | 실제 Mac | 대기 |
 
 ### W1 시나리오 입력 격리 (G3-6) — 완료 (2026-09-29, 아래 "해결됨")
@@ -174,16 +174,17 @@
 - 하다가 찾은 것: **G3-15** — 같은 코드의 루프끼리 closeup 샷의 받침대·룬 데칼 모서리 픽셀 6–7개가 두 값 중 하나로 찍힌다(허용치 안이라 `same`, W11 실행에도 있었음).
 - 매트릭스 3이 새 단계를 본다: 인터프리터 호출 통계, 새 헬퍼 경유 변경 = 인라인 변경의 샷, `harness_hot check`로 제네릭·오버로드 거부와 안 쓰는 새 메서드 수용.
 
-### W13 같은 코드면 픽셀까지 같은 샷 (G3-15)
-- 왜 먼저: "같은 머신·같은 버전이면 픽셀까지 같다"(CLAUDE.md "기준 이미지")에서 이 몇 픽셀만 예외다. W15의 완료 기준(구름 하늘 샷이 루프 2·3 픽셀까지 같음)도
-  이게 깨끗해야 판정되고, W15는 모든 샷을 바꿔 기준 이미지를 다시 만드니 그 전에 원인을 좁힌다.
-- 먼저: 재현율. 같은 코드로 루프를 반복해(selftest 3번에서 10개 중 3개) 두 값의 빈도를 창 에디터·창 없는 에디터·플레이어(`player.ps1`)에서 따로 잰다.
-  플레이어에서도 섞이면 캡처 경로가 아니라 렌더 자체다.
-- 좁히기: `Assets/Game/Stage/Builders/StageRenderSettingsStep.cs`의 렌더러 피처를 하나씩 끈 루프 반복 — `DecalRendererFeature`(룬 데칼, `StagePropsStep`의
-  `Props/RuneCircle`), SSAO, MSAA(캡처 RT의 해제 경로, `Runtime/HarnessCapture.cs` `CameraMsaa`). 앞 프레임·렌더 타깃 재사용 같은 상태를 읽는 패스를 찾는다.
-- 고치는 곳: 원인에 따라 `Runtime/HarnessCapture.cs`(캡처 RT 초기화·재사용), `Editor/Build/BuildContext.Decals.cs`, 샘플 빌더. 원인이 Unity·URP 안이면 우회하고 상시에 신고.
-- 추가 검증: 기준 이미지 판정(허용치 0.01%)과 별개로 같은 코드 루프 두 번의 샷이 **픽셀까지 같은지**(maxDiff 0) selftest에 둔다 — 세 버전 새 클론에서도.
-  CLAUDE.md "기준 이미지"의 "이 몇 픽셀을 뺀 말" 단서를 지운다.
+### W13 같은 코드면 픽셀까지 같은 샷 (G3-15) — 완료 (2026-10-01, 아래 "해결됨")
+- 결과: 원인은 URP의 **DBuffer 데칼**(데스크톱의 Automatic 기본값)이다. 플레이 중 마지막 카메라 렌더와 캡처 사이에 에디터 GUI가 그리면(창 다시 그리기) 룬 데칼
+  가장자리 2픽셀이 2–3단계 달라지고, SMAA의 에지 판정이 그것을 6–7픽셀·채널 차이 47로 키웠다. 매 에디터 업데이트마다 모든 창을 다시 그리게 하면 10번 중 10번,
+  그냥 두면 15번 중 1번. ScreenSpace 데칼은 그냥 3번·GUI 부하 8번 모두 세 샷이 픽셀까지 같았다 → 샘플을 ScreenSpace로(`m_Settings.technique`), 기준 이미지 갱신.
+- 하다가 찾은 것: **URP 17.3의 ScreenSpace 데칼 패스는 중간 텍스처 없이 타깃에 바로 그리는 카메라에서 NullReferenceException**을 낸다
+  (`RenderingUtils.SetScaleBiasRt` — `resourceData.cameraColor`가 비어 있음). 하네스가 uGUI 캔버스를 그리는 숨은 UI 카메라가 그런 카메라라 selftest의 uGUI 합성·연속
+  캡처가 빨갰다 → 그 카메라는 렌더러의 renderer feature를 끄고 그린다(게임도 오버레이 캔버스를 카메라 뒤에 feature 없이 그린다). 기존 프로젝트가 ScreenSpace 데칼을
+  쓰면 같은 일이 났을 것이다.
+- 해 보고 하지 않은 것: 캡처 직전에 같은 카메라를 한 번 더 그려 버리기(+ `GL.Flush`) — 편집 모드에서는 맞았지만 플레이 중 GUI 부하에서는 여전히 갈렸고,
+  렌더 횟수가 바뀌어 디더링 순번이 밀려 모든 샷이 ±4 바뀌었다. 렌더 그래프 풀·`UNITY_HDR_ON`·`GL.sRGBWrite`·SSAO·`copyDepthMode`·`intermediateTextureMode`는 원인이 아니었다.
+- 매트릭스 1이 루프 2·3의 maxDiff 0과, 모든 창을 매 업데이트마다 다시 그리는 루프의 maxDiff 0을 본다(수정 전 DBuffer에서는 그 루프가 3번 모두 47).
 
 ### W14 여러 worktree의 ProjectSettings (G5-6)
 - 왜: 병렬 작업(성질 5)에서 남은 공유 지점. 두 worktree의 미병합 모듈이 같은 ProjectSettings 파일을 바꾸면(둘 다 레이어 추가) 두 번째 submit은 되복사되지 않고
@@ -214,7 +215,7 @@
   매트릭스 10이 사내 프로젝트의 실제 타깃으로 돌게 둔다.
 - 하네스 코드가 바뀌지 않으면 매트릭스는 10만 돌리고 G3-8 상태·README만 갱신한다. 어긋남이 나오면 그 고침은 W8의 경로(`player.ps1`, `shotStats[].screen`)에 한다.
 
-### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5 신고, G2-4 재측정)
+### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5·W13 신고, G2-4 재측정)
 - 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존)과 G2-5의 인터프리터 2건(`try/catch` 미지원,
   교체 본문이 던진 예외를 줄 없이 로그하고 원래 본문으로 이어 돌림), Unity에 P-4의 원인
   (`Camera.RenderToCubemap(Cubemap)`: 6.6은 CPU 픽셀을 안 채우고 6.3은 sRGB로 인코딩 — 빈 씬 + 스카이박스 + half 큐브맵 한 개로 재현), O-6 Unity Search 예외,
@@ -224,6 +225,12 @@
   (파일당 첫 `[CodeReload]` 클래스, 비제네릭, 컴파일된 이름이 아님)을 따라 하고, 인터프리터 호출 수는 내부 `CodeReloadRegistry.m_MethodOverrides`·`MethodOverride.InterpreterInvoke`를
   감싸 센다 — Pipeline을 올리면 selftest 3번의 새 헬퍼·호출 통계 단계로 확인(없어지면 `hot.interpreted.error`만). O-10: Unity 6.7이 나오면 `EditorDialogEvents`로 자동으로 닫힌 대화상자를 report에 싣는다.
   G2-4: 남은 도메인 리로드 ~2.1 s와 리로드 직후 빌드 +0.8 s는 Unity 쪽이라 새 Unity(CoreCLR 에디터)가 나오면 "기준선"의 C# 1줄 루프를 다시 잰다.
+  W13: URP에 2건 — (1) DBuffer 데칼: 플레이 중 `SubmitRenderRequest`로 그린 카메라의 데칼 가장자리 픽셀이 그 앞에 에디터 GUI가 그렸는지에 따라 2–3단계
+  다르다(샘플 closeup의 룬 원·받침대 모서리; `InternalEditorUtility.RepaintAllViews()`를 매 에디터 업데이트마다 부르면 10/10, ScreenSpace 데칼은 0/8; 편집 모드에서는 에디터
+  프레임마다 첫 캡처가 다르고, 같은 프레임에서 앞서 그린 카메라 렌더가 GPU로 넘어간 뒤(`ReadPixels`·`GL.Flush`)에는 같다). (2) ScreenSpace 데칼:
+  `DecalScreenSpaceRenderPass`가 `resourceData.cameraColor`로 `SetScaleBiasRt`를 불러, 중간 텍스처 없는 카메라(후처리·HDR·MSAA·깊이/불투명 텍스처 없음, 타깃 텍스처)에서
+  NullReferenceException → Render Graph Execution error. 고쳐지면 CaptureUi의 feature 끄기는 그대로 두고(게임과 같은 그리기), 샘플을 DBuffer로 되돌려 selftest 1번의
+  다시 그리기 루프로 확인할 수 있다.
   W8: Unity에 증분 플레이어 빌드가 앞선 빌드의 `ScriptingAssemblies.json`을 쓰는 것(출시 빌드 → 다른 폴더로 개발 빌드, define 제약으로 어셈블리 집합이
   달라짐; 6.0 Fluid-Sim에서 재현 — 고쳐지면 `player.ps1`의 `CleanBuildCache` 재빌드를 걷어낸다), 플레이어 첫 씬 파티클의 로드 시점 한 스텝(의도인지 문의).
 - 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
@@ -354,14 +361,8 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 - **G3-12 캡처가 HDR 이미션·블룸을 잘랐다** (2026-09-30, W8에서 발견) → 같은 날 해결(W8, 아래 "해결됨"). URP는 대상 텍스처가 있는 카메라를 그 텍스처의
   형식으로 렌더해서 8비트 캡처 RT가 톤 매핑 전에 HDR을 1로 잘랐다. 에디터 캡처끼리는 매번 같아 기준 이미지로는 안 보였고 플레이어의 실제 화면과 비교해 드러났다.
 
-- [ ] **G3-15 같은 코드의 루프끼리 closeup 샷의 픽셀 6–7개가 두 값 중 하나다** (2026-10-01, W12에서 발견)
-  - 현상: 기본 시나리오 `shot0_closeup`(1280x720)의 받침대 오른쪽 아래 모서리 — 룬 데칼(`Stage/Props/RuneCircle`, 아래로 투영하는 8x8x3 상자)이 받침대 옆면과 만나는 곳,
-    x 907–950·y 664–676 — 의 픽셀 6–7개가 실행마다 두 값 중 하나로 찍힌다(가장 큰 픽셀 (10,99,127) ↔ (23,69,80), 채널 차이 47). 바뀐 비율 ~0.0008%라 기준 이미지
-    판정(픽셀 0.01%)은 `same`이고 루프는 녹색이다. W12 selftest 3번의 루프 10개에서 전체 루프·핫 루프 구분 없이 두 값이 섞였고(7개 대 3개; 코드·시나리오 같음), W11·W12
-    selftest 1번의 루프 3도 이랬다(`goldenMaxDiff` 47; 1·4번의 다른 루프에도 섞임). 6.3·6.0 새 클론의 selftest 1번에도 47(같은 W12 매트릭스의 6.6 새 클론은 0). horizon·overview 샷은 같다.
-  - 영향: "같은 머신·같은 버전이면 픽셀까지 같다"는 이 몇 픽셀을 뺀 말이다(CLAUDE.md "기준 이미지"). 허용치 안이라 판정에는 영향이 없지만 픽셀까지 비교하는 검사는
-    이 자리를 빼야 한다.
-  - 방향: 데칼(DBuffer)·MSAA 해제·SSAO 중 어느 것이 앞 프레임·렌더 타깃 재사용 같은 상태를 읽는지 좁힌다(데칼을 끈 루프 반복, MSAA 끈 루프 반복). 원인이 Unity·URP면 신고.
+- **G3-15 같은 코드의 루프끼리 closeup 샷의 픽셀 6–7개가 두 값 중 하나였다** (2026-10-01, W12에서 발견) → 같은 날 해결(W13, 아래 "해결됨").
+  URP DBuffer 데칼의 가장자리 픽셀이 캡처 전에 에디터 GUI가 그렸는지에 따라 달랐고 SMAA가 그것을 키웠다. 샘플은 ScreenSpace 데칼로 바꿨고, DBuffer 쪽은 상시(신고).
 
 ## 성질 4 — 에셋 없이도 완성도
 
@@ -513,13 +514,14 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
-**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; O-12가 겹쳐 ~11–14분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
+**1–8은 `tools/selftest.ps1` 한 번**(에디터 트리, 하네스 변경은 임시 커밋 후; O-12가 겹쳐 ~9–14분), **9는 `tools/fresh-clone-test.ps1 -SelfTest`**
 (새 클론에서 루프 3회 + 1–8, 지원 버전마다 `-UnityVersion`; 버전당 ~12–17분(O-12 포함)), **10은 `tools/attach-test.ps1`**(기존 프로젝트 클론마다; 0.5–1분).
 아래는 각 항목이 검사하는 것이다. 샷 PNG는 여전히 Read로 확인한다.
 
 1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark·magenta 샷 없음, 모든 샷 1280x720에
    HUD 합성(`ui`) + `compile-check -IncludeHarness`
-   + 기준 이미지(G3-4): 루프 1이 임시 폴더에 쓰고(`-UpdateGolden`) 2·3이 픽셀까지 같음, 커밋된 이 버전의 기준 이미지와 같음(있을 때),
+   + 기준 이미지(G3-4): 루프 1이 임시 폴더에 쓰고(`-UpdateGolden`) 2·3이 픽셀까지 같음(maxDiff 0 — 허용치 안의 `same`이 아니라), 모든 에디터 창을 매 업데이트마다
+   다시 그리는 플레이의 루프도 픽셀까지 같음(G3-15: 그 앞에 에디터 GUI가 그리면 DBuffer 데칼 가장자리가 달라졌다), 커밋된 이 버전의 기준 이미지와 같음(있을 때),
    `harness_golden`의 `ignore`(왼쪽 위 기준)와 같은 major.minor의 다른 패치 폴더 대체
    + 시나리오 도구 루프 한 번: `waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처
    + uGUI 합성(G3-1, 편집 모드 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·스택 UI 카메라의 캔버스 → 순서, 색 공간 블렌드 오차 ≤ 2, 되돌림)
@@ -601,6 +603,40 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G3-15 같은 코드의 루프끼리 closeup 샷의 픽셀 6–7개가 두 값 중 하나였다** (2026-10-01, W13 — 원인은 URP DBuffer 데칼, 신고는 상시)
+  - 현상(W12): 기본 시나리오 `shot0_closeup`의 받침대 오른쪽 아래 — 룬 데칼 원이 받침대 모서리 너머 지면에 닿는 곳, x 907–950·y 666–676 — 의 픽셀 6–7개가 실행마다
+    (10,99,127) ↔ (23,69,80) 중 하나(채널 차이 47, ~0.0008%라 판정은 `same`). 6.3·6.0 새 클론에도.
+  - 재현율(이 머신, 6.3 창 에디터, 수정 전): 그냥 루프 1/15. 편집 모드에서 한 eval 안에 closeup을 15번 그리면 첫 렌더만 B(23,69,80 쪽), 나머지는 A(기준 이미지 쪽)
+    — 에디터 프레임마다 그랬다.
+  - 좁히기(편집 모드 → 플레이 모드): 데칼을 끄면 그 자리에 차이 없음, SMAA를 끄면 같은 픽셀이 2–3단계만 다름 → 흔들림은 데칼, SMAA는 키울 뿐. 앞선 렌더로
+    "예열"되는 조건: 같은 프레임에 캡처 렌더(64x36·컬링 마스크 0·데칼·후처리 없이도)가 있었으면 A, 메인 카메라·Scene 뷰 카메라·빈 카메라의 렌더 요청은 예열하지 않음,
+    수동 렌더도 `ReadPixels`·`AsyncGPUReadback`·`GL.Flush`가 뒤따르면 예열, `GL.Flush`나 대기만으로는 아님. 플레이 중 캡처 시점의 렌더 그래프 텍스처 풀에는
+    매번 1280x720 텍스처가 없었다(B가 나온 실행도) → 풀이 아니다. **모든 에디터 창을 매 에디터 업데이트마다 다시 그리게 하면 10/10 B**(GPU 부하만 주면 1/4 —
+    평소 수준) → 계기는 에디터 GUI 그리기. 그 부하에서 설정별로 3–4회: `copyDepthMode=ForcePrepass`·`intermediateTextureMode=Always`·SSAO 끔 → 여전히 B,
+    **ScreenSpace 데칼 → 0회**(그 자리 값이 늘 같음). `UNITY_HDR_ON`·`GL.sRGBWrite`도 아니었다(에디터 GUI 뒤에도 같은 값).
+  - 방법: 샘플 렌더 설정 스텝이 `DecalRendererFeature`를 ScreenSpace로(`SettingsContext.Set(decals, "m_Settings.technique", 2)` — 그 enum은 internal). 룬 원의 모양은
+    같고 가장자리 0.009–0.013% 픽셀만 바뀌어 6.3 기준 이미지 3장을 갱신했다. 6.3 fingerprint `1d7568ed` → `896e67fc`(렌더러 설정값이 fingerprint에 들어간다).
+  - 하다가 찾은 것: URP 17.3의 ScreenSpace 데칼 패스는 중간 텍스처 없는 카메라에서 `RenderingUtils.SetScaleBiasRt` NullReferenceException(“Render Graph Execution
+    error”)을 낸다 — 캡처의 uGUI 레이어를 그리는 숨은 UI 카메라(후처리·HDR·MSAA·깊이/불투명 텍스처 없음)가 그랬고, selftest 1번의 uGUI 합성(빨강·파랑 캔버스가 빠짐)과
+    연속 캡처(`stage=runtime`)가 빨갰다. → `CaptureUi.RenderWithoutFeatures`: 그 카메라의 렌더러 feature를 그 렌더 동안 `SetActive(false)`(필드 하나 — 에셋을 dirty로
+    만들지 않음), 끝나면 켠다. 게임도 오버레이 캔버스를 카메라 뒤에 feature 없이 그리므로 더 게임과 같다(전체 화면 feature가 UI 레이어를 덮지 않음).
+  - 해 보고 하지 않은 것: 캡처 직전에 같은 카메라를 한 번 그려 버리고 `GL.Flush`(창 없는 에디터의 O-11 우회를 모든 모드로) — 편집 모드 실험으로는 맞았지만 플레이 중
+    GUI 부하에서 10번 중 6번 B였고, 렌더 횟수가 바뀌어 디더링(URP 후처리의 블루 노이즈 순번)이 밀려 모든 샷이 ±4(픽셀 63만 개) 바뀌었다 → 되돌림.
+  - 검증(6.3 창 에디터): ScreenSpace에서 그냥 3회 + GUI 부하 8회 = 세 샷 모두 픽셀까지 같음(maxDiff 0). selftest 1번에 두 검사: 루프 2·3이 루프 1과 **maxDiff 0**
+    (예전엔 `same`이면 통과), 모든 창을 매 업데이트마다 다시 그리는 플레이의 루프도 maxDiff 0(arm은 플레이 모드를 나가면 스스로 꺼짐; 다시 그리기 181회).
+    그 검사는 메모리에서 DBuffer로 되돌린 상태에서 3/3 B를 잡았다.
+    - 매트릭스(커밋 `W13 wip`): 샘플 selftest 1–8 녹색 538.6 s(`896e67fc`, 줄 64/71/77/87; 1번 94.7 s — `goldenMaxDiff` 0, 다시 그리기 루프 181회·maxDiff 0,
+      커밋된 기준 이미지 3/3 같음).
+      9: 새 클론 6.3 녹색 703.8 s(selftest 609.8 s — 1번 213.9 s(첫 플레이어 빌드 121 s 포함), 3번 80.0 s; 루프 3회 `896e67fc` = 메인 트리, `goldenMaxDiff` 0·
+      다시 그리기 루프 181회 maxDiff 0·커밋된 기준 이미지 3/3 같음, 플레이어 447 fps, `git status` 깨끗), 6.0 녹색 533.6 s(selftest 450.1 s; `8acf308c`,
+      `goldenMaxDiff` 0 — W12에서는 47, 다시 그리기 maxDiff 0, 플레이어 단계는 전처럼 건너뜀), 6.6 녹색 755.5 s(selftest 646.1 s; `6b943b54`, `goldenMaxDiff` 0,
+      다시 그리기 maxDiff 0, 플레이어 429 fps) — 세 버전 샷 72.6/61.3/48.2, `git status`는 버전 전환 파일뿐.
+      10: BagelGame 녹색 44.4 s(루프 3회 `619be553`, 출시 빌드 `Managed/` 132개·`Harness.*` 0개), Fluid-Sim 녹색 27.9 s(`54880f05`, 103개·0개), 사내 프로젝트 A 녹색
+      76.0 s(`brd-attach.json`, `6664b723`; uGUI 위주 — feature를 끈 UI 카메라로 합성한 로그인 대화상자가 W12 샷과 같은 배치, 다른 픽셀은 실행마다 바뀌는 배경 연출로
+      W6a·W6b 샷끼리도 그만큼 다름) — 셋 다 W12와 같은 fingerprint, 제거 뒤 `git status` 비어 있음.
+  - 남은 것: URP 쪽 두 건(DBuffer 데칼의 흔들림, ScreenSpace 데칼 패스의 NRE)은 신고(상시). 게임에서 DBuffer 데칼을 쓰면 그 가장자리 몇 픽셀은 여전히 실행마다 갈릴 수
+    있다(허용치 안 — CLAUDE.md "기준 이미지").
 
 - [x] **G2-5 핫 루프는 `[CodeReload]` 메서드 본문만 받는다** (2026-10-01, W12 — 하네스 쪽; `try/catch`·예외 줄은 Pipeline, 상시)
   - 조사: Pipeline 0.8.0-exp.1의 교체는 파일당 **첫 번째 `[CodeReload]` 클래스 하나**만 다룬다(`InPlaceReloadProcessor.ExtractCodeReloadableMethods`; 중첩 타입·두 번째

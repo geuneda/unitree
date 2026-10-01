@@ -357,7 +357,8 @@ var stone = MeshBuilder.FromSdf(p => Sdf.SmoothSubtract(Sdf.RoundBox(p, half, 0.
 var arch  = MeshBuilder.Tube(new Spline(points), t => Mathf.Lerp(0.55f, 0.32f, Mathf.Sin(t * Mathf.PI)), segments: 96, radialSegments: 16);
 var rock  = MeshBuilder.Rock(seed, radius: 1f, subdivisions: 2, roughness: 0.4f);
 foreach (var p in Scatter.Poisson(new Rect(-150, -150, 300, 300), minDistance: 5.5f, seed)) { /* 높이·경사로 거르고 */ all.Append(rock, Matrix4x4.TRS(...)); }
-// 데칼(URP): 렌더러에 DecalRendererFeature가 있어야 그린다(ISettingsStep에서 SettingsContext.AddRendererFeature<DecalRendererFeature>)
+// 데칼(URP): 렌더러에 DecalRendererFeature가 있어야 그린다(ISettingsStep에서 SettingsContext.AddRendererFeature<DecalRendererFeature>).
+//   샘플은 ScreenSpace: decals => SettingsContext.Set(decals, "m_Settings.technique", 2) — DBuffer(데스크톱 기본)는 가장자리 픽셀이 실행마다 갈릴 수 있다(G3-15)
 ctx.Decal("Props/Runes", ctx.DecalMaterial("Runes", runeTexture), new Vector3(8f, 8f, 3f)).transform.localPosition = new Vector3(0, 1.5f, 0);
 // 가까이서 선명하게: URP Lit 디테일 맵(타일링)
 ctx.LitMaterial("Terrain", m => { m.BaseMap = albedo; m.DetailAlbedoMap = detail; m.DetailNormalMap = detailNormal; m.DetailTiling = new Vector2(80, 80); });
@@ -595,6 +596,9 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
   `tools/player.ps1`: 캡처 크기의 플레이어 창을 그대로 찍어 이 캡처와 비교한다(`screen.vsShot`/`screen.vsEditor`, 위 "플레이어에서 돌리기").
   - 빠지는 것: 타깃 텍스처가 있는 패널(게임의 render-to-texture UI), 다른 디스플레이 → `"screen"`. 캡처가 비었는데(`blank`) 화면에 그리는
     카메라 중 그리지 않은 것이 있으면 `hint`가 알려 준다.
+  - uGUI 레이어(스택 Overlay 카메라·오버레이 캔버스)를 그리는 숨은 UI 카메라는 렌더러의 renderer feature를 그 렌더 동안 끄고 그린다(W13) — 게임도 오버레이
+    캔버스를 카메라 뒤에 feature 없이 그리고, 전체 화면 feature가 UI 레이어를 덮지 않는다. URP 17.3의 ScreenSpace 데칼 패스는 그런 카메라(중간 텍스처 없음)에서
+    예외를 던졌다(아래 "함정").
   - UI Toolkit 패널은 내부 API(`RuntimePanel.Update`, `UIElementsRuntimeUtility.RepaintPanel/RenderPanel`, 리플렉션)로 즉시 그린다. 없는 Unity 버전이면
     `uiError`로 보고한다(selftest 1번이 버전마다 HUD를 확인, ROADMAP O-9).
 - **연속 캡처(G3-3)**: `{"t": 1.0, "preset": "main", "name": "spin", "frames": 8, "every": 4}` → t부터 4프레임마다 8장을 **한 장의 PNG(시트)**로
@@ -617,8 +621,9 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1                 # 이후
 - Unity 버전마다 따로 둔다(URP 버전마다 렌더가 다르다, P-4). 그 버전 폴더가 없으면 같은 major.minor의 가장 가까운 패치 것과 비교한다(`golden.from`).
   샘플은 6000.3.11f1의 `default` 시나리오 3장을 커밋해 두었다(다른 버전은 `missing`).
 - 판정(`Editor/HarnessGolden.cs`): 채널 차이가 24 넘는 픽셀이 0.01% 넘거나 평균 차이(`meanDiff`, 0..255)가 0.5 넘으면 `changed`. 같은 머신·같은 버전은
-  **픽셀까지 같다**(고정 시간 간격: 측정 diff 0) — 하나 예외: 샘플 closeup 샷의 받침대·룬 데칼 모서리 픽셀 6–7개는 실행마다 두 값 중 하나다(채널 차이 최대 47, ~0.0008%,
-  허용치 안이라 `same`; ROADMAP G3-15). 허용치는 다른 GPU·드라이버용인데 아직 재지 않았다(ROADMAP P-3). 크기가 다르면 `size`.
+  **픽셀까지 같다**(고정 시간 간격: `maxDiff` 0 — 플레이 동안 에디터 창이 계속 다시 그려져도, selftest 1번). 예외는 URP의 **DBuffer 데칼**(데스크톱 Automatic의
+  기본값): 마지막 카메라 렌더와 캡처 사이에 에디터 GUI가 그렸는지에 따라 데칼 가장자리 픽셀 몇 개가 달라진다(SMAA가 키움 — 샘플에서 6–7픽셀, 채널 차이 47,
+  허용치 안이라 `same`; 아래 "함정"). 픽셀까지 같아야 하면 ScreenSpace 데칼을 쓴다(샘플). 허용치는 다른 GPU·드라이버용인데 아직 재지 않았다(ROADMAP P-3). 크기가 다르면 `size`.
   `changed`면 `<Out>/golden/<샷>.diff.png`: 샷을 어둡게, 바뀐 픽셀 빨강(진할수록 많이), 뺀 영역 파랑, 바뀐 범위 노란 테두리(`rect` = `[x, y, w, h]`, 왼쪽 위 기준).
 - **실패로 치지 않는다** — 루프는 의도한 변경 중에도 녹색이다. 의도하지 않은 `changed`(다른 모듈 작업, 렌더 설정 이전 W4)를 잡는 용도.
 - 매번 다른 글자(시계·네트워크 값)가 있는 샷: 캡처에 `"ignore": [{"x": 0.8, "y": 0, "w": 0.2, "h": 0.1}]`(이미지 비율, 왼쪽 위 기준)로 그 영역을 빼거나
@@ -851,12 +856,12 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
 ## 하네스 자기 검증 (tools/selftest.ps1)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~11–14분(O-12 포함)
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 1d7568ed
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~9–14분(O-12 포함)
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 896e67fc
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
 - 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark/magenta 없음, 모든 샷 1280x720에 HUD 합성, 기준 이미지: 루프 1이 `HarnessOut/selftest/golden`에
-  쓰고 2·3이 픽셀까지 같음, 커밋된 이 버전의 기준 이미지와 같음, `harness_golden`의 `ignore`·패치 버전 대체) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
+  쓰고 2·3이 픽셀까지 같음(maxDiff 0), 모든 에디터 창을 매 업데이트마다 다시 그리는 플레이의 루프도 픽셀까지 같음(G3-15), 커밋된 이 버전의 기준 이미지와 같음, `harness_golden`의 `ignore`·패치 버전 대체) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
   uGUI 합성(편집 모드, 저장하지 않는 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·스택 UI 카메라의 캔버스 → 순서, 선형 공간 블렌드 오차 ≤ 2, 되돌림) +
   카메라(G3-7, 픽스처: 메인 카메라 자식인 스택 Overlay 카메라가 그리는 쿼드가 메인·다른 포즈 모두 화면 중앙, 미니맵 Base 카메라가 오른쪽 위, 앞 depth 카메라는 덮임,
   `"camera"`로 미니맵만, 메인 카메라·타깃·스택 되돌림, 씬 dirty 아님) + 플레이 중 픽스처(오버레이 캔버스·스택 카메라)와 연속 캡처(2x2 시트, `motion` > 0) +
@@ -911,14 +916,14 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-10-01 W12, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W10에서 지형·소품이 레이어 Ground·Props로 가고 소유한 프로젝트 설정 값이 더해져 새 값,
-  W11·W12는 그대로 — 6.6은 에디터 창이 있는 화면의 DPI에 따라 fingerprint가 달랐는데(150% 화면 `9950ea8a`, ROADMAP G1-6) W11에서 고정했다):
+- 검증한 버전(2026-10-01 W13, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W13에서 샘플의 데칼이 ScreenSpace로 바뀌어(렌더러 설정값) 새 값
+  — 6.6은 에디터 창이 있는 화면의 DPI에 따라 fingerprint가 달랐는데(150% 화면, ROADMAP G1-6) W11에서 고정했다. 세 버전 모두 selftest 1번의 루프끼리 `maxDiff` 0):
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
-  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `330ebb7a…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크·`-automated`·창 없는 전용 에디터 포함), 샷 72.6/61.3/48.2(6.3과 같음). 플레이어 단계는 건너뜀 — 6.3이 저장한 URP 전역 설정(에셋 버전 10)을 URP 17.0(8)이 빌드에 거부 |
-  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `1d7568ed…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 실행 포함), 커밋된 기준 이미지와 같음 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `995ce417…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 312–414 fps), 샷 72.6/61.3/48.3. `render.batches`는 null(6.6엔 그 카운터가 없다, 아래 "함정") |
+  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `8acf308c…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크·`-automated`·창 없는 전용 에디터 포함), 샷 72.6/61.3/48.2(6.3과 같음). 플레이어 단계는 건너뜀 — 6.3이 저장한 URP 전역 설정(에셋 버전 10)을 URP 17.0(8)이 빌드에 거부 |
+  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `896e67fc…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 실행 포함), 커밋된 기준 이미지와 같음 |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `6b943b54…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 312–429 fps), 샷 72.6/61.3/48.2. `render.batches`는 null(6.6엔 그 카운터가 없다, 아래 "함정") |
 
   `-automated`·`-debugCodeOptimization`·`-batchmode -ignoreCompilerErrors`와 창 없는 에디터의 렌더(O-11 우회 포함)는 세 버전에서 같게 동작했다.
 
@@ -1155,6 +1160,16 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   보였다 → 캡처는 그 카메라의 HDR 형식 RT에 그린 뒤 8비트 sRGB로 `Blit`해 읽는다(같은 프레임 비교 0.06% → 워터마크만, 기준 이미지 갱신).
 - Unity는 `Library/` 안으로 플레이어를 빌드하지 않는다(`Invalid build path ... internal work directory`) → `HarnessOut/player-build/`.
 - **URP는 대상 텍스처가 있는 카메라의 MSAA를 그 텍스처의 `antiAliasing`으로 정한다**(`InitializeStackedCameraData`) → 1샘플 캡처 RT는 MSAA를 껐다.
+- **URP의 DBuffer 데칼은 그 앞에 에디터 GUI가 그렸는지에 따라 가장자리 픽셀이 달랐다**(W13, G3-15; URP 17.3, D3D11): 같은 코드의 루프끼리 샘플 closeup의 룬 원이
+  받침대 모서리와 만나는 픽셀 6–7개가 두 값 중 하나였다(채널 차이 47). 플레이 중 마지막 카메라 렌더와 캡처 사이에 에디터 창이 다시 그려지면 데칼 가장자리 2픽셀이
+  2–3단계 달라지고 SMAA의 에지 판정이 그것을 키운다. `InternalEditorUtility.RepaintAllViews()`를 매 에디터 업데이트마다 부르면 10/10, 그냥 두면 1/15. 편집 모드에서는
+  에디터 프레임마다 첫 캡처만 달랐고, 같은 프레임에 앞서 그린 카메라 렌더가 GPU로 넘어간 뒤(`ReadPixels`·`AsyncGPUReadback`·`GL.Flush`)에는 같았다. 렌더 그래프 텍스처
+  풀·`UNITY_HDR_ON`·`GL.sRGBWrite`·SSAO·그림자·디더링·`copyDepthMode`·`intermediateTextureMode`는 원인이 아니었다. 캡처 직전에 한 번 더 그려 버리는 우회는 플레이 중
+  GUI 부하에서 듣지 않았고 디더링 순번만 밀었다. ScreenSpace 데칼은 같은 부하에서 8/8 픽셀까지 같았다 → 샘플은 ScreenSpace, selftest 1번이 그 부하로 본다.
+- **URP 17.3의 ScreenSpace 데칼 패스는 중간 텍스처 없는 카메라에서 예외를 던진다**: `DecalScreenSpaceRenderPass`가 `resourceData.cameraColor`로
+  `RenderingUtils.SetScaleBiasRt`를 부르는데, 후처리·HDR·MSAA·깊이/불투명 텍스처 없이 타깃에 바로 그리는 카메라에서는 그 핸들이 비어 NullReferenceException →
+  "Render Graph Execution error". 캡처의 uGUI 레이어를 그리는 숨은 UI 카메라가 그런 카메라라 uGUI 합성이 비고 플레이 중 캡처가 런타임 에러를 냈다 → 그 카메라는
+  렌더러의 renderer feature를 끄고 그린다(`CaptureUi.RenderWithoutFeatures`). 게임의 그런 카메라(후처리 없는 보조 카메라)는 여전히 이 에러를 낸다(URP 쪽).
 - **Unity의 증분 플레이어 빌드가 앞선 빌드의 플레이어 데이터를 다시 썼다**: 출시 빌드(하네스 없음) 뒤 같은 프로젝트의 개발 빌드에서 "player data was not rebuilt"와
   함께 `ScriptingAssemblies.json`이 출시 빌드 목록 그대로 → `Harness.Runtime.dll`은 Managed에 있는데 로드되지 않아 `RuntimeInitializeOnLoadMethod`가 불리지 않았다
   (`RuntimeInitializeOnLoads.json`에는 있음). `CleanBuildCache`면 맞게 나온다(Fluid-Sim 9.6 s). 개발 → 출시 순서는 괜찮았다.
@@ -1196,7 +1211,7 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - 에디터 플레이 모드 FPS는 에디터 오버헤드·autotick 영향을 받는다. 절대값이 아니라 **변경 전후 비교**용이다(`editorFocused` 확인). 실제 성능은
   `tools/player.ps1`(개발 빌드 플레이어, 샘플은 에디터의 ~3.8배).
 - Code Optimization은 Debug(정확한 예외 줄 번호). Release면 throw 위치가 메서드 끝 줄로 보고되고, **절차적 메시·텍스처의 float 결과가 달라져
-  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `1d7568ed…`).
+  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `896e67fc…`).
   `CompilationPipeline.codeOptimization`은 에디터 세션 동안만 유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다
   → `HarnessCodeOptimization`([InitializeOnLoad])이 도메인이 로드될 때마다 이 프로젝트만 Debug로 되돌린다(재컴파일 1회; 그래서 이 프로젝트에선
   Release가 유지되지 않는다). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다. `open.ps1`은 명령줄 `-debugCodeOptimization`으로 열어서

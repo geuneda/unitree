@@ -113,7 +113,8 @@ powershell -ExecutionPolicy Bypass -File tools/player.ps1 [-Scenario tools/scena
 - 그 위에 **스크린 공간 UI(uGUI 캔버스, UI Toolkit 패널)를 캡처 크기로 다시 배치해 합성**한다 → 메뉴·HUD·팝업이 사람의 Game 뷰 크기와 상관없이 같은
   모양으로 찍힌다. `shotStats[].ui`(아래부터): 메인 카메라와 다른 Base 카메라의 Screen Space - Camera 캔버스는 그 카메라가 그리고(후처리 포함), 스택
   Overlay 카메라의 캔버스(렌더 요청으로는 그려지지 않는다)는 카메라들 위에, 오버레이 캔버스·UI Toolkit 패널은 맨 위에(sortingOrder 순). 캔버스 모드·카메라
-  타깃·패널 타깃을 잠깐 바꿨다 같은 프레임에 되돌린다 — UI 코드가 크기 변화에 반응해 게임이 이상해지면 그 캡처에 `"ui": false`.
+  타깃·패널 타깃을 잠깐 바꿨다 같은 프레임에 되돌린다 — UI 코드가 크기 변화에 반응해 게임이 이상해지면 그 캡처에 `"ui": false`. uGUI 레이어를 그리는
+  숨은 카메라는 렌더러의 renderer feature를 그 렌더 동안 끈다(게임도 오버레이 캔버스를 feature 없이 그린다).
 - 연속 캡처: `"frames": N`(+ `"every": k`프레임 간격)이면 t부터 N프레임을 **한 장의 PNG(시트, 칸마다 t)**로 찍는다. `shotStats[]`에 `frames`, `sheet`(열x행),
   `times`, `motion`(프레임 사이 평균 밝기 차이, 0이면 아무것도 안 움직임). 포즈는 첫 프레임에 고정(`"main"`·`"camera"`는 카메라를 따라감).
 - 캡처 크기: 시나리오 `"width"`/`"height"` → 설정 `captureSize` → 세로 게임(Player Settings 기본 방향)이면 720x1280, 아니면 1280x720.
@@ -122,7 +123,9 @@ powershell -ExecutionPolicy Bypass -File tools/player.ps1 [-Scenario tools/scena
 
 - `tools/loop.ps1 -UpdateGolden`: 루프가 녹색이면 샷을 `golden/<Unity 버전>/<시나리오 name>/<샷 파일>.png`로 쓴다(그 폴더의 다른 PNG는 지움). 커밋한다.
 - 이후 루프마다 같은 이름의 기준 이미지와 비교한다(`report.golden`: `same`/`changed`/`missing` 수, 샷마다 `shotStats[].golden`: `meanDiff`, `changedRatio`,
-  `ssim`, `rect` = 바뀐 곳 `[x, y, w, h]` 픽셀(왼쪽 위 기준), `diff` = 바뀐 픽셀을 빨강으로 칠한 PNG). 같은 머신·같은 버전이면 픽셀까지 같다.
+  `ssim`, `rect` = 바뀐 곳 `[x, y, w, h]` 픽셀(왼쪽 위 기준), `diff` = 바뀐 픽셀을 빨강으로 칠한 PNG). 같은 머신·같은 버전이면 픽셀까지 같다 — 단 URP의
+  DBuffer 데칼(데스크톱 기본)은 캡처 전에 에디터 창이 다시 그려졌는지에 따라 가장자리 픽셀 몇 개가 달라질 수 있다(허용치 안이라 `same`; 픽셀까지 같아야 하면
+  DecalRendererFeature의 technique을 Screen Space로).
   채널 차이 24 초과 픽셀이 0.01% 넘거나 평균 차이가 0.5 넘으면 `changed`. 실패로 치지 않는다.
 - 에디터의 Asynchronous Shader Compilation이 켜져 있으면 임포트 직후·새 머신의 첫 캡처에서 셰이더가 컴파일 중인 오브젝트가 빠진다(`shotStats[].shadersCompiling`).
   기준 이미지를 쓰려면 끈다: `& ./tools/uc.ps1 harness_setup '{"apply":"syncShaders"}'`(Editor 설정 한 줄; 그동안 그 프레임이 컴파일을 기다린다).
