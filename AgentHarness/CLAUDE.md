@@ -599,6 +599,7 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
   - `x`,`y`는 Game 뷰 픽셀(원점 왼쪽 아래). Game 뷰 크기는 사용자 레이아웃이라 매번 다를 수 있다 → 같은 곳을 눌러야 하면
     `"mouseSpace": "normalized"`(0..1)나 `click`의 `target`을 쓴다.
   - `target`: GameObject 이름·경로(uGUI 요소면 그 사각형 중심, 아니면 렌더러/콜라이더 중심을 메인 카메라로 투영) 또는 UI Toolkit 요소 이름
+    (`UIDocument`와 6.5+의 `PanelRenderer` 문서 — W20)
     (스크린 공간 패널, 6.2+ 월드 공간 패널은 메인 카메라로 투영). 찾은 좌표와 방법(`ugui`/`world`/`uitk`/`uitk-world`)은 `play.clicks`에 남는다.
 - 대기 이벤트(시나리오 시계를 멈춘다 → 뒤의 이벤트·캡처가 그 순간 기준): `waitScene`(`scene` = 이름·경로, 로드될 때까지) ·
   `waitTarget`(`target`이 활성·표시될 때까지). `timeoutSec`(기본 30, 벽시계) 안에 안 되면 시나리오 실패. 걸린 시간은 `play.waits`,
@@ -1213,6 +1214,14 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   uGUI + `InputSystemUIInputModule`은 `runInBackground`면 포커스를 무시한다. 시나리오 동안은 하네스가 UI Toolkit 쪽 판정을 끈다(G3-14).
 - **6.6은 코드로 만든 `PanelSettings`에 에디터 창이 있는 화면의 DPI를 넣는다**(`referenceDpi`: 150% 화면 144, 창 없는 에디터 96; 6.3·6.0은 96) → 빌더가 만들면 에셋과
   fingerprint가 화면을 따라간다(G1-6). `ctx.UIDocument`는 96으로 고정한다 — PanelSettings를 직접 만들면 `referenceDpi`·`fallbackDpi`를 정할 것.
+- **Input System 1.20은 임시 설정(`HideAndDontSave`)을 다른 설정으로 바꾸는 순간 파괴한다**(`InputManager.settings` setter의 `DestroyImmediate`, 1.19에는 없음). 설정 에셋이 없는
+  프로젝트의 기본 설정이 그 임시 설정이다. `ScriptedInput`이 복사본으로 바꾸던 동안 원본이 파괴돼, 프로젝트 B(W20)에서 에디터를 연 뒤 첫 루프만 녹색이고 그 뒤로는
+  `InputSettings has lost its native object` → 입력 0이었다. 임시 설정은 그 자리에서 값만 바꿨다가 되돌린다. `InputSystem.settings = x`를 새로 쓰면 나가는 쪽이 임시인지 볼 것.
+- **6.5+의 `PanelRenderer`(`UIDocument`를 대신하는 `Renderer`)는 `rootVisualElement`가 internal이다**(공개 API로는 `RegisterUIReloadCallback`의 콜백 인자로만). 문서를 찾을 때는
+  `FindObjects<UIDocument>`가 아니라 `UnityCompat.PanelDocuments()`(UIDocument + PanelRenderer, 루트는 `IPanelComponent.GetRootVisualElement` 리플렉션)를 쓴다 — 아니면 그 프로젝트의
+  UI는 `click`·`waitTarget`·캡처 합성에서 없는 것이 된다(W20).
+- **lint의 static-reset은 Player 어셈블리 목록 기준이라 Development Build가 꺼지면 `Harness.Runtime`이 빠졌다**(define 제약 `UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME`).
+  샘플은 하네스 런타임의 static을 검사하지 않았고 W16의 `CaptureUi` 캐시가 개발 빌드 프로필인 프로젝트 B에서 처음 걸렸다 → 이제 에디터 어셈블리 목록에서 더해 늘 검사한다.
 - **Input System이 포커스를 아는 경로는 `Application.focusChanged` 하나다** → 테스트에서는 내부 `Application.InvokeFocusChanged(bool)`로 포커스 잃음·복귀를 만든다
   (selftest 1번). OS 포커스를 실제로 옮기면(다른 창 앞으로) 사람이 쓰는 창과 다투어 불안정하다. 도메인 리로드 뒤에는 다른 창이 앞에 있어도 `Application.isFocused`가
   true일 수 있다(ROADMAP O-13) — `fps.editorFocused`는 참고값이다.

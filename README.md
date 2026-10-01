@@ -165,6 +165,8 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
   그리고 비공개 사내 모바일 게임 1개(URP, Addressables, 씬 22개, asmdef 35개, C# 4,400개, 부트 → 로그인 → 타이틀 → 로비): 설치 → 루프 3회 녹색 →
   제거 후 `git status` 깨끗(로비까지 도는 시나리오로 135 s). Windows 타깃으로 바꾼 그 클론에서는 개발 빌드 플레이어(실제 화면 = 캡처)와 출시 빌드
   (`Harness.*` 없음)까지 `attach-test.ps1 -Player` 한 번 녹색(202 s). Fluid-Sim은 `HarnessInput`으로 구 Input Manager 입력(스페이스 일시정지, 마우스 궤도)까지.
+  비공개 프로젝트 B(Unity 6.6, UI는 `PanelRenderer`, Input System 1.20, FishNet 호스트 싱글)는 부트 → 메뉴(버튼을 이름으로 클릭) → 인게임 → 이동 루프 3회 녹색(2.7–3.6 s) —
+  여기서 드러난 `PanelRenderer` 미지원, Input System 1.20이 임시 입력 설정을 파괴하던 것, lint가 Development Build 없이는 하네스 런타임을 안 보던 것을 W20에서 고쳤습니다.
 
 | BagelGame (URP) 메인 메뉴 | Fluid-Sim (Built-in) 입자 시뮬레이션 |
 |---|---|

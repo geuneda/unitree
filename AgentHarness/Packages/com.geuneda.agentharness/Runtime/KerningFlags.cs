@@ -49,8 +49,8 @@ namespace Harness
                         if (list[i].featureLookupFlags != FontFeatureLookupFlags.None) list[i] = WithoutFlags(list[i]);
             }
             if (cleared > 0)
-                foreach (var doc in UnityCompat.FindObjects<UIDocument>(FindObjectsInactive.Exclude))
-                    doc.rootVisualElement?.Query<TextElement>().ForEach(t => t.MarkDirtyText());
+                foreach (var doc in UnityCompat.PanelDocuments())
+                    doc.root?.Query<TextElement>().ForEach(t => t.MarkDirtyText());
         }
 
         static GlyphPairAdjustmentRecord WithoutFlags(GlyphPairAdjustmentRecord r)

@@ -512,9 +512,9 @@ namespace Harness
                 via = "world";
                 return true;
             }
-            foreach (var doc in UnityCompat.FindObjects<UIDocument>(FindObjectsInactive.Exclude))
+            foreach (var doc in UnityCompat.PanelDocuments())
             {
-                var root = doc.rootVisualElement;
+                var root = doc.root;
                 var el = root?.Q(target);
                 var panelRoot = root?.panel?.visualTree;
                 if (el == null || panelRoot == null) continue;
@@ -522,13 +522,13 @@ namespace Harness
                 var b = el.worldBound;
                 if (float.IsNaN(b.x) || b.width <= 0f || b.height <= 0f || el.resolvedStyle.display == DisplayStyle.None || el.resolvedStyle.visibility != Visibility.Visible) continue;
                 var c = b.center;
-                if (UnityCompat.IsWorldSpace(doc.panelSettings))
+                if (UnityCompat.IsWorldSpace(doc.settings))
                 {
                     // A panel in the world: bounds are in the document's local units, y up (checked against a menu's button
                     // order); project that point with the main camera.
                     var worldCam = HarnessCapture.FindMainCamera();
                     if (worldCam == null) continue;
-                    var wp = worldCam.WorldToScreenPoint(doc.transform.TransformPoint(new Vector3(c.x, c.y, 0f)));
+                    var wp = worldCam.WorldToScreenPoint(doc.component.transform.TransformPoint(new Vector3(c.x, c.y, 0f)));
                     if (wp.z <= 0f) continue;
                     point = wp;
                     via = "uitk-world";

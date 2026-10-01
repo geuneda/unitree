@@ -449,7 +449,7 @@ namespace Harness
                 var overlay = 0;
                 foreach (var c in UnityCompat.FindObjects<Canvas>(FindObjectsInactive.Exclude))
                     if (c.isRootCanvas && c.renderMode != RenderMode.WorldSpace) overlay++;
-                var panels = UnityCompat.FindObjects<UnityEngine.UIElements.UIDocument>(FindObjectsInactive.Exclude).Length;
+                var panels = UnityCompat.PanelDocuments().Count;
                 if (overlay > 0 || panels > 0)
                     parts.Add($"the capture left out screen-space UI (\"ui\": false; {overlay} canvas(es), {panels} UI Toolkit document(s) here)");
             }

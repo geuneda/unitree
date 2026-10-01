@@ -70,6 +70,14 @@ namespace Harness.Editor
                 if (module.Length > 0 && (module != "Harness" || a.name == "Harness.Runtime"))
                     runtimeAsms[a.name] = src;
             }
+            // Harness.Runtime is a Player assembly only when its define constraint holds there (DEVELOPMENT_BUILD): a project
+            // without Development Build never checked the harness's own statics, and an attached project with it failed on them.
+            if (!runtimeAsms.ContainsKey("Harness.Runtime"))
+            {
+                var harness = HarnessPaths.Assemblies(AssembliesType.Editor).FirstOrDefault(a => a.name == "Harness.Runtime");
+                var src = harness?.sourceFiles.FirstOrDefault();
+                if (src != null) runtimeAsms["Harness.Runtime"] = src.Replace('\\', '/');
+            }
 
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {

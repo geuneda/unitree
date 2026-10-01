@@ -26,6 +26,9 @@ namespace Harness
         GamepadState m_Pad;
         InputSettings m_OriginalSettings;
         InputSettings m_RuntimeSettings;
+        bool m_InPlace;
+        InputSettings.BackgroundBehavior m_SavedBackground;
+        InputSettings.EditorInputBehaviorInPlayMode m_SavedEditorBehavior;
 
         public string Name => "inputSystem";
 
@@ -34,14 +37,27 @@ namespace Harness
         public static ScriptedInput Create(bool keyboard, bool mouse, bool gamepad)
         {
             var si = new ScriptedInput();
-            // Work on a copy so the project's settings asset is never modified.
             si.m_OriginalSettings = InputSystem.settings;
-            si.m_RuntimeSettings = UnityEngine.Object.Instantiate(si.m_OriginalSettings);
-            si.m_RuntimeSettings.name = "HarnessInputSettings";
-            si.m_RuntimeSettings.hideFlags = HideFlags.HideAndDontSave;
-            si.m_RuntimeSettings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
-            si.m_RuntimeSettings.editorInputBehaviorInPlayMode = InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
-            InputSystem.settings = si.m_RuntimeSettings;
+            // A project without an InputSettings asset runs on temporary settings (HideAndDontSave), and Input System 1.20
+            // destroys temporary settings that new settings replace: swapping in a copy left the Input System on that copy,
+            // destroyed by Dispose, so every later play failed ("InputSettings has lost its native object"). Temporary
+            // settings are changed in place and put back by Dispose (the Input System also restores them on leaving Play
+            // mode); an asset is replaced by a copy so the project's asset is never modified.
+            si.m_InPlace = si.m_OriginalSettings.hideFlags == HideFlags.HideAndDontSave;
+            if (si.m_InPlace)
+            {
+                si.m_SavedBackground = si.m_OriginalSettings.backgroundBehavior;
+                si.m_SavedEditorBehavior = si.m_OriginalSettings.editorInputBehaviorInPlayMode;
+                SetFocusIgnored(si.m_OriginalSettings);
+            }
+            else
+            {
+                si.m_RuntimeSettings = UnityEngine.Object.Instantiate(si.m_OriginalSettings);
+                si.m_RuntimeSettings.name = "HarnessInputSettings";
+                si.m_RuntimeSettings.hideFlags = HideFlags.HideAndDontSave;
+                SetFocusIgnored(si.m_RuntimeSettings);
+                InputSystem.settings = si.m_RuntimeSettings;
+            }
 
             if (keyboard) si.Keyboard = InputSystem.AddDevice<Keyboard>("HarnessKeyboard");
             if (mouse) si.Mouse = InputSystem.AddDevice<Mouse>("HarnessMouse");
@@ -52,6 +68,12 @@ namespace Harness
             si.Mouse?.MakeCurrent();
             si.Gamepad?.MakeCurrent();
             return si;
+        }
+
+        static void SetFocusIgnored(InputSettings settings)
+        {
+            settings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
+            settings.editorInputBehaviorInPlayMode = InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
         }
 
         public bool Apply(ScenarioEvent e)
@@ -160,8 +182,13 @@ namespace Harness
             if (Mouse != null && Mouse.added) InputSystem.RemoveDevice(Mouse);
             if (Gamepad != null && Gamepad.added) InputSystem.RemoveDevice(Gamepad);
             Keyboard = null; Mouse = null; Gamepad = null;
-            if (m_OriginalSettings != null && InputSystem.settings == m_RuntimeSettings)
-                InputSystem.settings = m_OriginalSettings;
+            if (m_InPlace && m_OriginalSettings != null)
+            {
+                m_OriginalSettings.backgroundBehavior = m_SavedBackground;
+                m_OriginalSettings.editorInputBehaviorInPlayMode = m_SavedEditorBehavior;
+            }
+            if (!m_InPlace && m_OriginalSettings != null && InputSystem.settings == m_RuntimeSettings)
+                InputSystem.settings = m_OriginalSettings;   // 1.20 destroys the copy here (temporary settings)
             if (m_RuntimeSettings != null)
             {
                 if (Application.isPlaying) UnityEngine.Object.Destroy(m_RuntimeSettings);

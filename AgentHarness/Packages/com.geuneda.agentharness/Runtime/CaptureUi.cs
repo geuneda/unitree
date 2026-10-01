@@ -106,13 +106,13 @@ namespace Harness
                 ui.m_Layers.Add(layer);
             }
             var seen = new HashSet<PanelSettings>();
-            foreach (var d in UnityCompat.FindObjects<UIDocument>(FindObjectsInactive.Exclude))
+            foreach (var d in UnityCompat.PanelDocuments())
             {
-                var ps = d.panelSettings;
-                if (!d.isActiveAndEnabled || ps == null || !seen.Add(ps)) continue;
+                var ps = d.settings;
+                if (!d.active || ps == null || !seen.Add(ps)) continue;
                 // A panel with a target texture is the game's own render-to-texture UI (part of the scene, if shown at all).
                 if (UnityCompat.IsWorldSpace(ps) || ps.targetTexture != null || ps.targetDisplay != 0) continue;
-                var panel = d.rootVisualElement?.panel;
+                var panel = d.root?.panel;
                 if (panel == null) continue;
                 ui.m_Layers.Add(new Layer { name = "uitk:" + ps.name, band = 1, order = ps.sortingOrder, kind = 1, settings = ps, panel = panel });
             }
@@ -283,6 +283,14 @@ namespace Harness
         static Type s_TmpUgui;
         static MethodInfo s_TmpForceMeshUpdate;
         static bool s_TmpLooked;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics()
+        {
+            s_TmpUgui = null;
+            s_TmpForceMeshUpdate = null;
+            s_TmpLooked = false;
+        }
 
         /// <summary>Generate the TextMesh Pro texts of a canvas again for its current render mode (ForceMeshUpdate). False = none.</summary>
         static bool RegenerateText(Canvas canvas)

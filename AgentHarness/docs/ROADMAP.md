@@ -17,7 +17,7 @@
 - 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태·워크플로우 절 갱신 → 새로 드러난 항목 추가 →
   **저장소 루트 `README.md`와 `AgentHarness/CLAUDE.md`(필요하면 `Tools~/templates/AgentHarness.md`)에 바뀐 기능·측정값 반영** → 커밋(메시지에 항목 ID).
   README·ROADMAP 갱신은 워크플로우마다 빠뜨리지 않는다(W2 커밋은 README를 건드리지 않았고, W4 뒤에도 README "요구 사항"에 6.6의 옛 상태가 남아 있었다).
-- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W16·W18·W19는 끝났고 W17(macOS)은 부분 완료다(2026-10-02 갱신).
+- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W16·W18–W20은 끝났고 W17(macOS)은 부분 완료다(2026-10-02 갱신).
   W17·W18의 Windows 매트릭스 재확인은 W19에서 완료했다(`56a65a0`의 코드·허용치는 그대로, Windows golden 3장을 교정한 뒤 1–10 녹색; 생략 범위는 W19).
   남은 것: 상시(업스트림 — G2-4의 남은 Unity 쪽 비용, 신고서 초안 [`docs/upstream-reports.md`](upstream-reports.md)의 제출), W17의 남은 것(Mac의 BagelGame·사내 프로젝트 A —
   거기서 G3-18 TMP 커닝 확인, 6.0 Mac), G4-6(6.6 Mac의 씬 반사 프로브가 빌드마다 다름 — 6.6 Mac 매트릭스 9의 selftest 1번이 빨감, 다음 워크플로우 후보),
@@ -45,6 +45,7 @@
 | W17 | macOS | P-3 (+G3-17) | L | 실제 Mac | 부분 완료 (2026-10-02 갱신; Windows 재확인은 W19 완료. Mac의 BagelGame·사내 프로젝트 A(+G3-18)·6.0·G4-6이 남음; G3-17은 W18) |
 | W18 | Mac의 UI Toolkit 글자 결정성 | G3-17 | M | W17, 실제 Mac | 완료 (2026-10-01; 원인은 FontEngine의 커닝 플래그 — 신고는 상시, TMP는 G3-18; 6.6 Mac 매트릭스 9에서 G4-6 발견) |
 | W19 | W17·W18의 Windows 재검증·커닝 기준 이미지 | P-3, G3-17 후속 | S | W18, 실제 Windows | 완료 (2026-10-02; Windows에도 비정상 커닝 플래그가 있었음 — 코드·허용치 변경 없이 golden 3장 교정 후 매트릭스 1–10 녹색, 생략 범위는 아래) |
+| W20 | 기존 프로젝트 B(6.6)에 붙이기 | P-6 | S | — | 완료 (2026-10-02; `PanelRenderer` UI, Input System 1.20의 임시 설정 파괴, lint가 하네스 런타임을 안 보던 것 — 매트릭스 1–8 녹색, 9·10은 안 함) |
 | 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13(URP 데칼)·W15(카메라 상태)·W18(커닝 플래그) 신고([`docs/upstream-reports.md`](upstream-reports.md)), G2-4 재측정 | S | 새 버전이 나올 때 | — |
 
 ### W1 시나리오 입력 격리 (G3-6) — 완료 (2026-09-29, 아래 "해결됨")
@@ -298,6 +299,11 @@
   남지 않았다. 기본 PNG 각 3장·시각 검사 대표 10장·attach 결과 PNG를 모두 Read로 열어 확인했다.
 - 결과 보관: `HarnessOut/windows-56a65a0/`(gitignore), 6.6 최종 결과는 그 아래 `fresh-6.6-retry/`.
 
+### W20 기존 프로젝트 B(Unity 6.6)에 붙이기 (P-6) — 완료 (2026-10-02, 아래 "해결됨")
+- 계기: 비공개 프로젝트 B(6000.6.3f1, Input System 1.20.0, UI는 `PanelRenderer`, 개발 빌드 프로필)에 붙이자 첫 루프만 녹색이었다. 드러난 세 가지(UI Toolkit 문서를
+  `UIDocument`로만 찾음, Input System 1.20이 임시 설정을 파괴, static-reset lint가 Development Build 없이는 `Harness.Runtime`을 안 봄)는 모두 하네스 쪽이고 프로젝트는 고치지 않았다.
+- 검증: 프로젝트 B 루프 3회 연속 녹색, 샘플 매트릭스 1–8 녹색(453.1 s, 214개 검사). 매트릭스 9·10은 돌리지 않았다 — 자세한 것은 "해결됨" P-6.
+
 ### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13·W15·W18 신고, G2-4 재측정)
 - **신고서 초안**: [`docs/upstream-reports.md`](upstream-reports.md) — 항목별 제목·환경·재현·기대 결과(영어 본문)와 상태(재현 확인 1 — W18의 커닝 플래그 / 원인 확인 7 / 재현 필요 7). Unity는 에디터의
   Help > Report a Bug(이메일 + 재현 프로젝트), Pipeline은 공개 저장소가 없어 Unity Discussions(로그인). 사람이 제출한다(계정·이메일이 필요).
@@ -510,6 +516,8 @@ Unity는 6.0 LTS 이상(Windows의 6000.0.84f1·6000.3.11f1·6000.6.3f1 재검�
 - **P-2 기존 Unity 프로젝트에 붙일 수 없다** → 2026-09-29 해결(아래 "해결됨"). 붙인 뒤에도 남은 것은 P-5.
 
 - **P-5 기존 프로젝트에 붙였을 때 아직 안 되는 것** → 2026-09-29 해결(아래 "해결됨").
+
+- **P-6 기존 프로젝트 B(6.6)에서 UI를 못 찾고, 두 번째 루프부터 입력이 죽고, lint가 하네스 자신을 잡는다** → 2026-10-02 해결(W20, 아래 "해결됨").
 
 - **P-4 Unity 6.6(URP 17.6)에서 샘플 씬의 조명이 검게 나온다** → 2026-09-30 해결(W4, 아래 "해결됨"). 원인은 그림자가 아니라
   `Camera.RenderToCubemap(Cubemap)`이 6.6에서 CPU 픽셀을 채우지 않는 것(반사 큐브맵에 초기화 안 된 메모리가 저장됨)이었다. Unity 신고는 "상시".
@@ -732,6 +740,35 @@ Unity는 6.0 LTS 이상(Windows의 6000.0.84f1·6000.3.11f1·6000.6.3f1 재검�
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **P-6 기존 프로젝트 B(6.6)에서 UI를 못 찾고, 두 번째 루프부터 입력이 죽고, lint가 하네스 자신을 잡는다** (2026-10-02, W20)
+  - 현상(전): 비공개 프로젝트 B(6000.6.3f1, URP, Input System 1.20.0, UI는 6.5+의 `PanelRenderer`, FishNet 호스트로 도는 싱글, Domain Reload 꺼짐, 활성 빌드 프로필이
+    개발 빌드)에 `install.ps1`로 붙이고 부트 → 메뉴 → 싱글 → 인게임 → 이동 시나리오를 돌렸다.
+    (1) `waitTarget`·`click`이 UI Toolkit 요소를 `UIDocument`에서만 찾아 메뉴 버튼을 못 찾았다(`no such active, visible GameObject or UI Toolkit element after 30s`). 캡처 UI 합성·커닝 정리·
+    blank 힌트도 그 패널을 몰라 하네스 샷에 HUD가 빠졌다(좌표 클릭 + `"screen"` 캡처로만 우회됨).
+    (2) 에디터를 연 뒤 첫 루프만 녹색이고 그 뒤 루프는 모두 `ScriptedInput.cs:39` `MissingReferenceException`(InputSettings has been destroyed) → 입력 이벤트 0, 에디터 로그에
+    Input System의 `InputSettings has lost its native object` assert(3/3 재현; 같은 에디터에서 하네스 없이 플레이 2회는 0건).
+    (3) 루프가 매번 `stage=lint`: `Harness.CaptureUi`의 TMP 리플렉션 캐시(W16) 정적 필드 3개에 리셋이 없었다.
+  - 원인: (1) `PanelRenderer`(6.5+, `UIDocument`를 대신하는 `Renderer`)는 `rootVisualElement`가 internal이다(공개 API로는 `RegisterUIReloadCallback`의 콜백 인자로만 받는다).
+    `UIDocument`와 같이 구현하는 공개 인터페이스 `IPanelComponent`의 `GetRootVisualElement()`도 internal.
+    (2) **Input System 1.20의 `InputManager.settings` setter는 바뀌어 나가는 설정이 `HideAndDontSave`(설정 에셋이 없는 프로젝트의 임시 기본값)이면 `DestroyImmediate`한다**(1.19에는
+    없는 코드). `ScriptedInput`이 복사본으로 바꾸는 순간 원본이 파괴되고, Dispose는 되돌릴 원본이 없어(`m_OriginalSettings != null`이 거짓) Input System을 그 복사본에 둔 채
+    복사본을 파괴했다 → 다음 플레이부터 Input System이 파괴된 설정을 쥔다. 샘플도 설정 에셋이 없지만 1.19라 드러나지 않았다.
+    (3) static-reset 규칙은 검사할 어셈블리를 Player 어셈블리 목록에서 고르는데, `Harness.Runtime`은 define 제약(`UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME`) 때문에
+    Development Build일 때만 그 목록에 있다 → Development Build가 꺼진 샘플은 하네스 런타임의 static을 한 번도 검사하지 않았고, 개발 빌드 프로필인 프로젝트 B에서 처음 걸렸다.
+  - 고친 것: (1) `UnityCompat.PanelDocuments()` — `UIDocument`와 6.5+의 `PanelRenderer`(루트는 `IPanelComponent.GetRootVisualElement` 리플렉션, `#if UNITY_6000_5_OR_NEWER`)를
+    같은 모양(컴포넌트·활성 여부·PanelSettings·루트)으로 돌려준다. 시나리오 대상 찾기(`waitTarget`·`click`)·캡처 UI 합성·커닝 정리·blank 힌트가 이것을 쓴다.
+    (2) `ScriptedInput` — 원래 설정이 임시(`HideAndDontSave`)면 바꾸지 않고 그 객체의 두 값(`backgroundBehavior`, `editorInputBehaviorInPlayMode`)을 바꿨다가 Dispose에서 되돌린다
+    (Input System도 플레이 모드를 나갈 때 들어가기 전 값으로 덮어쓴다). 설정 에셋이면 전처럼 복사본으로 바꾼다(1.20은 되돌릴 때 임시 복사본을 직접 파괴 — 이미 파괴된 것은
+    건너뜀). (3) `CaptureUi.ResetStatics`, 그리고 lint가 Player 목록에 없는 `Harness.Runtime`을 에디터 어셈블리 목록에서 더해 Development Build와 상관없이 검사한다.
+  - 검증(이 Mac): 프로젝트 B(6000.6.3f1, 이 트리를 `file:` 의존으로) — 시나리오 `waitTarget single-button` → `click single-button`(`play.clicks` `via: uitk`) → `waitTarget crosshair` → W 1.5 s.
+    루프 3회 연속 녹색 3.64 / 2.83 / 2.74 s, lint 0, `editorErrors` 0, assert 0건. `"main"` 캡처 4장에 `uitk:GamePanelSettings`(메뉴, 체력 바·Tab 힌트·조준점 — PNG 확인), 연속 캡처
+    `motion` 2.05–2.40. 루프 뒤 `InputSystem.settings`는 원래 객체이고 기본값(`ResetAndDisableNonBackgroundDevices`, `PointersAndKeyboardsRespectGameViewFocus`). 프로젝트 B의 EditMode
+    구조 테스트 8/8 통과.
+    샘플(6.3, Input System 1.19, `UIDocument`): 루프 녹색·커밋된 Mac 기준 이미지 same 3/3. lint 음성 시험 — `CaptureUi`의 리셋 속성을 빼고 `loop.ps1 -NoPlay` → `stage=lint`
+    (Development Build가 꺼진 샘플에서도 잡음), 되돌리면 녹색. 매트릭스 1–8: 에디터 트리 녹색 453.1 s(214개 검사, `4bb3e16d`, 1번 86.3 s — 루프끼리·repaint·커닝 루프 `maxDiff` 0, 커밋된 Mac 기준 이미지 same 3/3; 8번 126.0 s), 끝난 뒤 `git status` 깨끗.
+  - 안 한 것: 매트릭스 9(새 클론·버전별)·10(`attach-test.ps1`)은 돌리지 않았다. 프로젝트 B에는 월드 공간 `PanelRenderer`가 없어 `uitk-world` 경로는 확인하지 않았다. 6.0은 이번에
+    열지 않았다(PanelRenderer 분기는 6.5 미만에서 컴파일되지 않는다; 6.3은 샘플로 확인).
 
 - [x] **G3-17 Mac에서 같은 코드의 루프끼리 UI Toolkit의 작은 글자가 소수 픽셀 다르게 찍힌다** (2026-10-01, W18; 발견은 W17)
   - 현상(전): 샘플 HUD의 제목(13 px 굵게, 자간 3)·힌트(자간 1)·토스트(굵게, 자간 1)가 요소마다 따로 두 상태 중 하나로 찍혔다(제목 ~490픽셀 = 0.05%, 글자 세로 가장자리만).

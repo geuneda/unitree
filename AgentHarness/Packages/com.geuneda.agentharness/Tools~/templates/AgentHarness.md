@@ -90,7 +90,7 @@ powershell -ExecutionPolicy Bypass -File tools/player.ps1 [-Scenario tools/scena
   "mouseSpace": "pixels",
   "events": [
     { "t": 0.0, "type": "waitTarget", "target": "PlayButton", "timeoutSec": 60 },   // 부트·로딩이 끝나 버튼이 보일 때까지 시계 정지
-    { "t": 0.1, "type": "click", "target": "PlayButton" },                          // uGUI/씬 오브젝트 이름·경로 또는 UI Toolkit 요소 이름
+    { "t": 0.1, "type": "click", "target": "PlayButton" },                          // uGUI/씬 오브젝트 이름·경로 또는 UI Toolkit 요소 이름(UIDocument·PanelRenderer)
     { "t": 0.3, "type": "waitScene", "scene": "Level1", "timeoutSec": 60 },         // 그 씬이 로드될 때까지 시계 정지
     { "t": 1.0, "type": "keyTap", "key": "Space", "hold": 0.1 } ],
   "captures": [ { "t": 0.05, "preset": "main", "name": "menu" },                    // 화면의 카메라들 + 스크린 공간 UI(캡처 크기로 배치)
