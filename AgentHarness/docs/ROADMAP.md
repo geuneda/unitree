@@ -17,9 +17,9 @@
 - 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태·워크플로우 절 갱신 → 새로 드러난 항목 추가 →
   **저장소 루트 `README.md`와 `AgentHarness/CLAUDE.md`(필요하면 `Tools~/templates/AgentHarness.md`)에 바뀐 기능·측정값 반영** → 커밋(메시지에 항목 ID).
   README·ROADMAP 갱신은 워크플로우마다 빠뜨리지 않는다(W2 커밋은 README를 건드리지 않았고, W4 뒤에도 README "요구 사항"에 6.6의 옛 상태가 남아 있었다).
-- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W12는 모두 끝났다(2026-10-01). 남은 것은 상시(업스트림)·마지막(macOS)과
-  아직 워크플로우로 묶지 않은 항목이다: G2-4의 남은 부분(Unity 쪽), G3-8의 사내 프로젝트 확인(Android 타깃 — 사람의 결정), G3-15(픽셀 몇 개의 깜빡임), G4-5(하늘·반사),
-  G5-6(여러 worktree의 ProjectSettings).
+- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W12는 모두 끝났다(2026-10-01). 남은 항목은 W13–W16으로 묶었다
+  (2026-10-01): G3-15(픽셀 몇 개의 깜빡임) → G5-6(여러 worktree의 ProjectSettings) → G4-5(하늘·반사), G3-8의 사내 프로젝트 확인(타깃 전환 허락받음 — 언제든).
+  그 뒤에 남는 것은 상시(업스트림 — G2-4의 남은 Unity 쪽 비용 포함)와 마지막(macOS)이다.
 - 크기: S = 파일 1–2개 · M = 여러 파일 또는 새 커맨드 · L = 조사가 필요하거나 새 하위 시스템.
 
 | 순서 | 워크플로우 | 항목 | 크기 | 선행 | 상태 |
@@ -36,7 +36,11 @@
 | W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 완료 (2026-09-30; 여러 worktree가 같은 ProjectSettings 파일을 바꾸는 경우는 G5-6) |
 | W11 | 백그라운드 에디터의 실제 입력 격리 | G3-9 (+G3-14, G1-6) | S | — | 완료 (2026-10-01) |
 | W12 | 핫 루프 넓히기 | G2-5 | M | W5 | 완료 (2026-10-01; `try/catch`·예외 줄·새 필드는 Pipeline — 상시) |
-| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5 신고 | S | 새 버전이 나올 때 | — |
+| W13 | 같은 코드면 픽셀까지 같은 샷 | G3-15 | M | — | 대기 |
+| W14 | 여러 worktree의 ProjectSettings | G5-6 | M | — | 대기 |
+| W15 | 하늘과 씬 반사 | G4-5 | L | W13 | 대기 |
+| W16 | 사내 프로젝트 A의 플레이어 화면 | G3-8 | S | — | 대기 (타깃 전환 허락받음, 2026-10-01) |
+| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5 신고, G2-4 재측정 | S | 새 버전이 나올 때 | — |
 | 마지막 | macOS | P-3 | L | 실제 Mac | 대기 |
 
 ### W1 시나리오 입력 격리 (G3-6) — 완료 (2026-09-29, 아래 "해결됨")
@@ -170,7 +174,47 @@
 - 하다가 찾은 것: **G3-15** — 같은 코드의 루프끼리 closeup 샷의 받침대·룬 데칼 모서리 픽셀 6–7개가 두 값 중 하나로 찍힌다(허용치 안이라 `same`, W11 실행에도 있었음).
 - 매트릭스 3이 새 단계를 본다: 인터프리터 호출 통계, 새 헬퍼 경유 변경 = 인라인 변경의 샷, `harness_hot check`로 제네릭·오버로드 거부와 안 쓰는 새 메서드 수용.
 
-### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5 신고)
+### W13 같은 코드면 픽셀까지 같은 샷 (G3-15)
+- 왜 먼저: "같은 머신·같은 버전이면 픽셀까지 같다"(CLAUDE.md "기준 이미지")에서 이 몇 픽셀만 예외다. W15의 완료 기준(구름 하늘 샷이 루프 2·3 픽셀까지 같음)도
+  이게 깨끗해야 판정되고, W15는 모든 샷을 바꿔 기준 이미지를 다시 만드니 그 전에 원인을 좁힌다.
+- 먼저: 재현율. 같은 코드로 루프를 반복해(selftest 3번에서 10개 중 3개) 두 값의 빈도를 창 에디터·창 없는 에디터·플레이어(`player.ps1`)에서 따로 잰다.
+  플레이어에서도 섞이면 캡처 경로가 아니라 렌더 자체다.
+- 좁히기: `Assets/Game/Stage/Builders/StageRenderSettingsStep.cs`의 렌더러 피처를 하나씩 끈 루프 반복 — `DecalRendererFeature`(룬 데칼, `StagePropsStep`의
+  `Props/RuneCircle`), SSAO, MSAA(캡처 RT의 해제 경로, `Runtime/HarnessCapture.cs` `CameraMsaa`). 앞 프레임·렌더 타깃 재사용 같은 상태를 읽는 패스를 찾는다.
+- 고치는 곳: 원인에 따라 `Runtime/HarnessCapture.cs`(캡처 RT 초기화·재사용), `Editor/Build/BuildContext.Decals.cs`, 샘플 빌더. 원인이 Unity·URP 안이면 우회하고 상시에 신고.
+- 추가 검증: 기준 이미지 판정(허용치 0.01%)과 별개로 같은 코드 루프 두 번의 샷이 **픽셀까지 같은지**(maxDiff 0) selftest에 둔다 — 세 버전 새 클론에서도.
+  CLAUDE.md "기준 이미지"의 "이 몇 픽셀을 뺀 말" 단서를 지운다.
+
+### W14 여러 worktree의 ProjectSettings (G5-6)
+- 왜: 병렬 작업(성질 5)에서 남은 공유 지점. 두 worktree의 미병합 모듈이 같은 ProjectSettings 파일을 바꾸면(둘 다 레이어 추가) 두 번째 submit은 되복사되지 않고
+  (`settingsNotWrittenBack`) 에디터 트리에 미커밋 변경이 남아, 그 파일을 다르게 바꾼 브랜치의 land가 `foreign`으로 거부된다.
+- 먼저 정할 것: 항목 절의 두 방향 중 land 쪽(하네스가 쓴 ProjectSettings = 마지막 빌드가 남긴 내용과 같은 파일을 다시 만들 수 있는 산출물로 보고, 병합 뒤 루프의
+  결과로 맞춘다)을 먼저 본다 — 완료 기준이 "순서 무관"이라 submit 순서에 기대는 쪽보다 맞는다. 사람이 손으로 고친 파일(드리프트)은 산출물로 덮지 않는다.
+- 고치는 곳: `Tools~/submit.ps1`(되복사 판정), `Tools~/land.ps1`(`foreign` 판정, 병합 뒤 루프), `Tools~/Harness.psm1`,
+  `Editor/Build/SettingsContext.Project.cs`·`ProjectValues.cs`(마지막 빌드가 남긴 값 `Library/Harness/project-settings.json`).
+- 주의: 줄 단위 YAML 병합 충돌을 git에 맡기지 않는다. 빨간 land의 되돌림이 루프가 쓴 ProjectSettings도 되돌리는지 같이 본다.
+- 추가 검증: 매트릭스 7·8에 두 worktree가 각자 레이어를 더한 모듈 → submit → 커밋 → land를 두 순서로 → 에디터 트리 깨끗, 두 레이어 모두 커밋됨(항목의 완료 기준).
+  손으로 고친 TagManager가 섞인 land는 여전히 거부.
+
+### W15 하늘과 씬 반사 (G4-5)
+- 왜 W13 뒤: 완료 기준이 "구름 하늘 샷이 루프 2·3 픽셀까지 같음"이다. 샘플의 모든 샷이 바뀌므로 기준 이미지를 버전별(6.0·6.3·6.6)로 다시 만든다.
+- 고치는 곳: 하네스 하늘 셰이더(`Shaders/`, `HarnessNoise.hlsl`의 `Noise_Fbm`), `Editor/Build/BuildContext.cs`(`BakeSkyReflection` 옆에 `ctx.ReflectionProbe(path, size)` —
+  빌드가 끝난 뒤 그 자리에서 씬을 큐브맵으로 렌더해 Custom 프로브로), `Editor/Build/HarnessBuild.cs`(빌드 뒤 단계), `Editor/Build/SceneFingerprint.cs`(큐브맵은 참조만),
+  샘플 `Assets/Game/Stage/Builders/StageEnvironmentStep.cs`(지금 `Skybox/Procedural`).
+- 주의: 구름 움직임은 게임 시간으로(실시간이면 G3-10처럼 캡처가 흔들린다). 프로브 큐브맵은 `BakeSkyReflection`과 같은 RT + `AsyncGPUReadback` 경로로
+  P-4(`RenderToCubemap`의 6.6·6.3 차이)를 피한다. 창 없는 에디터의 첫 메시 그리기(O-11) 우회가 빌드 중 프로브 렌더에도 필요한지 본다.
+- 추가 검증: 매듭·링·받침대에 선돌·아치가 비친 샷 PNG, 새 클론 세 버전의 fingerprint가 머신마다 같음(큐브맵 픽셀이 들어가지 않음), 빌드 시간 증가를 "기준선"에 기록.
+
+### W16 사내 프로젝트 A의 플레이어 화면 (G3-8)
+- 사람의 결정(2026-10-01): 사내 프로젝트 A 클론(`../../ah-p2/brd` — 사용자 본인의 프로젝트 폴더가 아니다)의 활성 빌드 타깃을 Standalone으로 바꿔도 된다.
+- 할 일: 클론을 Standalone으로 전환(프로젝트 전체 재임포트) → `attach-test.ps1 -Player`(또는 `player.ps1`)로 `brd-attach-player.json`(부트 대화상자, 아무것도 누르지 않음) →
+  플레이어 720x1280 창의 실제 화면과 같은 프레임의 에디터 `"auto"` 비교. 다르면 그 원인이 report에 나오는지가 완료 기준이다. 로비 시나리오는 PlayerPrefs를 바꾸므로
+  돌리기 전에 한 번 묻는다.
+- 주의: 재임포트·플레이어 빌드는 메모리를 많이 쓴다 — 사용자의 프로젝트 A 에디터가 열려 있으면 닫아도 되는지 먼저 묻는다. 끝나면 클론을 Android로 되돌려
+  매트릭스 10이 사내 프로젝트의 실제 타깃으로 돌게 둔다.
+- 하네스 코드가 바뀌지 않으면 매트릭스는 10만 돌리고 G3-8 상태·README만 갱신한다. 어긋남이 나오면 그 고침은 W8의 경로(`player.ps1`, `shotStats[].screen`)에 한다.
+
+### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5 신고, G2-4 재측정)
 - 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존)과 G2-5의 인터프리터 2건(`try/catch` 미지원,
   교체 본문이 던진 예외를 줄 없이 로그하고 원래 본문으로 이어 돌림), Unity에 P-4의 원인
   (`Camera.RenderToCubemap(Cubemap)`: 6.6은 CPU 픽셀을 안 채우고 6.3은 sRGB로 인코딩 — 빈 씬 + 스카이박스 + half 큐브맵 한 개로 재현), O-6 Unity Search 예외,
@@ -179,6 +223,7 @@
   `InputDevice.disabledWhileInBackground`(격리)에 기댄다 — 새 버전에서 selftest 1번의 포커스 검사로 확인. W12: 핫 루프의 새 메서드 판정은 Pipeline의 규칙
   (파일당 첫 `[CodeReload]` 클래스, 비제네릭, 컴파일된 이름이 아님)을 따라 하고, 인터프리터 호출 수는 내부 `CodeReloadRegistry.m_MethodOverrides`·`MethodOverride.InterpreterInvoke`를
   감싸 센다 — Pipeline을 올리면 selftest 3번의 새 헬퍼·호출 통계 단계로 확인(없어지면 `hot.interpreted.error`만). O-10: Unity 6.7이 나오면 `EditorDialogEvents`로 자동으로 닫힌 대화상자를 report에 싣는다.
+  G2-4: 남은 도메인 리로드 ~2.1 s와 리로드 직후 빌드 +0.8 s는 Unity 쪽이라 새 Unity(CoreCLR 에디터)가 나오면 "기준선"의 C# 1줄 루프를 다시 잰다.
   W8: Unity에 증분 플레이어 빌드가 앞선 빌드의 `ScriptingAssemblies.json`을 쓰는 것(출시 빌드 → 다른 폴더로 개발 빌드, define 제약으로 어셈블리 집합이
   달라짐; 6.0 Fluid-Sim에서 재현 — 고쳐지면 `player.ps1`의 `CleanBuildCache` 재빌드를 걷어낸다), 플레이어 첫 씬 파티클의 로드 시점 한 스텝(의도인지 문의).
 - 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
@@ -251,7 +296,7 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
     오래 띄워 둘수록 늘었다(2.5 → 3.5 s, 재시작하면 돌아옴).
   - 2026-09-30 W7 측정(새로 연 에디터 각 3회, 위 "기준선"): 창 없는 에디터에서는 리로드 뒤 ~0.9 s가 **없고**(창 다시 그리기였다) 리로드도 2.73–2.77 → 2.07–2.10 s,
     플레이 2.8 → 1.6 s → C# 1줄 9.27–9.67 s → **6.75–7.10 s**. 창 에디터(`-automated`)는 전과 같다.
-  - 남은 것: 도메인 리로드 ~2.1 s와 리로드 직후 빌드 +0.8 s는 Unity 쪽이다(CoreCLR 에디터가 나오면 다시 잰다). 에디터 세션의 나이를 보고 재시작을 권하는 것은
+  - 남은 것: 도메인 리로드 ~2.1 s와 리로드 직후 빌드 +0.8 s는 Unity 쪽이다(CoreCLR 에디터가 나오면 다시 잰다 — 상시). 에디터 세션의 나이를 보고 재시작을 권하는 것은
     하지 않았다.
 
 - **G2-5 핫 루프는 `[CodeReload]` 메서드 본문만 받는다** → 2026-10-01 해결(W12, 아래 "해결됨"): 본문이 부르는 새 메서드도 핫, 인터프리터 비용을
@@ -282,6 +327,7 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
     샘플(가로·세로 720x1280)과 BagelGame에서 실제 화면 = 캡처, 그 비교로 캡처의 HDR·MSAA 문제(G3-12)를 고쳤다.
   - 남은 것: 완료 기준의 사내 프로젝트 A — 그 클론의 활성 빌드 타깃이 Android라 `player.ps1`이 빌드 전에 거부했다(전환은 프로젝트 전체 재임포트라 하지 않음).
     Standalone 타깃으로 바꾼 사본(사람의 결정)에서 `brd-attach-player.json`(부트 대화상자, 아무것도 누르지 않음)이나 로비 시나리오로 확인한다(로비는 PlayerPrefs를 바꾼다).
+    2026-10-01 결정: 클론의 타깃을 바꿔도 된다 → W16.
   - 아래는 W8 전의 기록이다.
   - 현상: 에디터에서는 게임이 Game 뷰 크기로 돈다. 캡처는 UI만 캡처 크기로 잠깐 다시 배치하므로 (1) 크기 변화 콜백(`OnRectTransformDimensionsChange`,
     `GeometryChangedEvent`)이 캡처마다 두 번 더 불리고, (2) `Screen.width/height`를 직접 읽어 배치한 UI·카메라(safe area 스크립트, 비율 맞춤 카메라)는
