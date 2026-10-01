@@ -1239,6 +1239,10 @@ function Invoke-HarnessLoop {
             # Render settings from code (ISettingsStep): their assets, what this build rewrote, the active pipeline.
             if ($build.result.settings) { $b['settings'] = $build.result.settings }
             if ($build.result.phases) { $b['phases'] = $build.result.phases }   # where the build's time went (ms)
+            # Cubemaps the build rendered (ctx.ReflectionProbe, ctx.BakeSkyReflection): probes rendered, files whose pixels changed.
+            if ($build.result.reflectionProbes) { $b['reflectionProbes'] = $build.result.reflectionProbes }
+            $cubes = @($build.result.cubemapsWritten | Where-Object { $_ })
+            if ($cubes.Count -gt 0) { $b['cubemapsWritten'] = $cubes }
             # No build steps (an attached project): nothing was built; the fingerprint is the play scene's.
             if ($build.result.skipped) { $b['skipped'] = $true; $b['scene'] = $build.result.scene; $b['fingerprintOf'] = $build.result.fingerprintOf }
             $b

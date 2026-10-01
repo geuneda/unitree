@@ -105,8 +105,8 @@ namespace Harness.Editor
 
         /// <summary>
         /// The scene's render settings (fog, ambient, sky, reflection) and lighting data, which live outside its GameObjects.
-        /// GPU-baked lighting (the reflection cubemap, the ambient probe computed from it) is referenced, not hashed: it can
-        /// differ in the last bits between GPUs, and the golden images compare how it looks.
+        /// GPU-baked lighting (the reflection cubemap, the ambient probe computed from it, reflection probes' cubemaps) is referenced,
+        /// not hashed: it can differ in the last bits between GPUs, and the golden images compare how it looks.
         /// </summary>
         static void DumpRenderSettings(Scene scene, StringBuilder sb, SortedSet<string> assets)
         {
@@ -271,6 +271,9 @@ namespace Harness.Editor
         static string HashAsset(string path, SortedSet<string> referenced)
         {
             var main = AssetDatabase.LoadMainAssetAtPath(path);
+            // A cubemap the build rendered (BakeSkyReflection, ReflectionProbe): its shape, not its pixels - a GPU result can differ in
+            // the last bits between GPUs and drivers (the golden images compare how it looks). What it shows is hashed anyway.
+            if (main is Cubemap cube) return $"cubemap {cube.width} {cube.format} {cube.mipmapCount}";
             if (main is Texture2D || main is Mesh)
             {
                 // Bulk data: hash the bytes on disk instead of walking thousands of serialized elements.

@@ -210,6 +210,9 @@ namespace Harness.Editor
             if (config.IsHarnessProject) EnsureInBuildSettings(HarnessPaths.BuildScene);
             else MarkGenerated(HarnessPaths.BuildScene);
             phases.Lap("lighting");
+            // Reflection probes see the scene as it plays: complete, saved, with its lighting data (ctx.ReflectionProbe).
+            ctx.RenderReflectionProbes();
+            phases.Lap("probes");
 
             var applied = settings.steps.Count > 0 && !settings.skipped;
             var fp = SceneFingerprint.Compute(scene, applied ? settings.ctx.Fingerprint() : null);
@@ -225,6 +228,8 @@ namespace Harness.Editor
                 cacheHits = ctx.CacheHits,
                 bakes = ctx.Bakes,                 // GPU bakes drawn (BakeTexture)
                 bakesSkipped = ctx.BakesSkipped,   // GPU bakes whose inputs were the same as the PNG's
+                reflectionProbes = ctx.ProbesRendered,   // ctx.ReflectionProbe cubemaps rendered after the scene was saved
+                cubemapsWritten = ctx.CubemapsWritten,   // sky and probe cubemaps whose pixels changed (the rest were left alone)
                 deletedAssets = deleted,
                 settings = applied ? SettingsSummary(settings) : null,
                 steps = allSteps,

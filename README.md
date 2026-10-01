@@ -7,7 +7,8 @@
 Claude Code 같은 코딩 에이전트가 **Unity에서도 Three.js로 웹 3D를 만들 때와 같은 완성도**를 내도록 만드는 작업 환경입니다.
 하네스는 UPM 패키지(`com.geuneda.agentharness`)이고, **이미 있는 Unity 프로젝트에 설치 스크립트 한 번으로 붙였다 뗄 수 있습니다**(아래 "기존 프로젝트에 붙이기").
 이 저장소의 `AgentHarness/`는 그 패키지를 쓰는 샘플 프로젝트로, 하네스를 검증하는 스모크 씬(GPU로 텍스처를 구운 절차적 지형 + 손으로 쓴 HLSL + 라이트 +
-URP 후처리 + 회전 오브젝트 + 코드로 만든 파티클·애니메이션 + SDF 선돌·흩뿌린 바위·튜브 아치·룬 데칼 + UI Toolkit HUD)만 들어 있습니다.
+URP 후처리 + 회전 오브젝트 + 코드로 만든 파티클·애니메이션 + SDF 선돌·흩뿌린 바위·튜브 아치·룬 데칼 + 구름이 흐르는 하늘 + 씬을 비추는 반사 프로브 +
+UI Toolkit HUD)만 들어 있습니다.
 씬 파일도 에셋도 커밋돼 있지 않습니다 — 전부 코드에서 생성됩니다.
 
 | 루프가 찍은 샷 (카메라 + HUD 합성) | 연속 캡처 시트 (코드로만 만든 링 애니메이션·불씨 파티클) |
@@ -26,7 +27,7 @@ URP 후처리 + 회전 오브젝트 + 코드로 만든 파티클·애니메이�
 | 1. 모든 게 텍스트 | 씬은 `IBuildStep` 빌더 코드가 생성(YAML 직접 수정 금지), URP·Renderer 에셋은 `ISettingsStep` 코드가 생성하고 품질 레벨·레이어·색 공간·Time·Physics 같은 ProjectSettings 값도 같은 코드가 소유(Project Settings 창이나 YAML로 바꾸면 다음 루프가 되돌리며 보고). HLSL `.shader`, UI Toolkit UXML/USS(+ UI 킷: 디자인 변수·판·버튼·게이지·토스트, UXML 데이터 바인딩), 머티리얼·Volume·라이팅·파티클·애니메이션 클립도 코드 |
 | 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 메서드 본문(과 그 본문이 부르는 새 메서드)만 고쳤으면 컴파일 없이 바꿔 넣는 핫 루프(`loop.ps1 -Hot`), 모달 대화상자에 멈추지 않는 `-automated` 에디터와 창 없는 에디터(`open.ps1 -Headless`, 한 바퀴 ~2.4 s) |
 | 3. 눈으로 검증 | 캡처 PNG(화면의 카메라 스택·미니맵 + 스크린 공간 UI, 파이프라인의 HDR 그대로) + 이미지 통계, 연속 캡처 시트, 기준 이미지와의 diff 점수·바뀐 곳 PNG(시나리오 동안 UI Toolkit transition도 프레임 시계라 UI가 움직이는 중에도 픽셀까지 같음), 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로. 같은 시나리오를 개발 빌드 플레이어에서 돌려(`player.ps1`) 에디터 없는 프레임 시간과 게임이 그린 실제 화면을 에디터 샷과 비교 |
-| 4. 에셋 없이 완성도 | 절차적 메시(SDF → 서피스 네트, 스플라인 튜브, 바위)·포아송 스캐터·노이즈, GPU 텍스처 베이크(`ctx.BakeTexture`: HLSL이 C# 노이즈와 같은 무늬, 입력이 같으면 건너뜀), URP 데칼·디테일 맵, 코드로 만든 URP 후처리, 라이팅 베이크 없는 스카이 반사·앰비언트, 키워드를 알아서 맞추는 `LitMaterial`, 설정 한 벌로 만드는 결정적 파티클(`ctx.Particles`), 키를 코드로 쓰는 애니메이션 클립을 Playables로 재생(`ctx.AnimationClip` + `ClipPlayer`, 틀린 경로·속성은 빌드 경고) |
+| 4. 에셋 없이 완성도 | 절차적 메시(SDF → 서피스 네트, 스플라인 튜브, 바위)·포아송 스캐터·노이즈, GPU 텍스처 베이크(`ctx.BakeTexture`: HLSL이 C# 노이즈와 같은 무늬, 입력이 같으면 건너뜀), URP 데칼·디테일 맵, 코드로 만든 URP 후처리, 게임 시간으로 구름이 흐르는 하늘(`ctx.Sky`), 라이팅 베이크 없는 스카이 반사·앰비언트와 빌드가 끝난 뒤 그 자리에서 씬을 찍는 반사 프로브(`ctx.ReflectionProbe`, mip은 GGX로 거름), 키워드를 알아서 맞추는 `LitMaterial`, 설정 한 벌로 만드는 결정적 파티클(`ctx.Particles`), 키를 코드로 쓰는 애니메이션 클립을 Playables로 재생(`ctx.AnimationClip` + `ClipPlayer`, 틀린 경로·속성은 빌드 경고) |
 | 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 worktree + 트랜잭션 submit / land, worktree마다 따로 도는 창 없는 에디터(`open.ps1 -Own`, 루프가 서로 기다리지 않음), 기계가 지키는 공유 이벤트 폴더(모듈별 파일·같은 이름 금지·올라간 타입 불변 — 어기면 submit/land가 복사·병합 전에 거부), 여러 모듈의 설정 스텝이 같이 쓰는 ProjectSettings 파일은 land가 병합된 코드로 다시 써서 커밋(병합 순서 무관) |
 
 ## 루프 한 방
@@ -45,7 +46,7 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
   "fps": { "avg": 110.8, "min": 66.1, "p95ms": 11.25 },
   "shots": ["…/HarnessOut/latest/shot0_closeup.png", "…/shot1_horizon.png", "…/shot2_overview.png"],
   "play": { "events": [{ "name": "ClipEvent:HaloHalfTurn", "count": 1 }, { "name": "SpinDirectionChanged", "count": 1 }, { "name": "SpinnerLap", "count": 2 }] },
-  "render": { "batches": 65.0, "setPassCalls": 50.0, "triangles": 1215697 },
+  "render": { "batches": 61.0, "setPassCalls": 51.0, "triangles": 1215696 },
   "golden": { "version": "6000.3.11f1", "same": 3, "changed": 0, "missing": 0 },
   "editor": { "mode": "window", "automated": true },
   "durationSec": 4.2 }
@@ -53,7 +54,8 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 
 실패하면 `stage`(compile / build / shader / play / runtime / lint / shots)와 함께 `{"file","line","msg","module"}`가 나옵니다.
 샷은 커밋된 기준 이미지(`golden/<Unity 버전>/<시나리오>/`)와 비교됩니다. 같은 머신·같은 에디터 모드면 플레이 중 에디터 창이 계속 다시 그려져도 픽셀까지
-같아서(URP의 DBuffer 데칼만 가장자리 몇 픽셀이 갈릴 수 있어 샘플은 Screen Space 데칼 — ROADMAP G3-15), 셰이더 한 줄(스펙큘러 절반)도
+같아서(URP의 DBuffer 데칼만 가장자리 몇 픽셀이 갈릴 수 있어 샘플은 Screen Space 데칼 — ROADMAP G3-15; 구름은 게임 시간으로 흐르고 빌드가 찍는 하늘·프로브
+큐브맵은 픽셀이 바뀐 때만 다시 쓴다), 셰이더 한 줄(스펙큘러 절반)도
 `changed` + 바뀐 곳을 칠한 diff PNG로 드러납니다(실패로 치지는 않음). 의도한 변경이면 `loop.ps1 -UpdateGolden`으로 갱신합니다.
 
 | 상황 (측정) | 창 에디터 | 창 없는 에디터 (`open.ps1 -Headless`) |
@@ -90,7 +92,7 @@ powershell -ExecutionPolicy Bypass -File tools/player.ps1 -NoBuild        # 시�
 | 샘플, 이 머신 | 창 에디터 플레이 모드 | 개발 빌드 플레이어 |
 |---|---|---|
 | fps (p95 프레임) | ~105–120 (~11 ms) | **~450–515 (~3 ms), ×3.8–4.9** |
-| batches / SetPass | 65 / 50 | 69 / 54 (D3D12) |
+| batches / SetPass | 61 / 51 | 65 / 55 (D3D12) |
 | 이벤트 (`play.events`) | SpinnerLap 2 · SpinDirectionChanged 1 · HaloHalfTurn 1 | 같음 |
 | 한 바퀴 | 루프 ~4 s | `player.ps1` ~16 s (에디터 루프 ~4.5 s + 증분 빌드 ~5 s + 플레이어 ~6 s), 첫 빌드 ~2분(셰이더), `-NoBuild` ~11 s |
 
@@ -191,7 +193,7 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1               # 끝낼 �
 들어가는데, `open.ps1`과 루프가 그 에러(file·line)를 로그에서 읽어 보고합니다(창 없는 에디터는 마지막으로 성공한 어셈블리로 떠서 루프가 에러를 보고).
 
 위 과정 전체(클론 → 열기 → 설정 → 루프 3회 → 종료 → 삭제)를 `tools/fresh-clone-test.ps1` 하나로 검증할 수 있습니다(이 머신에서 ~110 s).
-하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·실제 입력 격리(포커스 있음·없음)·동시 루프·worktree 전용 에디터·worktree submit/land·계약 규칙·프로젝트 설정 드리프트·두 worktree가 같은 ProjectSettings 파일을 바꾼 land·에디터 창을 계속 다시 그려도 픽셀까지 같은 샷)는 `tools/selftest.ps1`이 한 번에 돌리고(~9–14분),
+하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·실제 입력 격리(포커스 있음·없음)·동시 루프·worktree 전용 에디터·worktree submit/land·계약 규칙·프로젝트 설정 드리프트·두 worktree가 같은 ProjectSettings 파일을 바꾼 land·에디터 창을 계속 다시 그려도 픽셀까지 같은 샷·흐르는 구름과 씬을 비추는 반사 프로브)는 `tools/selftest.ps1`이 한 번에 돌리고(~9–14분),
 `fresh-clone-test.ps1 -UnityVersion <버전> -SelfTest`는 그것을 다른 Unity 버전의 새 클론에서 돌립니다.
 
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)
@@ -325,12 +327,13 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
   docs/ROADMAP.md                          아직 남은 격차 (워크플로우별 작업 순서 + 성질 1~5 + 이식성) + 검증 매트릭스
   Packages/com.geuneda.agentharness/       하네스 = UPM 패키지 (git URL: ...unitree.git?path=/AgentHarness/Packages/com.geuneda.agentharness)
     Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioInput · ScenarioRunner · PlayerRun ·
-                                           HarnessCapture(+CaptureCameras · CaptureUi · ContactSheet) · ClipPlayer(Playables 클립 재생) · PanelClock · UI/ ·
+                                           HarnessCapture(+CaptureCameras · CaptureUi · ContactSheet) · ClipPlayer(Playables 클립 재생) · PanelClock · SkyClock(구름 시계) · UI/ ·
                                            Procedural/(MeshBuilder · Noise · Sdf · Spline · Scatter · TextureBaker)
     Editor/                                harness_* 에디터 커맨드(핫 루프 harness_hot, 플레이어 빌드 계획·이미지 비교, 계약 검사 harness_contracts 포함), lint, 에디터 모드(창 없는 에디터의 유휴 CPU 억제),
-                                           BuildContext(머티리얼·파티클·애니메이션·GPU 베이크·데칼 헬퍼) / IBuildStep,
+                                           BuildContext(머티리얼·파티클·애니메이션·GPU 베이크·데칼·하늘·반사 프로브 헬퍼) / IBuildStep,
                                            SettingsContext / ISettingsStep(렌더 파이프라인 + ProjectSettings 값), 출시 빌드 필터
-    UI/ · Shaders/                         UI 킷 테마(HarnessKit.uss) · GPU 베이크 include(HarnessBake.hlsl, HarnessNoise.hlsl)
+    UI/ · Shaders/                         UI 킷 테마(HarnessKit.uss) · GPU 베이크 include(HarnessBake.hlsl, HarnessNoise.hlsl) · 하늘(HarnessSky.shader) ·
+                                           반사 큐브맵 GGX 프리필터(HarnessCubeFilter.shader)
     Tools~/                                loop · player · submit · land · uc · compile-check · open · quit · install · uninstall · attach-test ·
                                            fresh-clone-test · selftest (.ps1) + templates/ (Unity는 ~ 폴더를 임포트하지 않는다)
   ProjectSettings/AgentHarness.json        하네스 설정: 모듈 폴더, 플레이할 씬, setup 모드
@@ -342,7 +345,7 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
 ## 에이전트와 함께 쓰기
 
 `AgentHarness/CLAUDE.md`에 루프 사용법, report.json 해석, 규칙(YAML 직접 수정 금지, 텍스트 우선 형태, 모듈 폴더 밖 수정 금지,
-에디터 조작은 순서대로), 모듈·빌더 템플릿(`[CodeReload] Tick` 포함 — 본문(과 거기서 부르는 새 메서드)만 고치면 `loop.ps1 -Hot`), 렌더·프로젝트 설정 스텝, 머티리얼·파티클·애니메이션·UI 킷·GPU 베이크·절차적 메시 헬퍼, 개발 빌드 플레이어 실행(`player.ps1` — 실제 성능·실제 화면), 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
+에디터 조작은 순서대로), 모듈·빌더 템플릿(`[CodeReload] Tick` 포함 — 본문(과 거기서 부르는 새 메서드)만 고치면 `loop.ps1 -Hot`), 렌더·프로젝트 설정 스텝, 머티리얼·파티클·애니메이션·UI 킷·GPU 베이크·절차적 메시·하늘·반사 프로브 헬퍼(손으로 쓴 URP 셰이더가 Forward+에서 프로브를 받는 법 포함), 개발 빌드 플레이어 실행(`player.ps1` — 실제 성능·실제 화면), 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
 병렬 에이전트는 위의 worktree + `submit.ps1` + `land.ps1` 흐름을 쓰고(G5-2, G5-5 — 설정 스텝이 같이 쓰는 ProjectSettings는 land가 다시 써서 커밋, G5-6), 루프를 나란히 돌리려면 worktree마다 `open.ps1 -Own`(G5-1)입니다.
 모듈 사이의 공유 이벤트는 모듈별 `<모듈>Events.cs`에 덧붙이기만 합니다(G5-4 — 이름·타입·소유를 submit/land가 지킴).
 

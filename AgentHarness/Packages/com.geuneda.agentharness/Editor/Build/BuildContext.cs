@@ -371,57 +371,6 @@ namespace Harness.Editor
 #endif
 
         /// <summary>
-        /// Render the current RenderSettings.skybox into a cubemap asset and use it as the default reflection
-        /// (no lighting bake needed). Call after the skybox is set.
-        /// </summary>
-        public Cubemap BakeSkyReflection(string name = "SkyReflection", int size = 128)
-        {
-            var go = new GameObject("[HarnessSkyBake]") { hideFlags = HideFlags.HideAndDontSave };
-            RenderTexture rt = null;
-            try
-            {
-                var cam = go.AddComponent<Camera>();
-                cam.enabled = false;
-                cam.cullingMask = 0;
-                cam.clearFlags = CameraClearFlags.Skybox;
-                cam.allowHDR = true;
-                // Render into a cube render texture and read the faces back. Camera.RenderToCubemap(Cubemap) renders on the GPU,
-                // but in Unity 6.6 it leaves the Cubemap's pixel data uninitialized - and that is what gets saved (P-4: the next
-                // load reflected garbage, often negative, and every URP Lit surface went black).
-                rt = new RenderTexture(new RenderTextureDescriptor(size, size, RenderTextureFormat.ARGBHalf, 0) { dimension = TextureDimension.Cube });
-                if (!SystemInfo.supportsAsyncGPUReadback || !cam.RenderToCubemap(rt))
-                {
-                    Warn("rendering the sky into a cubemap failed; default reflection left unset");
-                    return null;
-                }
-                var cube = new Cubemap(size, TextureFormat.RGBAHalf, true);
-                for (var face = 0; face < 6; face++)
-                {
-                    var request = AsyncGPUReadback.Request(rt, 0, 0, size, 0, size, face, 1, TextureFormat.RGBAHalf);
-                    request.WaitForCompletion();
-                    if (request.hasError)
-                    {
-                        Warn("reading the sky cubemap back from the GPU failed; default reflection left unset");
-                        Object.DestroyImmediate(cube);
-                        return null;
-                    }
-                    cube.SetPixelData(request.GetData<byte>(), 0, (CubemapFace)face);
-                }
-                cube.Apply(true);
-                cube = SaveAsset(cube, name + ".asset");
-                RenderSettings.defaultReflectionMode = DefaultReflectionMode.Custom;
-                RenderSettings.customReflectionTexture = cube;
-                RenderSettings.reflectionIntensity = 1f;
-                return cube;
-            }
-            finally
-            {
-                if (rt != null) { rt.Release(); Object.DestroyImmediate(rt); }
-                Object.DestroyImmediate(go);
-            }
-        }
-
-        /// <summary>
         /// Ambient light from the sky without a lighting bake (G4-2): projects <paramref name="sky"/> (e.g. BakeSkyReflection's
         /// cubemap) to L2 spherical harmonics (<see cref="Harness.Procedural.AmbientProbe"/>) and stores them as the scene's
         /// lighting data with ambient mode Skybox - what baking the environment lighting would store. <paramref name="intensity"/>

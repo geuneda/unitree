@@ -17,7 +17,7 @@
     (child of it, drawing a quad) seen from the main camera and from another pose, a minimap Base camera drawn after
     the main camera in its viewport, one before it covered, a capture from the minimap camera by name drawing it alone,
     everything put back; a play-mode fixture: a capture sequence (G3-3, contact sheet, motion) with an overlay canvas
-    and a stack camera made during the play; real input (G3-6): Space pressed on the real keyboard during a loop leaves
+    and a stack camera made during the play, and one of the sky alone whose clouds drift with game time (G4-5); real input (G3-6): Space pressed on the real keyboard during a loop leaves
     play.events as they were and is counted, with the game focused when play mode starts and (G3-9) unfocused then (the
     Input System turns the real devices off itself), getting focus back during the play - focus changes made inside Unity
     (Application.InvokeFocusChanged, the Input System's only source), whatever window has the OS focus; UI Toolkit takes
@@ -28,7 +28,9 @@
     and the YAML edited by hand plus values changed in memory as the Project Settings window does (the Editor's quality level
     among them) are set back by one loop and reported as drift (same fingerprint, pixels and git status); the reflection
     cubemap holds the sky (P-4), the ambient is its SH through the scene's lighting data (G4-2), AmbientProbe maps a
-    uniform environment to Flat ambient and refuses garbage; ctx.Material reports a misspelled / obsolete property and an
+    uniform environment to Flat ambient and refuses garbage; the harness sky (G4-5) with its clock at 0 after the plays, the
+    reflection probe (Custom, its cubemap holding the scene - the arch where the sky cubemap has sky - fingerprinted by shape,
+    drawn into the closeup: the pedestal and the knot reflect it), its and the sky's cubemaps rewritten in none of loops 2-3; ctx.Material reports a misspelled / obsolete property and an
     emission color without its toggle, ctx.LitMaterial turns emission and alpha clipping on (G4-3); content helpers (G1-3):
     the built embers have a fixed seed and always simulate, the halo plays through a ClipPlayer; a clip with a misspelled
     path, component, material property and Transform property gives one warning each; a linear turn samples right; particles
@@ -802,13 +804,15 @@ onChange = c =>
 UnityEditor.EditorApplication.playModeStateChanged += onChange;
 return "armed";
 '@
+# The sky sequence (G4-5) looks up where only clouds are, without the HUD (its lap gauge moves): the clouds drift with game time.
 $SequenceScenarioText = @'
 {
     "name": "selftest-sequence",
-    "durationSec": 0.6,
+    "durationSec": 1.3,
     "fixedDeltaTime": 0.0166667,
     "captures": [
-        { "t": 0.1, "preset": "main", "name": "seq", "frames": 4, "every": 5 }
+        { "t": 0.1, "preset": "main", "name": "seq", "frames": 4, "every": 5 },
+        { "t": 0.1, "pos": [0, 2, -16], "lookAt": [0, 54, 14], "fov": 40, "ui": false, "name": "sky", "frames": 2, "every": 60 }
     ]
 }
 '@
@@ -1022,6 +1026,121 @@ if (cube != null)
     r["lightingData"] = lda == null ? "none" : UnityEditor.AssetDatabase.GetAssetPath(lda);
     r["probeDiff"] = diff;
     r["ambientUp"] = sh[0, 0] + sh[0, 1] - sh[0, 6];
+}
+// G4-5: the harness sky's clock is back at 0 after the plays (edit-mode captures and the build's cubemaps see time 0).
+r["skyTime"] = UnityEngine.Shader.GetGlobalFloat("_HarnessSkyTime");
+r["skyShader"] = UnityEngine.RenderSettings.skybox == null ? "none" : UnityEngine.RenderSettings.skybox.shader.name;
+// The knot's shader takes probes through the Forward+ cluster loop: its keyword is _FORWARD_PLUS in 6.0, _CLUSTER_LIGHT_LOOP after.
+var knotShader = UnityEngine.Shader.Find("Game/Smoke/Iridescent");
+r["knotKeyword"] = knotShader == null ? "none" : string.Join(",", System.Array.FindAll(knotShader.keywordSpace.keywordNames, n => n == "_FORWARD_PLUS" || n == "_CLUSTER_LIGHT_LOOP"));
+// G4-5: the reflection probe (ctx.ReflectionProbe) - Custom, its cubemap the scene seen from it, drawn into the closeup.
+var probes = UnityEngine.Object.FindObjectsByType<UnityEngine.ReflectionProbe>(UnityEngine.FindObjectsSortMode.None);
+var rprobe = probes.Length == 1 ? probes[0] : null;
+var pcube = rprobe == null ? null : rprobe.customBakedTexture as UnityEngine.Cubemap;
+r["probe"] = rprobe == null ? "probes=" + probes.Length : $"{rprobe.mode} {rprobe.resolution} box={rprobe.boxProjection} {(pcube == null ? "none" : UnityEditor.AssetDatabase.GetAssetPath(pcube))}";
+if (pcube != null && cube != null)
+{
+    var bad = 0;
+    for (var f = 0; f < 6; f++)
+        foreach (var c in pcube.GetPixels((UnityEngine.CubemapFace)f, 0))
+            if (!(c.r >= 0f && c.g >= 0f && c.b >= 0f) || float.IsInfinity(c.r) || float.IsInfinity(c.g) || float.IsInfinity(c.b)) bad++;
+    r["probeBadTexels"] = bad;
+    r["probeMips"] = pcube.mipmapCount;
+    // Toward the arch's top (StagePropsStep: the spline's apex): stone in the probe, sky in the sky cubemap.
+    System.Func<UnityEngine.Cubemap, UnityEngine.Vector3, UnityEngine.Color> at = (cm, d) =>
+    {
+        var ax = System.Math.Abs(d.x); var ay = System.Math.Abs(d.y); var az = System.Math.Abs(d.z);
+        int f; double uu, vv;
+        if (ax >= ay && ax >= az) { if (d.x > 0) { f = 0; uu = -d.z / ax; vv = -d.y / ax; } else { f = 1; uu = d.z / ax; vv = -d.y / ax; } }
+        else if (ay >= az) { if (d.y > 0) { f = 2; uu = d.x / ay; vv = d.z / ay; } else { f = 3; uu = d.x / ay; vv = -d.z / ay; } }
+        else { if (d.z > 0) { f = 4; uu = d.x / az; vv = -d.y / az; } else { f = 5; uu = -d.x / az; vv = -d.y / az; } }
+        var n = cm.width;
+        return cm.GetPixel((UnityEngine.CubemapFace)f, System.Math.Min(n - 1, (int)((uu + 1) / 2 * n)), System.Math.Min(n - 1, (int)((vv + 1) / 2 * n)));
+    };
+    var toArch = (new UnityEngine.Vector3(0f, 8.4f, 7f) - rprobe.transform.position).normalized;
+    var archProbe = at(pcube, toArch);
+    var archSky = at(cube, toArch);
+    r["archProbe"] = archProbe.ToString("F3");
+    r["archSky"] = archSky.ToString("F3");
+    r["archStone"] = archProbe.b < 1.3f * archProbe.r && System.Math.Abs(archProbe.r - archSky.r) + System.Math.Abs(archProbe.g - archSky.g) + System.Math.Abs(archProbe.b - archSky.b) > 0.1f;
+    // The fingerprint has the cubemap's shape, not its pixels (a GPU result).
+    var dump = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "Library/Harness/fingerprint.txt"));
+    var key = UnityEditor.AssetDatabase.GetAssetPath(pcube) + "=";
+    var line = System.Array.Find(dump.Split('\n'), l => l.StartsWith(key, System.StringComparison.Ordinal));
+    r["probeFingerprint"] = line == null ? "missing" : line.Substring(key.Length).Trim();
+    // The closeup with the probe and without it (edit mode, no post-processing): the pedestal and the knot reflect it.
+    var shot = UnityEngine.GameObject.Find("Smoke/Shots/closeup");
+    var main = UnityEngine.Camera.main;
+    if (shot != null && main != null)
+    {
+        var go = new UnityEngine.GameObject("[selftest probe shot]") { hideFlags = UnityEngine.HideFlags.HideAndDontSave };
+        var cam = go.AddComponent<UnityEngine.Camera>();
+        cam.CopyFrom(main);
+        cam.enabled = false;
+        cam.transform.SetPositionAndRotation(shot.transform.position, shot.transform.rotation);
+        cam.fieldOfView = shot.GetComponent<Harness.ShotPreset>().fieldOfView;
+        var rt = new UnityEngine.RenderTexture(640, 360, 24, UnityEngine.RenderTextureFormat.ARGBHalf);
+        cam.targetTexture = rt;
+        System.Func<bool, UnityEngine.Color[]> grab = on =>
+        {
+            rprobe.enabled = on;
+            UnityEngine.ReflectionProbe.UpdateCachedState();
+            cam.Render(); cam.Render();
+            var prev = UnityEngine.RenderTexture.active;
+            UnityEngine.RenderTexture.active = rt;
+            var t = new UnityEngine.Texture2D(640, 360, UnityEngine.TextureFormat.RGBAHalf, false);
+            t.ReadPixels(new UnityEngine.Rect(0, 0, 640, 360), 0, 0);
+            t.Apply();
+            UnityEngine.RenderTexture.active = prev;
+            var px = t.GetPixels();
+            UnityEngine.Object.DestroyImmediate(t);
+            return px;
+        };
+        try
+        {
+            var with1 = grab(true); var with2 = grab(true); var without = grab(false);
+            // Mean |difference| over a region (fractions of the frame, from the bottom left).
+            System.Func<UnityEngine.Color[], UnityEngine.Color[], float, float, float, float, double> region = (a, b, x0, x1, y0, y1) =>
+            {
+                double sum = 0; var n = 0;
+                for (var y = (int)(y0 * 360); y < (int)(y1 * 360); y++)
+                    for (var x = (int)(x0 * 640); x < (int)(x1 * 640); x++)
+                    {
+                        var i = y * 640 + x;
+                        sum += System.Math.Abs(a[i].r - b[i].r) + System.Math.Abs(a[i].g - b[i].g) + System.Math.Abs(a[i].b - b[i].b);
+                        n++;
+                    }
+                return sum / n;
+            };
+            // Mean brightness of b minus a over a region: the knot's bands and wobble follow the real-time clock in edit mode (they
+            // change between any two renders), but they do not make it brighter or darker on average; the sky does.
+            System.Func<UnityEngine.Color[], UnityEngine.Color[], float, float, float, float, double> brighter = (a, b, x0, x1, y0, y1) =>
+            {
+                double sum = 0; var n = 0;
+                for (var y = (int)(y0 * 360); y < (int)(y1 * 360); y++)
+                    for (var x = (int)(x0 * 640); x < (int)(x1 * 640); x++)
+                    {
+                        var i = y * 640 + x;
+                        sum += (b[i].r + b[i].g + b[i].b) - (a[i].r + a[i].g + a[i].b);
+                        n++;
+                    }
+                return sum / n;
+            };
+            r["pedestalNoise"] = region(with1, with2, 0.35f, 0.65f, 0.02f, 0.18f);
+            r["pedestalProbe"] = region(with1, without, 0.35f, 0.65f, 0.02f, 0.18f);
+            r["knotNoise"] = System.Math.Abs(brighter(with1, with2, 0.3f, 0.7f, 0.3f, 0.75f));
+            r["knotSkyBrighter"] = brighter(with2, without, 0.3f, 0.7f, 0.3f, 0.75f);
+        }
+        finally
+        {
+            rprobe.enabled = true;
+            UnityEngine.ReflectionProbe.UpdateCachedState();
+            cam.targetTexture = null;
+            rt.Release();
+            UnityEngine.Object.DestroyImmediate(rt);
+            UnityEngine.Object.DestroyImmediate(go);
+        }
+    }
 }
 // AmbientProbe: a uniform environment of radiance c is Flat ambient c in every direction.
 var u = new UnityEngine.Cubemap(8, UnityEngine.TextureFormat.RGBAHalf, false);
@@ -1484,6 +1603,10 @@ function Invoke-Item1 {
         Test-Check "golden: same as the committed goldens ($($committed.from))" ($bad.Count -eq 0) ($bad -join ' | ')
     }
     $state.item['committedGolden'] = $(if ($committed.from) { "$($committed.from): same $($committed.same)/$(@($committed.results).Count)" } else { "none for $($committed.version)" })
+    # G4-5: the sky and probe cubemaps are rendered by every build and written only when their pixels change: none in loops 2-3.
+    $cubes = @($runs[1..2] | ForEach-Object { @($_.build.cubemapsWritten) } | Where-Object { $_ })
+    $probesRendered = @($runs | ForEach-Object { [int]$_.build.reflectionProbes })
+    Test-Check 'cubemaps: the reflection probe rendered by every build, the sky and probe cubemaps rewritten in none of loops 2-3' (@($probesRendered | Where-Object { $_ -ne 1 }).Count -eq 0 -and $cubes.Count -eq 0) "probes=[$($probesRendered -join ',')] written=[$($cubes -join ',')]"
     $fps = @($runs | ForEach-Object { if ($_.build) { $_.build.fingerprint } } | Select-Object -Unique)
     $evs = @($runs | ForEach-Object { Get-Events $_ } | Select-Object -Unique)
     Test-Check 'same build.fingerprint' ($fps.Count -eq 1 -and [bool]$fps[0]) ($fps -join ', ')
@@ -1555,7 +1678,10 @@ function Invoke-Item1 {
     $motion = @($q.motion | ForEach-Object { [double]$_ })
     Test-Check 'sequence: motion between frames (the knot spins)' ($motion.Count -eq 3 -and @($motion | Where-Object { $_ -le 0.5 }).Count -eq 0) ($motion -join ',')
     Test-Check 'sequence: the play-mode overlay canvas and stack camera in the frames' (@($q.ui) -contains 'ugui:[selftest play overlay]' -and @($q.cameras | Where-Object { $_ -like '*[[]selftest play overlay camera] (overlay)' }).Count -eq 1) "ui=[$(@($q.ui) -join ',')] cameras=[$(@($q.cameras) -join ',')]"
-    $state.item['sequence'] = [ordered]@{ sheet = $q.sheet; motion = $motion; shot = @($r.shots)[0] }
+    $sky = @($r.shotStats | Where-Object { $_.name -eq 'sky' })[0]
+    $skyMotion = @($(if ($sky) { $sky.motion }) | ForEach-Object { [double]$_ })
+    Test-Check 'sky: the clouds drift with game time (a second of play between two frames of the sky alone, G4-5)' ($skyMotion.Count -eq 1 -and $skyMotion[0] -gt 0.5) "motion=$($skyMotion -join ',') times=$(if ($sky) { @($sky.times) -join ',' })"
+    $state.item['sequence'] = [ordered]@{ sheet = $q.sheet; motion = $motion; skyMotion = $skyMotion; shot = @($r.shots)[0] }
 
     # harness_golden: "ignore" regions (fractions from the top left) and another patch of the same major.minor.
     $gi = Join-Path $outAbs 'golden-ignore'
@@ -1716,7 +1842,11 @@ function Invoke-Item1 {
     $missing = @($expected | Where-Object { $p = $_; @($warnings | Where-Object { $_ -like $p }).Count -eq 0 })
     Test-Check 'materials: a misspelled, an obsolete and an emission color without its toggle are reported' ($missing.Count -eq 0 -and $warnings.Count -eq $expected.Count) (@($warnings) -join ' | ')
     Test-Check 'materials: LitMaterial turns emission and alpha clipping on (hand-set _EMISSION stays off)' ("$($k.litKeywords)" -like '*_ALPHATEST_ON*' -and "$($k.litKeywords)" -like '*_EMISSION*' -and [int]$k.litQueue -eq 2450 -and -not [bool]$k.byHandEmission) "lit=[$($k.litKeywords)] queue=$($k.litQueue) byHand=$($k.byHandEmission)"
-    $state.item['renderCheck'] = [ordered]@{ sunAngle = $k.sunAngle; sunTexel = $k.sunTexel; ambientUp = $k.ambientUp; uniformDiff = $k.uniformDiff }
+    # G4-5: the harness sky and the reflection probe of the built scene.
+    Test-Check 'sky: the harness sky (Harness/Sky), its clock back at 0 after the plays' ($k.skyShader -eq 'Harness/Sky' -and [double]$k.skyTime -eq 0) "shader=$($k.skyShader) time=$($k.skyTime)"
+    Test-Check 'reflection probe: Custom, its cubemap valid and holding the scene (the arch''s stone where the sky cubemap has sky); the fingerprint has its shape, not its pixels' ("$($k.probe)" -like 'Custom 256 box=True Assets/*' -and [int]$k.probeBadTexels -eq 0 -and [bool]$k.archStone -and "$($k.probeFingerprint)" -like 'cubemap 256 *') "$($k.probe) bad=$($k.probeBadTexels) arch: probe $($k.archProbe) sky $($k.archSky) fingerprint=$($k.probeFingerprint)"
+    Test-Check 'reflection probe: drawn into the closeup - the pedestal and the knot reflect it (without it they reflect the brighter sky)' ([double]$k.pedestalProbe -gt 0.05 -and [double]$k.pedestalProbe -gt 20 * [double]$k.pedestalNoise -and [double]$k.knotSkyBrighter -gt 0.03 -and [double]$k.knotSkyBrighter -gt 20 * [double]$k.knotNoise) "pedestal $($k.pedestalProbe) (noise $($k.pedestalNoise)) knot +$($k.knotSkyBrighter) (noise $($k.knotNoise)) knot keyword=$($k.knotKeyword)"
+    $state.item['renderCheck'] = [ordered]@{ sunAngle = $k.sunAngle; sunTexel = $k.sunTexel; ambientUp = $k.ambientUp; uniformDiff = $k.uniformDiff; probe = $k.probe; pedestalProbe = $k.pedestalProbe; knotSkyBrighter = $k.knotSkyBrighter }
 
     # Content helpers (G1-3): particles and clips from code, in edit mode, then a ClipPlayer driven in play mode.
     $cc = (Join-Path $outAbs 'content-check.cs').Replace('\', '/')

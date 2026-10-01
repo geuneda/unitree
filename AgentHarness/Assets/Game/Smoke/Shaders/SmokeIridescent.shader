@@ -1,5 +1,5 @@
-// Hand-written URP HLSL (no Shader Graph): vertex wobble, main-light diffuse + shadows, Blinn-Phong spec,
-// animated iridescent fresnel rim pushed into HDR so the Bloom override picks it up.
+// Hand-written URP HLSL (no Shader Graph): vertex wobble, main-light diffuse + shadows, Blinn-Phong spec, reflections of the
+// probe around it (Forward+ cluster loop), animated iridescent fresnel rim pushed into HDR so the Bloom override picks it up.
 Shader "Game/Smoke/Iridescent"
 {
     Properties
@@ -13,6 +13,8 @@ Shader "Game/Smoke/Iridescent"
         _BandSpeed ("Band Speed", Float) = 0.35
         _Gloss ("Gloss", Range(4, 256)) = 96
         _Wobble ("Vertex Wobble", Range(0, 0.2)) = 0.035
+        _Smoothness ("Reflection Smoothness", Range(0, 1)) = 0.85
+        _Reflectivity ("Reflectivity Facing", Range(0, 1)) = 0.25
     }
 
     SubShader
@@ -32,6 +34,8 @@ Shader "Game/Smoke/Iridescent"
             float _BandSpeed;
             half _Gloss;
             float _Wobble;
+            half _Smoothness;
+            half _Reflectivity;
         CBUFFER_END
 
         float3 WobbleOS(float3 positionOS, float3 normalOS)
@@ -52,6 +56,14 @@ Shader "Game/Smoke/Iridescent"
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #pragma multi_compile_fog
+            // Reflection probes under Forward+ come through the cluster loop, whose keyword Unity 6.1 renamed (UNITY_VERSION: 6000.1.0 = 60010000).
+            #if UNITY_VERSION >= 60010000
+            #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
+            #else
+            #pragma multi_compile _ _FORWARD_PLUS
+            #endif
+            #pragma multi_compile_fragment _ _REFLECTION_PROBE_BLENDING
+            #pragma multi_compile_fragment _ _REFLECTION_PROBE_BOX_PROJECTION
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
             struct Attributes
@@ -98,7 +110,11 @@ Shader "Game/Smoke/Iridescent"
                 float band = 0.5 + 0.5 * sin((i.uv.x * _BandScale + _Time.y * _BandSpeed) * 6.2831853);
                 half3 rim = lerp(_RimColorA.rgb, _RimColorB.rgb, band);
 
-                half3 color = diffuse + spec * light.color + rim * fresnel * _Emission;
+                // The probe around the knot (or the sky outside it), Schlick's fresnel.
+                half3 env = GlossyEnvironmentReflection(reflect(-v, n), i.positionWS, 1.0h - _Smoothness, 1.0h, GetNormalizedScreenSpaceUV(i.positionCS));
+                half reflectance = _Reflectivity + (1.0h - _Reflectivity) * pow(1.0h - saturate(dot(n, v)), 5.0h);
+
+                half3 color = diffuse + spec * light.color + env * reflectance + rim * fresnel * _Emission;
                 color = MixFog(color, i.fogFactor);
                 return half4(color, 1.0h);
             }

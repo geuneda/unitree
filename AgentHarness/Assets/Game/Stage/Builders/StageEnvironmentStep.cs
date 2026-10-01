@@ -52,19 +52,12 @@ namespace Game.Stage.Builders
             beacon.shadows = LightShadows.None;
 
             // Sky, ambient, fog -------------------------------------------------------------------------
-            var sky = ctx.Material("Sky", "Skybox/Procedural", m =>
+            // The harness sky: gradient, sun, fBm clouds drifting with game time (Packages/.../Shaders/HarnessSky.shader).
+            ctx.Sky(sun, s =>
             {
-                m.SetFloat("_SunDisk", 2f);          // high quality
-                m.SetFloat("_SunSize", 0.035f);
-                m.SetFloat("_SunSizeConvergence", 6f);
-                m.SetFloat("_AtmosphereThickness", 0.85f);
-                m.SetColor("_SkyTint", new Color(0.45f, 0.55f, 0.75f));
-                // Below-horizon sky ≈ fog color, so the world edge dissolves instead of showing a dark band.
-                m.SetColor("_GroundColor", new Color(0.55f, 0.6f, 0.66f));
-                m.SetFloat("_Exposure", 1.15f);
+                s.CloudCoverage = 0.45f;
+                s.Wind = new Vector2(0.02f, 0.008f);
             });
-            RenderSettings.skybox = sky;
-            RenderSettings.sun = sun;
             // Reflections and ambient light both come from the sky, with no lighting bake.
             var skyCube = ctx.BakeSkyReflection();
             ctx.SkyAmbient(skyCube);

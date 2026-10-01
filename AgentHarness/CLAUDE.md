@@ -1,7 +1,8 @@
 # AgentHarness — Unity 6(6.0 LTS 이상) + URP 에이전트 하네스
 
 이 문서만 읽고 바로 루프를 돌릴 수 있어야 한다. 게임은 아직 없다 — `Assets/Game/Stage`, `Assets/Game/Smoke`는
-하네스를 검증하는 스모크 씬이다(절차적 지형 + 커스텀 HLSL + 라이트 + Volume 후처리 + 회전 오브젝트 + 코드로 만든 파티클·애니메이션 + UI Toolkit HUD).
+하네스를 검증하는 스모크 씬이다(절차적 지형 + 커스텀 HLSL + 라이트 + Volume 후처리 + 회전 오브젝트 + 코드로 만든 파티클·애니메이션 + 구름이 흐르는 하늘 +
+씬을 비추는 반사 프로브 + UI Toolkit HUD).
 샘플 프로젝트는 Unity 6000.3.11f1로 고정돼 있고, 하네스는 UPM 패키지 `Packages/com.geuneda.agentharness/`(이 프로젝트에 임베드)로
 Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **기존 Unity 프로젝트에 설치 스크립트로 붙일 수 있다**(아래 "기존 프로젝트에 붙이기").
 `tools/*.ps1`은 패키지 `Tools~/`의 같은 이름 스크립트를 부르는 얇은 진입점이다(모두 같은 파일). 도구를 고칠 때는 `Tools~/`를 고친다.
@@ -15,7 +16,7 @@ Unity 6.0 LTS 이상에서 돈다(아래 "Unity 버전"). 같은 패키지를 **
 | 1 | 모든 게 텍스트(JS 코드) | 씬/프리팹이 GUID로 얽힌 YAML, GUI 중심 도구 | 씬은 `IBuildStep` 코드가 생성, 렌더 파이프라인과 프로젝트 설정(품질 레벨·레이어·Player·Time·Physics)은 `ISettingsStep` 코드, HLSL·UXML/USS·코드로 만든 머티리얼/Volume/라이팅/파티클/애니메이션 클립 |
 | 2 | 수정→새로고침이 초 단위 | 컴파일 + 도메인 리로드, GUI 에디터와 모달 대화상자 | Domain Reload 끔, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 본문(과 그 본문이 부르는 새 메서드)만 바꾸면 컴파일 없이 적용하는 핫 루프(`loop.ps1 -Hot`), 대화상자에 멈추지 않는 `-automated` 에디터·창 없는 에디터(`open.ps1 -Headless`) |
 | 3 | 스크린샷·콘솔·FPS를 눈/기계로 확인 | 에이전트가 화면을 못 봄 | `harness_capture/play`가 PNG + 이미지 통계, `harness_console/stats`가 JSON, 같은 시나리오를 개발 빌드 플레이어에서(`player.ps1`: 에디터 없는 프레임 시간, 게임이 그린 실제 화면과 캡처·에디터 샷의 비교) |
-| 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/SDF/스플라인/스캐터), GPU 텍스처 베이크(`ctx.BakeTexture`, C#과 같은 HLSL 노이즈), URP Volume·데칼을 코드로, 파티클·키프레임 애니메이션을 코드로(`ctx.Particles`, `ctx.AnimationClip` + Playables `ClipPlayer`) |
+| 4 | 에셋 없이 절차적 생성 + 셰이더 + 후처리 | 에셋 임포트 중심 | `Harness.Procedural`(Mesh/Noise/SDF/스플라인/스캐터), GPU 텍스처 베이크(`ctx.BakeTexture`, C#과 같은 HLSL 노이즈), URP Volume·데칼을 코드로, 파티클·키프레임 애니메이션을 코드로(`ctx.Particles`, `ctx.AnimationClip` + Playables `ClipPlayer`), 구름 하늘(`ctx.Sky`)과 빌드 뒤 씬을 찍는 반사 프로브(`ctx.ReflectionProbe`) |
 | 5 | 레지스트리 구조라 병렬 작업이 쉬움 | 에디터 하나를 공유 | `GameRoot.Register` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 git worktree + `submit.ps1`/`land.ps1` 트랜잭션, worktree마다 따로 도는 에디터(`open.ps1 -Own`), 기계가 지키는 계약 폴더(발행 모듈별 파일·이름 한 번·타입 단위 추가만) |
 
 모든 설계 결정의 기준: **"Three.js 환경의 어떤 성질을 복원하는가"**. URP·물리·엔진 기능을 쓰니 결과는 그 이상을 노린다.
@@ -93,7 +94,8 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
   "hot": {"applied","reloaded":[{"file","methods","newMethods","ms"}],"overridesCleared","fallback","changes":[{"file","kind","line","methods","newMethods"}],   // -Hot만
           "interpreted":{"methods":[{"method","calls","frames","ms","msPerCall"}],"msPerFrame","frameShare","error"}},   // 인터프리터로 돈 메서드의 플레이 동안 비용(G2-5)
   "build": {"fingerprint","steps":[{"type","module","ms","error","file","line"}], "warnings":[],   // warnings: 머티리얼 설정 실수 등(실패 아님, 읽을 것)
-            "phases": {"check","settings","steps","cleanup","save","lighting","fingerprint"},   // 빌드 시간이 든 곳(ms)
+            "phases": {"check","settings","steps","cleanup","save","lighting","probes","fingerprint"},   // 빌드 시간이 든 곳(ms)
+            "reflectionProbes": 1, "cubemapsWritten": [],   // ctx.ReflectionProbe를 그린 수, 픽셀이 바뀌어 다시 쓴 하늘·프로브 큐브맵(같은 씬이면 비어 있음)
             "settings": {"assets","written","assigned","pipeline","switched","reloadRequested",   // ISettingsStep이 만든 RP 에셋·이번에 다시 쓴 것·활성 파이프라인·전환
                          "project": {"owned","changed":[],"drift":[]}}, ...},   // 설정 스텝이 소유한 ProjectSettings 값 수·이번에 쓴 것·코드 밖에서 바뀌었던 것(아래 "프로젝트 설정")
             // 핫 루프는 빌드하지 않는다: {"ok":true,"skipped":true,"note"}
@@ -173,18 +175,20 @@ Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json:
   Runtime/                     런타임 계약: GameRoot, IGameModule, EventBus, HarnessProbe, HarnessConfig, ShotPreset(+ShotPose), ScriptedInput,
                                ScenarioInput(KeyNames, InputHookReplay), ScenarioRunner, HarnessCapture(+CaptureCameras: 화면의 카메라들,
                                CaptureUi: 스크린 공간 UI 합성, ContactSheet: 연속 캡처 시트), ClipPlayer(Playables 클립 재생, ClipEvent),
-                               PanelClock(시나리오 동안 UI Toolkit 시간 = 프레임), PlayerRun(플레이어에서 명령줄 시나리오, W8), UI/(Gauge, ToastStack: UI 킷 컨트롤)
+                               PanelClock(시나리오 동안 UI Toolkit 시간 = 프레임), PlayerRun(플레이어에서 명령줄 시나리오, W8), UI/(Gauge, ToastStack: UI 킷 컨트롤),
+                               SkyClock(하늘 구름의 게임 시간)
                                (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
   Runtime/Procedural/          MeshBuilder(+Sdf: FromSdf, +Spline: Tube, +Scatter: Rock·Icosphere), Noise(Perlin/fBm/Ridged/Worley/Rng), Sdf, Spline,
                                Scatter(Poisson), TextureBaker, PMath, AmbientProbe(큐브맵 → 앰비언트 SH)
   Editor/                      [CliCommand] harness_* (HarnessGolden: 기준 이미지 비교, HarnessHot: 핫 루프, HarnessPlayer: 플레이어 빌드 계획, HarnessHeadless: 에디터 모드·창 없는
                                에디터의 유휴 CPU 억제, HarnessContracts: 계약 폴더의 lint 규칙과 소스 선언 읽기) 와 BuildContext(+.Materials: LitMaterial,
                                +.Particles: Particles·ParticleMaterial, +.Animation: AnimationClip·Animate, +.Bake: BakeTexture·FloatTexture,
-                               +.Decals: Decal·DecalMaterial)/IBuildStep,
+                               +.Decals: Decal·DecalMaterial, +.Environment: Sky·BakeSkyReflection·ReflectionProbe)/IBuildStep,
                                SettingsContext(+.Project: ProjectSettings 값, ProjectValues: 값 묶음)/ISettingsStep(렌더·프로젝트 설정), HarnessReleaseBuild
                                (asmdef Harness.Editor, Editor 전용)
   UI/                          DefaultRuntimeTheme.tss (UI Toolkit 기본 테마) + HarnessKit.uss (UI 킷: 디자인 변수·컴포넌트 클래스, 텍스트)
-  Shaders/                     HarnessBake.hlsl (GPU 베이크 셰이더의 정점·도우미) + HarnessNoise.hlsl (C# Noise와 같은 HLSL 노이즈)
+  Shaders/                     HarnessBake.hlsl (GPU 베이크 셰이더의 정점·도우미) + HarnessNoise.hlsl (C# Noise와 같은 HLSL 노이즈) +
+                               HarnessSky.shader (Harness/Sky: ctx.Sky) + HarnessCubeFilter.shader (반사 큐브맵 mip의 GGX 프리필터)
   Tools~/                      도구 본체(.ps1, Harness.psm1) + templates/ (진입점, 기본 시나리오, 기존 프로젝트용 안내서, HarnessInput.cs)
 ProjectSettings/AgentHarness.json   하네스 설정: setup 모드, 모듈 루트/폴더, contracts, 생성물 경로, 빌드·플레이 씬
 Assets/Game/Contracts/         모듈 간 이벤트 타입 (Game.Contracts): <Module>Events.cs, 타입 단위 추가만, 이름 한 번 ("계약 폴더")
@@ -268,8 +272,9 @@ public sealed class FooBuildStep : IBuildStep
 `BuildContext`는 산출물을 제자리 덮어쓰기(GUID 유지)하고, 이번 빌드에서 아무도 만들지 않은 `Assets/Generated` 에셋은 지운다.
 `ctx.CacheHit`: 스텝 어셈블리·Harness.Runtime 코드, 모듈 폴더의 셰이더 소스(include 포함)와 입력이 같으면 재생성을 건너뛴다(`harness_build {"no_cache":true}`로 무시).
 생성 메시·큐브맵은 Mesh·Texture API로 제자리 덮어쓴다(GUID 유지, 바꾼 첫 루프부터 새 모양이 그려짐 — 아래 "함정").
-환경 헬퍼: `ctx.BakeSkyReflection()`(스카이박스→HDR 큐브맵, 기본 반사로), `ctx.SkyAmbient(cube)`(그 큐브맵의 SH를 씬 라이팅 데이터의
-앰비언트로 — 스카이박스 앰비언트를 베이크 없이), `ctx.Create(path, types)`, `ctx.Root()`, `ctx.Seed(salt)`.
+환경 헬퍼: `ctx.Sky(sun, s => …)`(구름 하늘), `ctx.BakeSkyReflection()`(스카이박스→HDR 큐브맵, 기본 반사로), `ctx.SkyAmbient(cube)`(그 큐브맵의 SH를
+씬 라이팅 데이터의 앰비언트로 — 스카이박스 앰비언트를 베이크 없이), `ctx.ReflectionProbe(path, size)`(빌드 뒤 씬을 찍는 반사 프로브) — 아래 "하늘·반사",
+`ctx.Create(path, types)`, `ctx.Root()`, `ctx.Seed(salt)`.
 - 머티리얼: URP Lit은 `ctx.LitMaterial(name, m => …)`(`LitSettings`: BaseColor/BaseMap/Tiling, Metallic/Smoothness/MetallicGlossMap,
   NormalMap/NormalScale, OcclusionMap, Emission/EmissionMap, Transparent, AlphaClip, Cull, ReceiveShadows). 키워드·큐·블렌드는 셰이더 검증이
   설정에서 만든다 — 이미션은 GI 플래그(인스펙터의 Emission 체크)로 켜지므로 `EnableKeyword("_EMISSION")`은 검증이 되돌린다.
@@ -386,6 +391,41 @@ ctx.LitMaterial("Terrain", m => { m.BaseMap = albedo; m.DetailAlbedoMap = detail
 - `LitSettings`에 디테일 맵: `DetailAlbedoMap`(선형, 0.5 = 변화 없음 — URP가 알베도에 2 × 이 값을 곱한다; sRGB로 임포트돼 있으면 경고), `DetailNormalMap`, `DetailNormalScale`,
   `DetailTiling`, `DetailMask`.
 - 빌드가 만드는 큰 메시(샘플 바위 14만 정점)는 매 빌드 디스크에서 다시 읽고 fingerprint가 해시한다(각 수십 ms) — 멀리 보이는 것은 덜 쪼갠다.
+
+### 하늘·반사 (G4-5)
+
+```csharp
+// 하늘: 그라디언트 + 태양 + fBm 구름(게임 시간으로 흐름) — 샘플: Assets/Game/Stage/Builders/StageEnvironmentStep.cs
+ctx.Sky(sun, s => { s.CloudCoverage = 0.45f; s.Wind = new Vector2(0.02f, 0.008f); });   // RenderSettings.skybox·sun + <Module>/Sky의 SkyClock
+ctx.SkyAmbient(ctx.BakeSkyReflection());   // 하늘 → HDR 큐브맵(mip은 GGX로 거름) = 기본 반사, 그 SH = 앰비언트
+// 반사 프로브: 빌드가 끝난 뒤 그 자리에서 씬을 찍은 큐브맵(Custom) — 샘플: Assets/Game/Smoke/Builders/SmokeBuildStep.cs
+pedestal.isStatic = true;   // 프로브에 그려지는 것 = Reflection Probe Static 렌더러(Unity의 베이크 프로브 규칙) + 하늘·라이트·데칼·안개
+var probe = ctx.ReflectionProbe("Probe", new Vector3(19f, 12.4f, 19f), 256);   // 박스(이 안의 오브젝트가 씀, 박스 투영 켬), 해상도(기본 128)
+probe.transform.localPosition = new Vector3(0f, 3.4f, 0f);   // 찍는 자리 — 프로브는 빌드 스텝이 다 돈 뒤에 그려지므로 호출 뒤에 옮겨도 된다
+probe.center = new Vector3(0f, 2.4f, 0f);                    // 박스를 땅에 맞춤(박스 투영이 그 면 위에 비춘다)
+```
+- `ctx.Sky(sun, setup)`: 패키지 셰이더 `Harness/Sky`(`Shaders/HarnessSky.shader`, 파이프라인 무관 스카이박스)의 `Sky.mat`. `SkySettings`: `Zenith`/`Horizon`/`Ground`
+  (색은 `Material.SetColor`·인스펙터 값), `HorizonFalloff`, `SunColor`(기본 = 태양 라이트 색)/`SunSize`(각반지름, 도)/`SunIntensity`/`SunGlow`, `CloudCoverage`(0 맑음 – 1 흐림)/
+  `CloudSharpness`/`CloudScale`/`CloudOpacity`/`CloudColor`/`CloudShadow`/`Wind`(초당 하늘 단위)/`CloudOctaves`/`Seed`(기본 `ctx.Seed("sky")`), `Exposure`. 태양 원반은
+  빌드 때 라이트가 비추는 방향(`_SunDirection`) — 게임이 태양을 돌리면 그 머티리얼 값도 바꾼다. 원반과 태양 쪽 구름은 HDR(1 넘음)이라 블룸이 걸린다.
+- 구름 시계: 전역 셰이더 값 `_HarnessSkyTime`을 `SkyClock`(Harness.Runtime, `ctx.Sky`가 둠)이 매 프레임 `Time.timeSinceLevelLoad`(게임 시간)로 → 고정 시간 간격
+  시나리오에서 같은 t면 같은 구름(실시간이면 G3-10처럼 캡처가 흔들린다). 플레이가 끝나면 0 → 편집 모드 캡처와 빌드가 찍는 큐브맵은 시간 0의 구름. 픽셀보다 작아진
+  노이즈 옥타브는 지운다(지평선·작은 큐브맵 면에서 반짝이지 않음). 출시 빌드에서 구름이 흐르려면 `GameRoot`처럼 `AGENTHARNESS_RUNTIME`.
+- `ctx.ReflectionProbe(path, size, resolution)`: Custom 모드 프로브(HDR, 박스 투영). **모든 빌드 스텝이 끝나고 씬이 라이팅 데이터와 함께 저장된 뒤**
+  (`build.phases.probes`, `build.reflectionProbes`) 그 자리에서 씬을 큐브로 그려 mip을 GGX로 거르고 `Reflection_<path>.asset`에 둔다(씬은 그 에셋을 참조).
+  Reflection Probe Static이 아닌 렌더러(돌아가는 매듭·링·파티클)는 그리지 않는다 — 움직이는 것은 빌드 때 자리로 박혀 틀리게 비친다. 그리는 동안 다른 프로브는 끈다
+  (한 번 튐: 프로브 안의 금속은 하늘을 비춘다). 그 자리에서 씬을 본 것이라 박스 안 오브젝트의 반사가 하늘이 아니라 주변이 된다(샘플: 프로브 없이는 강철 받침대가 하늘만
+  비춰 하얗게 뜬다).
+- 큐브맵(하늘·프로브)은 매 빌드 다시 그리고 **픽셀이 바뀐 때만 쓴다**(`build.cubemapsWritten` — 같은 머신·같은 씬이면 바꾼 뒤 첫 빌드에만; 새 클론(새 `Library/`)은
+  첫 빌드가 셰이더 변형을 처음 컴파일하며 다음 빌드와 조금 달라 둘째 빌드도 쓴다 — 샷 차이 2–3단계, 그 뒤로 픽셀까지 같음). fingerprint에는 큐브맵의
+  모양만 들어간다(`fingerprint.txt`에 `cubemap 256 RGBAHalf 9` — GPU 결과라 끝자리가 GPU마다 다를 수 있다, 보이는 모양은 기준 이미지가 본다). 비용(샘플, 창 에디터, 웜):
+  하늘 128² ~13–16 ms, 프로브 256² ~20–55 ms(빌드가 쓰는 변경 뒤 첫 번째는 쓰기 포함 ~0.1–0.2 s).
+- mip의 GGX 프리필터(`Shaders/HarnessCubeFilter.shader`): mip m = URP가 그 mip에서 읽는 거칠기(`PerceptualRoughnessToMipmapLevel`, 6단계)의 GGX 로브, 고정 Hammersley 256표본 +
+  원본 박스 mip에서 거른 중요도 표본 → 매번 같은 값, 라이팅 베이크의 컨볼루션처럼 거친 면이 면 경계(seam) 없이 흐리다(W15 전 `BakeSkyReflection`은 박스 mip).
+- **손으로 쓴 URP 셰이더가 프로브를 받으려면**: Forward+(샘플 PC 렌더러, 프로브 블렌딩 켬)는 프로브를 클러스터 루프로만 준다(오브젝트별 `unity_SpecCube0`는 채우지 않음) →
+  `#pragma multi_compile _ _CLUSTER_LIGHT_LOOP`(6.0은 `_FORWARD_PLUS` — `#if UNITY_VERSION >= 60010000`로 가른다 — Unity 6의 `UNITY_VERSION`은 6000.3.11 = 60030011, 6.1+에서 `_FORWARD_PLUS`를 선언하면 폐기 경고),
+  `_REFLECTION_PROBE_BLENDING`·`_REFLECTION_PROBE_BOX_PROJECTION`(fragment), `GlossyEnvironmentReflection(reflect(-v, n), positionWS, 1 - smoothness, 1,
+  GetNormalizedScreenSpaceUV(positionCS))`. 샘플: `Assets/Game/Smoke/Shaders/SmokeIridescent.shader`. 키워드가 없으면 에러 없이 하늘만 비친다. URP Lit은 그대로 된다.
 
 ### UI 킷 (G1-4)
 
@@ -519,7 +559,7 @@ public sealed class FooProjectSettings : ISettingsStep       // 렌더 설정과
 
 | 커맨드 | 하는 일 |
 |---|---|
-| `harness_build` | Builders의 ISettingsStep(렌더·프로젝트 설정, harness 프로젝트만) → IBuildStep을 Order 순으로 빈 씬에 실행 → `buildScene` 저장. `{ok, fingerprint, steps[], settings, cacheHits, bakes, bakesSkipped, deletedAssets}`. `dry_run`, `no_cache`. 빌드 스텝이 없고 `playScene`이 build가 아니면(기존 프로젝트) 플레이 씬을 열고 에셋 기준 fingerprint만(`skipped`) |
+| `harness_build` | Builders의 ISettingsStep(렌더·프로젝트 설정, harness 프로젝트만) → IBuildStep을 Order 순으로 빈 씬에 실행 → `buildScene` 저장 → 반사 프로브(`ctx.ReflectionProbe`) 렌더. `{ok, fingerprint, steps[], settings, cacheHits, bakes, bakesSkipped, reflectionProbes, cubemapsWritten, deletedAssets, phases}`. `dry_run`, `no_cache`. 빌드 스텝이 없고 `playScene`이 build가 아니면(기존 프로젝트) 플레이 씬을 열고 에셋 기준 fingerprint만(`skipped`) |
 | `harness_capture` | `{"preset":"all"\|"<name>"\|"main","out":"HarnessOut/capture","scene":"","ui":true}` 편집 모드 오프스크린 PNG(프로젝트 캡처 크기, 화면의 카메라들 + 스크린 공간 UI 합성) + `meanLuma/stdLuma/blank/dark/magenta/cameras/ui`. 샷 = 씬의 ShotPreset + 설정 `shots`. 플레이 씬을 먼저 연다(`"scene":"open"`이면 열린 씬 그대로) |
 | `harness_golden` | `{"shots":"[{\"path\",\"name\",\"ignore\":[{x,y,w,h}]}]","golden":"","key":"default","out":"","update":false}` 샷을 `<golden>/<Unity 버전>/<key>/<파일>`과 비교(샷마다 status·meanDiff·changedRatio·ssim·rect, 바뀌었으면 `<out>/golden/<샷>.diff.png`) 또는 그 폴더에 씀(`update`). 루프가 매번 부른다 |
 | `harness_play` | `{"scenario":"tools/scenarios/default.json"\|"{...inline}","out":"HarnessOut/play"}` 즉시 반환 → `harness_play_status` 폴링 |
@@ -871,20 +911,21 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -Source http
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/selftest.ps1                                         # 매트릭스 1–8, ~9–14분(O-12 포함)
-powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 896e67fc
+powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -ExpectFingerprint 609b54d2
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
 - 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark/magenta 없음, 모든 샷 1280x720에 HUD 합성, 기준 이미지: 루프 1이 `HarnessOut/selftest/golden`에
   쓰고 2·3이 픽셀까지 같음(maxDiff 0), 모든 에디터 창을 매 업데이트마다 다시 그리는 플레이의 루프도 픽셀까지 같음(G3-15), 커밋된 이 버전의 기준 이미지와 같음, `harness_golden`의 `ignore`·패치 버전 대체) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
   uGUI 합성(편집 모드, 저장하지 않는 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·스택 UI 카메라의 캔버스 → 순서, 선형 공간 블렌드 오차 ≤ 2, 되돌림) +
   카메라(G3-7, 픽스처: 메인 카메라 자식인 스택 Overlay 카메라가 그리는 쿼드가 메인·다른 포즈 모두 화면 중앙, 미니맵 Base 카메라가 오른쪽 위, 앞 depth 카메라는 덮임,
-  `"camera"`로 미니맵만, 메인 카메라·타깃·스택 되돌림, 씬 dirty 아님) + 플레이 중 픽스처(오버레이 캔버스·스택 카메라)와 연속 캡처(2x2 시트, `motion` > 0) +
+  `"camera"`로 미니맵만, 메인 카메라·타깃·스택 되돌림, 씬 dirty 아님) + 플레이 중 픽스처(오버레이 캔버스·스택 카메라)와 연속 캡처(2x2 시트, `motion` > 0), 하늘만 보는 연속 캡처에서 구름이 게임 시간으로 흐름(G4-5) +
   실제 입력 격리(플레이 동안 실제 키보드 장치에 스페이스를 넣어도 events 그대로·`isolatedDevices` 누름 > 0, 실패·중단한 플레이 뒤에도 실제 장치가 다시 켜짐;
   플레이가 포커스 있음·없음으로 시작하는 두 번 — 없음은 Input System이 먼저 꺼 둔 장치를 `background`로 가져가 세고 도중에 포커스가 돌아와도 끝까지(G3-9), 포커스 변화는
   Unity 안에서 `Application.InvokeFocusChanged`로 만들어 OS 포커스와 무관; UI Toolkit의 "포커스 없으면 입력 무시"가 시나리오 동안 꺼짐(G3-14)) +
   렌더 설정(W4: RP 에셋이 생성물이고 루프 2·3은 다시 쓰지 않음, 지우면 루프 한 번으로 다시 생기고 fingerprint·픽셀·`git status` 같음; 반사 큐브맵에 잘못된 텍셀이
   없고 가장 밝은 텍셀이 태양 방향(2° 안); 앰비언트 = 라이팅 데이터의 큐브맵 SH; `AmbientProbe` 균일 환경 → Flat과 같음·쓰레기 텍셀 거부; 머티리얼 경고 3종과
-  `LitMaterial`의 이미션·알파 클립) + 프로젝트 설정(G1-5: 설정 스텝이 소유한 값을 루프 2·3은 쓰지 않음; YAML을 손으로 고치고(Mobile 레벨 이름, PC의 LOD 바이어스,
+  `LitMaterial`의 이미션·알파 클립; 하늘·반사(G4-5): `Harness/Sky`, 플레이 뒤 구름 시계 0, Custom 반사 프로브의 큐브맵에 잘못된 텍셀 없고 아치 방향이 하늘이 아니라 돌,
+  fingerprint에 큐브맵 모양만, 프로브를 켜고 끈 closeup 렌더에서 받침대·매듭이 그것을 비춤, 루프 2·3은 하늘·프로브 큐브맵을 다시 쓰지 않음) + 프로젝트 설정(G1-5: 설정 스텝이 소유한 값을 루프 2·3은 쓰지 않음; YAML을 손으로 고치고(Mobile 레벨 이름, PC의 LOD 바이어스,
   레이어 이름 바꾸기·추가) Project Settings 창처럼 메모리에서 바꾼 값(PC의 vSync, 에디터의 품질 레벨 → 파이프라인 전환)을 루프 한 번이 되돌리고 6개 모두 `drift`, 파일·에디터에
   코드 값, fingerprint·픽셀·`git status` 같음 — 샘플 버전은 바이트까지) + 콘텐츠 헬퍼(G1-3: 빌드된 불씨의 고정 시드·`AlwaysSimulate`, Halo의 `ClipPlayer`; 픽스처 클립의 경로·컴포넌트·머티리얼 속성·
   Transform 속성 오타 → 경고 한 줄씩, 선형 회전 샘플, 파티클 두 번 시뮬레이션이 같음, 가산 `ParticleMaterial`; 플레이 중 런타임 클립을 받은 `ClipPlayer`의
@@ -916,7 +957,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   `play.events`, 플레이어의 프레임·렌더 통계, 샷이 에디터 것과 파티클 차이 안(바뀐 픽셀 ≤ 1%, 평균 ≤ 2), 그 프레임의 화면 = 캡처(`screen.vsShot` same),
   빌드 뒤 작업 트리 그대로(첫 빌드는 셰이더 컴파일로 ~2분).
 - 주입 위치는 샘플 모듈의 표식 줄: `SmokeModule.cs`의 `m_Time += dt;`(컴파일, 64행)·`EventBus.Publish(new SpinnerLap(laps));`(런타임, 71행),
-  `SmokeIridescent.shader`의 `Frag` 첫 줄(87행). 핫 루프는 `Tick`의 `Mathf.Sin(m_Time * 1.6f) * 0.3f`(흔들림 폭; 새 헬퍼 단계는 이것을 `SelftestBob(1.2f)`로 바꾸고 `void Reverse()` 앞에 헬퍼를 더함)와
+  `SmokeIridescent.shader`의 `Frag` 첫 줄(99행 — W15에서 프로브 반사의 속성·키워드를 더해 87행에서 옮김). 핫 루프는 `Tick`의 `Mathf.Sin(m_Time * 1.6f) * 0.3f`(흔들림 폭; 새 헬퍼 단계는 이것을 `SelftestBob(1.2f)`로 바꾸고 `void Reverse()` 앞에 헬퍼를 더함)와
   `float m_Time;`(필드 추가).
   이 줄들을 바꾸면 `selftest.ps1`의 표식도 바꾼다.
 - 6–8은 커밋된 `tools/`·하네스 패키지·`Assets/Game/`·설정 파일을 쓴다. 6은 detached worktree(`<저장소>-st-o`, 전용 에디터; 끝나면 닫고 지운다),
@@ -932,14 +973,15 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-10-01 W13, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W13에서 샘플의 데칼이 ScreenSpace로 바뀌어(렌더러 설정값) 새 값
-  — 6.6은 에디터 창이 있는 화면의 DPI에 따라 fingerprint가 달랐는데(150% 화면, ROADMAP G1-6) W11에서 고정했다. 세 버전 모두 selftest 1번의 루프끼리 `maxDiff` 0):
+- 검증한 버전(2026-10-01 W15, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W15에서 샘플의 하늘(`Harness/Sky`)·반사 프로브·받침대·매듭 재질이 바뀌어 새 값
+  — 6.6은 에디터 창이 있는 화면의 DPI에 따라 fingerprint가 달랐는데(150% 화면, ROADMAP G1-6) W11에서 고정했다. 세 버전 모두 selftest 1번의 루프끼리 `maxDiff` 0,
+  하늘·프로브 큐브맵을 루프 2·3이 다시 쓰지 않음, 매듭이 프로브를 비춤(6.0은 `_FORWARD_PLUS`, 6.3·6.6은 `_CLUSTER_LIGHT_LOOP`)):
 
   | 버전 | URP(내장) | build.fingerprint | 줄(컴파일/런타임/셰이더) | 매트릭스 |
   |---|---|---|---|---|
-  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `8acf308c…` | 64 / 71 / 87 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크·`-automated`·창 없는 전용 에디터 포함), 샷 72.6/61.3/48.2(6.3과 같음). 플레이어 단계는 건너뜀 — 6.3이 저장한 URP 전역 설정(에셋 버전 10)을 URP 17.0(8)이 빌드에 거부 |
-  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `896e67fc…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 실행 포함), 커밋된 기준 이미지와 같음 |
-  | 6000.6.3f1 (최신 정식) | 17.6.0 | `6b943b54…` | 64 / 71 / 87 | 1–9 녹색(같음, 플레이어 312–429 fps), 샷 72.6/61.3/48.2. `render.batches`는 null(6.6엔 그 카운터가 없다, 아래 "함정") |
+  | 6000.0.84f1 (6.0 LTS) | 17.0.4 | `a0df2fa8…` | 64 / 71 / 99 | 1–9 녹색(핫 루프·UI 시계·GPU 베이크·`-automated`·창 없는 전용 에디터·하늘·반사 프로브 포함), 샷 81.8/66.1/50.6(6.3과 같음). 플레이어 단계는 건너뜀 — 6.3이 저장한 URP 전역 설정(에셋 버전 10)을 URP 17.0(8)이 빌드에 거부 |
+  | 6000.3.11f1 (6.3 LTS, 샘플) | 17.3.0 | `609b54d2…` | 64 / 71 / 99 | 1–9 녹색(같음, 플레이어 실행 포함), 커밋된 기준 이미지와 같음(새 클론은 루프 2부터 픽셀까지) |
+  | 6000.6.3f1 (최신 정식) | 17.6.0 | `cadaeca6…` | 64 / 71 / 99 | 1–9 녹색(같음, 플레이어 408 fps), 샷 81.8/66.1/50.6. `render.batches`는 null(6.6엔 그 카운터가 없다, 아래 "함정") |
 
   `-automated`·`-debugCodeOptimization`·`-batchmode -ignoreCompilerErrors`와 창 없는 에디터의 렌더(O-11 우회 포함)는 세 버전에서 같게 동작했다.
 
@@ -1186,6 +1228,16 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   `RenderingUtils.SetScaleBiasRt`를 부르는데, 후처리·HDR·MSAA·깊이/불투명 텍스처 없이 타깃에 바로 그리는 카메라에서는 그 핸들이 비어 NullReferenceException →
   "Render Graph Execution error". 캡처의 uGUI 레이어를 그리는 숨은 UI 카메라가 그런 카메라라 uGUI 합성이 비고 플레이 중 캡처가 런타임 에러를 냈다 → 그 카메라는
   렌더러의 renderer feature를 끄고 그린다(`CaptureUi.RenderWithoutFeatures`). 게임의 그런 카메라(후처리 없는 보조 카메라)는 여전히 이 에러를 낸다(URP 쪽).
+- **반사 프로브를 끄거나 지워도 같은 에디터 프레임의 렌더는 계속 그것을 쓴다**(W15): 컬링이 프로브를 프레임이 시작될 때의 상태로 본다(`enabled = false`, GameObject 끄기,
+  텍스처 null, 크기 0, 멀리 옮기기 모두 그대로; 다음 프레임부터 반영). 빌드는 한 프레임이라 프로브 렌더가 **앞 빌드 씬의 프로브와 그 큐브맵**(같은 에셋)을 비췄고,
+  받침대 재질을 바꾸면 프로브가 2–3 빌드에 걸쳐 수렴했다(루프마다 큐브맵을 다시 씀 → 첫 루프의 샷이 다음 루프와 달랐다) → 끈 뒤 `ReflectionProbe.UpdateCachedState()`.
+- **카메라의 첫 렌더가 앞서 그린 다른 카메라의 상태를 이어받는다**(W15, URP 17.3): near/far가 다른 카메라 뒤의 첫 하늘 렌더는 태양 원반 가장자리 텍셀 몇 개가 half 1–6단계
+  달랐다(같은 near/far 카메라를 먼저 한 번 그리면 같음). 큐브맵이 "에디터가 바로 전에 무엇을 그렸나"(빌드 프레임인지, 컴파일 뒤인지)를 따라 다시 쓰였다 → 빌드의 큐브
+  렌더는 같은 카메라로 두 번 그리고 둘째를 쓴다(창 없는 에디터의 첫 메시 그리기 O-11 우회와 같은 자리).
+- **Unity 6의 셰이더 매크로 `UNITY_VERSION`은 문서 예(2020.3.0 = 202030)와 형식이 다르다**: 6000.3.11f1 = 60030011, 6000.0.84f1 = 60000084(6000.<마이너>를 붙인
+  수 × 10000 + 패치; 셰이더로 직접 읽어 확인). `#if UNITY_VERSION >= 600010`은 6.0에서도 참이라 6.0의 매듭이 프로브를 받지 못했다(W15 6.0 새 클론) → 6.1+는 `>= 60010000`.
+  `#pragma`를 감싼 `#if UNITY_VERSION`은 6.0–6.6 모두 평가된다.
+- `NativeArray<byte>` 인덱서로 큐브맵 4 MB를 바이트 비교하면 Debug 코드 최적화에서 수십 ms였다(프로브 단계 ~110 ms 중 대부분) → `AsReadOnlySpan().SequenceEqual(...)`.
 - **Unity의 증분 플레이어 빌드가 앞선 빌드의 플레이어 데이터를 다시 썼다**: 출시 빌드(하네스 없음) 뒤 같은 프로젝트의 개발 빌드에서 "player data was not rebuilt"와
   함께 `ScriptingAssemblies.json`이 출시 빌드 목록 그대로 → `Harness.Runtime.dll`은 Managed에 있는데 로드되지 않아 `RuntimeInitializeOnLoadMethod`가 불리지 않았다
   (`RuntimeInitializeOnLoads.json`에는 있음). `CleanBuildCache`면 맞게 나온다(Fluid-Sim 9.6 s). 개발 → 출시 순서는 괜찮았다.
@@ -1227,7 +1279,7 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - 에디터 플레이 모드 FPS는 에디터 오버헤드·autotick 영향을 받는다. 절대값이 아니라 **변경 전후 비교**용이다(`editorFocused` 확인). 실제 성능은
   `tools/player.ps1`(개발 빌드 플레이어, 샘플은 에디터의 ~3.8배).
 - Code Optimization은 Debug(정확한 예외 줄 번호). Release면 throw 위치가 메서드 끝 줄로 보고되고, **절차적 메시·텍스처의 float 결과가 달라져
-  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `896e67fc…`).
+  build fingerprint도 바뀐다**(F-6: 당시 해시로 Debug `b012cf35…` / Release `6b977ecd…`; 지금 스모크 씬 Debug는 `609b54d2…`).
   `CompilationPipeline.codeOptimization`은 에디터 세션 동안만 유지돼서 재시작하면 Release(사용자 전역 "Code Optimization On Startup")로 돌아간다
   → `HarnessCodeOptimization`([InitializeOnLoad])이 도메인이 로드될 때마다 이 프로젝트만 Debug로 되돌린다(재컴파일 1회; 그래서 이 프로젝트에선
   Release가 유지되지 않는다). 전역 EditorPrefs는 다른 프로젝트에 영향을 주므로 건드리지 않는다. `open.ps1`은 명령줄 `-debugCodeOptimization`으로 열어서
