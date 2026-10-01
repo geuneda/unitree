@@ -83,8 +83,9 @@ $major = 0
 if ($major -lt 6000) {
     $result.warnings += "the project is on Unity $version; the harness needs Unity 6.0 LTS or newer (open it with tools/open.ps1 -UnityVersion <installed 6.x> to upgrade)"
 }
-if ($root.Length -gt 60) { $result.warnings += "the project path is $($root.Length) characters: Unity package paths under Library/ can then exceed the Windows 260-character limit (keep it at 60 or less)" }
-if ($root.StartsWith([IO.Path]::GetTempPath().TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { $result.warnings += 'the project is under %TEMP%: Windows application control may block Burst DLLs there' }
+$windows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+if ($windows -and $root.Length -gt 60) { $result.warnings += "the project path is $($root.Length) characters: Unity package paths under Library/ can then exceed the Windows 260-character limit (keep it at 60 or less)" }
+if ($windows -and $root.StartsWith([IO.Path]::GetTempPath().TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { $result.warnings += 'the project is under %TEMP%: Windows application control may block Burst DLLs there' }
 if (Test-Path -LiteralPath (Join-Path $root 'Temp/UnityLockfile')) {
     try { $s = [IO.File]::Open((Join-Path $root 'Temp/UnityLockfile'), 'Open', 'Read', 'None'); $s.Dispose() }
     catch { $result.warnings += 'an Editor has the project open: it picks up the new package on its next refresh (or close it and use tools/open.ps1)' }
@@ -335,6 +336,7 @@ if (-not $WhatIf) {
     }
     foreach ($s in $plan) { if ($s.write) { & $s.write } }
 }
-$result.next = @('powershell -ExecutionPolicy Bypass -File tools/open.ps1', "& ./tools/uc.ps1 harness_setup   # recommendations only in an attached project", 'powershell -ExecutionPolicy Bypass -File tools/loop.ps1')
+$run = if ($windows) { 'powershell -ExecutionPolicy Bypass -File' } else { 'pwsh' }   # macOS / Linux: PowerShell 7 (P-3)
+$result.next = @("$run tools/open.ps1", "$run tools/uc.ps1 harness_setup   # recommendations only in an attached project", "$run tools/loop.ps1")
 $result.ok = $true
 Finish 0

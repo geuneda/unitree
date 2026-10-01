@@ -171,15 +171,22 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
 
 ## 요구 사항
 
-- Windows 10/11 — 도구 스크립트는 Windows PowerShell 5.1 기준
+- Windows 10/11(Windows PowerShell 5.1) 또는 **macOS**(Apple Silicon, PowerShell 7 `pwsh` 7.4+) — 도구 스크립트는 둘 다 같은 파일입니다. macOS에서는
+  `powershell -ExecutionPolicy Bypass -File tools/x.ps1` 대신 `pwsh tools/x.ps1`. 기준 이미지는 OS별 폴더(`golden/<버전>-macos/`)이고 fingerprint도 OS마다 다릅니다
+  (같은 머신에서는 매번 같음). M4 Pro에서 루프·새 클론(6.3·6.6)·기존 프로젝트 붙이기가 녹색, 코드 변경 없는 루프 ~2.8 s. 다만 Mac에서는 UI Toolkit의 작은 글자가
+  에디터 세션에 따라 소수 픽셀 다르게 찍혀(ROADMAP G3-17, 미해결) 기준 이미지 비교가 그 글자에서 `changed`일 수 있고, Mac 기준 이미지는 아직 커밋하지 않았습니다
+  (자세한 것: `AgentHarness/CLAUDE.md` "macOS").
+  pwsh는 관리자 권한 없이 GitHub 릴리스의 `powershell-<버전>-osx-arm64.tar.gz`를 풀어 `~/.local/bin/pwsh`로 링크하면 됩니다.
 - Unity **6.0 LTS 이상** + URP. 샘플 프로젝트는 **6000.3.11f1**(Unity 6.3 LTS)로 고정돼 있고, 새 클론에서 6000.0.84f1·6000.3.11f1·6000.6.3f1 모두
   검증 매트릭스가 전부 녹색입니다(6.6의 검은 조명은 W4에서 고침, ROADMAP P-4; 6.0에서는 6.3이 저장한 URP 에셋을 URP 17.0이 빌드에 받지 않아 플레이어 단계만
   건너뜁니다). 다른 설치 버전으로 열 때는 `tools/open.ps1 -UnityVersion <버전>`.
-- `tools/player.ps1`: 에디터와 같은 버전의 Windows 빌드 지원(Windows 에디터에 기본 포함). 개발 빌드는 `AgentHarness/HarnessOut/player-build/`(샘플 ~190 MB).
-- Unity CLI (`unity`, beta): `$env:UNITY_CLI_CHANNEL='beta'; irm https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.ps1 | iex`
+- `tools/player.ps1`: 에디터와 같은 버전의 그 OS용 Standalone 빌드 지원(에디터에 기본 포함 — Windows `.exe`, macOS `.app`). 개발 빌드는
+  `AgentHarness/HarnessOut/player-build/`(샘플 Windows ~190 MB, macOS ~350 MB).
+- Unity CLI (`unity`, beta): Windows `$env:UNITY_CLI_CHANNEL='beta'; irm https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.ps1 | iex`,
+  macOS `curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash`
 - 하네스가 에디터에 붙는 통로는 Unity의 실험 패키지 `com.unity.pipeline`(0.8.0-exp.1)이다. 하네스 패키지의 의존성으로 함께 설치된다.
-- 선택: Visual Studio 2022 MSBuild (`compile-check.ps1`의 msbuild 백엔드). 기본인 `csc` 백엔드는 Unity 설치에 포함된 Roslyn만 쓴다.
-- **짧은 경로에 클론할 것 (프로젝트 경로 60자 이하 권장).** Unity 패키지 내부 경로가 길어서(Library 아래 최장 200자 이상) 긴 경로에 두면
+- 선택(Windows): Visual Studio 2022 MSBuild (`compile-check.ps1`의 msbuild 백엔드). 기본인 `csc` 백엔드는 Unity 설치에 포함된 Roslyn만 쓴다(macOS는 csc만).
+- **(Windows) 짧은 경로에 클론할 것 (프로젝트 경로 60자 이하 권장).** Unity 패키지 내부 경로가 길어서(Library 아래 최장 200자 이상) 긴 경로에 두면
   Windows 260자 경로 제한에 걸려 Unity 자체가 패키지 파일을 못 읽는다. 확인: 49자·57자 경로 정상, 149자 경로에서 임포트 에러와 플레이 실패.
 
 ## 빠른 시작
@@ -192,6 +199,13 @@ powershell -ExecutionPolicy Bypass -File tools/open.ps1               # 에디�
 powershell -ExecutionPolicy Bypass -File tools/uc.ps1 harness_setup   # 1회: 사용자별 설정(Debug 코드 최적화 등)
 powershell -ExecutionPolicy Bypass -File tools/loop.ps1               # 씬이 없으면 여기서 코드로 생성된다
 powershell -ExecutionPolicy Bypass -File tools/quit.ps1               # 끝낼 때: 정상 종료
+```
+macOS(PowerShell 7)에서는 같은 스크립트를 `pwsh`로 부릅니다:
+
+```sh
+cd ~/dev/unitree/AgentHarness
+pwsh tools/open.ps1 && pwsh tools/uc.ps1 harness_setup && pwsh tools/loop.ps1
+pwsh tools/quit.ps1
 ```
 
 `open.ps1`은 에디터 로그를 프로젝트의 `Logs/Editor.log`에 따로 쓰게 합니다. `unity open`이나 Hub로 열면 모든 에디터가

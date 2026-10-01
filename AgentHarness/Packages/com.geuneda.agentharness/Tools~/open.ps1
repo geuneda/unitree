@@ -136,8 +136,7 @@ if ($editor -or $started -or (Test-HarnessProjectOpen)) {
     $logDir = Split-Path -Parent $log
     New-Item -ItemType Directory -Force $logDir | Out-Null
     if (Test-Path -LiteralPath $log) { Move-Item -LiteralPath $log -Destination (Join-Path $logDir 'Editor-prev.log') -Force }
-    $argLine = (@(Get-HarnessEditorArguments -Root $root -Log $log -Headless:$Headless -Interactive:$Interactive) | ForEach-Object { ConvertTo-HarnessArg $_ }) -join ' '
-    $p = Start-Process -FilePath $exe -ArgumentList $argLine -PassThru
+    $p = Start-HarnessDetached $exe @(Get-HarnessEditorArguments -Root $root -Log $log -Headless:$Headless -Interactive:$Interactive)
     Save-HarnessLaunchedEditor $p
     $result.pid = $p.Id
     $result.launched = $true

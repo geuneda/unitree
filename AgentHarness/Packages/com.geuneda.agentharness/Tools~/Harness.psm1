@@ -222,8 +222,16 @@ function Get-HarnessEditorProcess {
     $p = Get-Process -Id $ep.Pid -ErrorAction SilentlyContinue
     if (-not $p -or $p.ProcessName -ne 'Unity') { return $null }
     # The descriptor is written after its Editor started; a process that started later reuses a dead Editor's pid.
-    try { if ($p.StartTime -gt (Get-Item -LiteralPath $script:Descriptor).LastWriteTime) { return $null } } catch { }
+    # (Not Get-Item: the descriptor's leading dot hides it from Get-Item on macOS and Linux.)
+    try { if ($p.StartTime -gt [IO.File]::GetLastWriteTime($script:Descriptor)) { return $null } } catch { }
     $p
+}
+
+# A time from a JSON reply as UTC. PowerShell 7's ConvertFrom-Json already made an ISO 8601 string a DateTime; formatting
+# that back for [DateTime]::Parse loses the fraction of a second and reads it as local time (P-3). 5.1 leaves the string.
+function ConvertTo-HarnessUtc($Value) {
+    if ($Value -is [DateTime]) { return $Value.ToUniversalTime() }
+    [DateTime]::Parse("$Value", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
 }
 
 # The Editor tools/open.ps1 started for this project (Logs/harness-editor.json), while it runs. Known from the start,
@@ -235,14 +243,16 @@ function Get-HarnessLaunchedEditor {
     $p = Get-Process -Id ([int]$j.pid) -ErrorAction SilentlyContinue
     if (-not $p -or $p.ProcessName -ne 'Unity' -or $p.HasExited) { return $null }
     # A later process that reuses the pid of an Editor that has exited is not it.
-    try { if ([math]::Abs(($p.StartTime.ToUniversalTime() - [DateTime]::Parse($j.startedAt).ToUniversalTime()).TotalSeconds) -gt 2) { return $null } } catch { return $null }
+    try { if ([math]::Abs(($p.StartTime.ToUniversalTime() - (ConvertTo-HarnessUtc $j.startedAt)).TotalSeconds) -gt 2) { return $null } } catch { return $null }
     $p
 }
 
 # Titles of a process's visible top-level windows: how a dialog shown before the Pipeline server is up (software
 # terms, "Enter Safe Mode?", package errors) is seen from outside. Process.MainWindowTitle misses some of them (the
-# Safe Mode prompt has no main window). Windows only for now (P-3); elsewhere an empty list.
+# Safe Mode prompt has no main window). macOS (P-3): the window server's list of on-screen windows, whose titles it
+# gives only to a terminal with the Screen Recording permission (without it: no titles). Linux: an empty list.
 function Get-HarnessWindowTitles([int]$ProcessId) {
+    if (Test-HarnessMacOS) { return @(Get-HarnessMacWindowTitles $ProcessId) }
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { return @() }
     if (-not ('AgentHarnessWindows' -as [type])) {
         Add-Type -TypeDefinition @'
@@ -270,6 +280,53 @@ public static class AgentHarnessWindows {
 '@
     }
     @([AgentHarnessWindows]::Titles($ProcessId))
+}
+
+# PowerShell 7 on macOS ($IsMacOS does not exist in Windows PowerShell 5.1).
+function Test-HarnessMacOS { (Test-Path variable:global:IsMacOS) -and $global:IsMacOS }
+
+function Get-HarnessMacWindowTitles([int]$ProcessId) {
+    if (-not ('AgentHarnessMacWindows' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
+public static class AgentHarnessMacWindows {
+    const string CG = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
+    const string CF = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
+    const uint Utf8 = 0x08000100;
+    [DllImport(CG)] static extern IntPtr CGWindowListCopyWindowInfo(uint option, uint relativeToWindow);
+    [DllImport(CF)] static extern long CFArrayGetCount(IntPtr array);
+    [DllImport(CF)] static extern IntPtr CFArrayGetValueAtIndex(IntPtr array, long index);
+    [DllImport(CF)] static extern IntPtr CFDictionaryGetValue(IntPtr dict, IntPtr key);
+    [DllImport(CF)] static extern IntPtr CFStringCreateWithCString(IntPtr alloc, string s, uint encoding);
+    [DllImport(CF)] static extern bool CFNumberGetValue(IntPtr number, int type, out long value);
+    [DllImport(CF)] static extern long CFStringGetLength(IntPtr s);
+    [DllImport(CF)] static extern bool CFStringGetCString(IntPtr s, byte[] buffer, long size, uint encoding);
+    [DllImport(CF)] static extern void CFRelease(IntPtr o);
+    public static string[] Titles(int processId) {
+        var titles = new List<string>();
+        IntPtr list = CGWindowListCopyWindowInfo(1 | 16, 0);   // on-screen windows only, without desktop elements
+        if (list == IntPtr.Zero) return titles.ToArray();
+        IntPtr kPid = CFStringCreateWithCString(IntPtr.Zero, "kCGWindowOwnerPID", Utf8);
+        IntPtr kName = CFStringCreateWithCString(IntPtr.Zero, "kCGWindowName", Utf8);
+        try {
+            for (long i = 0, n = CFArrayGetCount(list); i < n; i++) {
+                IntPtr w = CFArrayGetValueAtIndex(list, i);
+                long pid;
+                if (!CFNumberGetValue(CFDictionaryGetValue(w, kPid), 4, out pid) || pid != processId) continue;   // 4 = kCFNumberSInt64Type
+                IntPtr name = CFDictionaryGetValue(w, kName);
+                if (name == IntPtr.Zero) continue;
+                var buffer = new byte[4 * CFStringGetLength(name) + 1];
+                if (!CFStringGetCString(name, buffer, buffer.Length, Utf8)) continue;
+                var title = Encoding.UTF8.GetString(buffer).TrimEnd('\0');
+                if (title.Length > 0) titles.Add(title);
+            }
+        } finally { CFRelease(kPid); CFRelease(kName); CFRelease(list); }
+        return titles.ToArray();
+    }
+}
+'@
+    }
+    @([AgentHarnessMacWindows]::Titles($ProcessId))
 }
 
 function Save-HarnessLaunchedEditor([Diagnostics.Process]$Process) {
@@ -354,10 +411,18 @@ function Get-HarnessLogCompileErrors([string]$Path) {
 }
 
 # A windowed Editor in Safe Mode (compile errors at startup; -automated enters it without asking): no Pipeline server,
-# the window title says so.
+# the window title says so. Without window titles (macOS without the Screen Recording permission, Linux): the mode its
+# log (open.ps1's Logs/Editor.log) last changed to.
 function Test-HarnessSafeMode([int]$ProcessId) {
     if ($ProcessId -le 0) { return $false }
-    [bool](@(Get-HarnessWindowTitles $ProcessId) | Where-Object { $_ -match 'SAFE MODE' })
+    $titles = @(Get-HarnessWindowTitles $ProcessId)
+    if ($titles.Count -gt 0) { return [bool]($titles | Where-Object { $_ -match 'SAFE MODE' }) }
+    $log = Join-Path $script:ProjectRoot 'Logs/Editor.log'
+    if (-not (Test-Path -LiteralPath $log)) { return $false }
+    $s = New-Object IO.FileStream($log, 'Open', 'Read', 'ReadWrite, Delete')
+    try { $text = (New-Object IO.StreamReader($s, [Text.Encoding]::UTF8)).ReadToEnd() } finally { $s.Dispose() }
+    $modes = [regex]::Matches($text, 'ModeService\[\w+\]\.ChangeMode\((\w+)\)')
+    $modes.Count -gt 0 -and $modes[$modes.Count - 1].Groups[1].Value -eq 'safe_mode'
 }
 
 # Seed an agent worktree's Library/ with a copy of the Editor tree's (open.ps1 -Own): the imported assets, the package
@@ -375,12 +440,21 @@ function Copy-HarnessLibrary {
     $skipDirs = @('Pipeline', 'Harness', 'AgentHarness', 'TempArtifacts')
     $skipFiles = @('EditorInstance.json', 'ilpp.pid', 'ArtifactDB-lock', 'SourceAssetDB-lock')
     $robocopy = Get-Command robocopy -ErrorAction SilentlyContinue
+    # macOS: APFS clones (cp -c, clonefile) - no data is copied and no disk space taken until a file is written (P-3).
+    $cloned = $false
+    if (-not $robocopy -and (Test-HarnessMacOS)) {
+        $r = Invoke-HarnessProcess '/bin/cp' @('-cR', $src, $tmp)
+        if ($r.code -eq 0) {
+            foreach ($n in @($skipDirs + $skipFiles)) { $p = Join-Path $tmp $n; if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force } }
+            $cloned = $true
+        } elseif (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }   # not APFS: copied below
+    }
     if ($robocopy) {
         # Windows: multi-threaded (1.9 GB, 27k files in ~7 s here). Exit codes below 8 are success.
         $rcArgs = @($src, $tmp, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NP', '/MT:16', '/R:2', '/W:1', '/XD') + @($skipDirs | ForEach-Object { Join-Path $src $_ }) + @('/XF') + $skipFiles
         $r = Invoke-HarnessProcess $robocopy.Source $rcArgs
         if ($r.code -ge 8) { throw "copying $src failed (robocopy $($r.code)): $($r.out.Trim()) $($r.err.Trim())" }
-    } else {
+    } elseif (-not $cloned) {
         foreach ($f in [IO.Directory]::EnumerateFiles($src, '*', [IO.SearchOption]::AllDirectories)) {
             $rel = $f.Substring($src.Length + 1)
             $top = $rel.Split([char[]]@('\', '/'))[0]
@@ -393,7 +467,9 @@ function Copy-HarnessLibrary {
     [IO.Directory]::Move($tmp, $dst)
     $files = @([IO.Directory]::EnumerateFiles($dst, '*', [IO.SearchOption]::AllDirectories))
     $bytes = 0; foreach ($f in $files) { $bytes += (New-Object IO.FileInfo $f).Length }
-    [ordered]@{ from = $src.Replace('\', '/'); files = $files.Count; mb = [math]::Round($bytes / 1MB); sec = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
+    $seeded = [ordered]@{ from = $src.Replace('\', '/'); files = $files.Count; mb = [math]::Round($bytes / 1MB); sec = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
+    if ($cloned) { $seeded['cloned'] = $true }   # APFS clones: the files share the Editor tree's blocks
+    $seeded
 }
 
 # ---- Editor lock -------------------------------------------------------------------------------------
@@ -583,6 +659,20 @@ function Invoke-HarnessProcess {
 
 # The PowerShell running this script (powershell.exe or pwsh), for running other tools/*.ps1 as child processes.
 function Get-HarnessPowerShell { [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName }
+
+# A program that outlives this script (the Editor), started without this script's standard streams. On macOS and Linux a
+# started process inherits them, so whatever reads this script's output through a pipe (an agent's shell tool) waited
+# until the Editor exited (P-3): there it starts through /bin/sh with stdin/stdout/stderr on /dev/null (the Editor logs to
+# -logFile). Its exit code is not available there (not our child).
+function Start-HarnessDetached([string]$File, [string[]]$Arguments = @()) {
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        return Start-Process -FilePath $File -ArgumentList ((@($Arguments) | ForEach-Object { ConvertTo-HarnessArg $_ }) -join ' ') -PassThru
+    }
+    $r = Invoke-HarnessProcess '/bin/sh' (@('-c', 'exec "$0" "$@" < /dev/null > /dev/null 2>&1 & echo $!', $File) + @($Arguments))
+    $id = 0
+    if ($r.code -ne 0 -or -not [int]::TryParse($r.out.Trim(), [ref]$id)) { throw "could not start ${File}: $($r.err.Trim())" }
+    Get-Process -Id $id
+}
 
 # ---- git (tools/land.ps1, submit ownership) -------------------------------------------------------------------
 # Paths come back unquoted (core.quotePath=false).
@@ -1303,7 +1393,7 @@ function Invoke-HarnessLoop {
         $shotObjs = @(); if ($playResult) { $shotObjs = @($playResult.shots) }
         if ($state.state -eq 'failed') { $report['playError'] = $state.error }
         # Entering play mode (a domain reload when the project keeps Domain Reload on): request -> scenario runner started.
-        try { $Timings['playEnterSec'] = [math]::Round(([DateTime]::Parse($state.startedAt) - [DateTime]::Parse($state.requestedAt)).TotalSeconds, 2) } catch { }
+        try { $Timings['playEnterSec'] = [math]::Round(((ConvertTo-HarnessUtc $state.startedAt) - (ConvertTo-HarnessUtc $state.requestedAt)).TotalSeconds, 2) } catch { }
         if ($start.result.scene) { $report['scene'] = $start.result.scene }
     }
     $Timings['playSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
@@ -1489,7 +1579,7 @@ Export-ModuleMember -Function Get-HarnessProjectRoot, Get-HarnessWorkRoot, Test-
     Get-HarnessConfig, Get-HarnessModuleOf, Get-HarnessModuleFolder, Initialize-HarnessOut, Find-HarnessProjectAbove,
     Wait-UnityReachable, Get-HarnessEditorProcess, Get-HarnessLaunchedEditor, Save-HarnessLaunchedEditor, Get-HarnessWindowTitles, Test-HarnessProjectOpen,
     Get-HarnessProjectVersion, Get-HarnessInstalledEditors,
-    Find-HarnessEditorExe, Read-HarnessLogTail, Invoke-HarnessProcess, Get-HarnessPowerShell, ConvertTo-HarnessArg,
+    Find-HarnessEditorExe, Read-HarnessLogTail, Invoke-HarnessProcess, Get-HarnessPowerShell, ConvertTo-HarnessArg, Start-HarnessDetached, Test-HarnessMacOS,
     Invoke-HarnessRecompile, Get-HarnessCompileState, Wait-HarnessIdle, Wait-HarnessReload, Enter-HarnessLock, Exit-HarnessLock, Test-HarnessReadOnly,
     Get-HarnessLastRecovery, Get-HarnessLastLandRecovery, Add-HarnessRecovery, Start-HarnessSubmit, Complete-HarnessSubmit,
     Undo-HarnessSubmit, Invoke-HarnessLoop, Save-HarnessReport, Invoke-HarnessGit, Split-HarnessZ, Get-HarnessGitStatus,

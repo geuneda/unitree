@@ -133,7 +133,8 @@ function Invoke-PlayerRun {
         # script assemblies the Player loads (<Data>/ScriptingAssemblies.json) lacked Harness.Runtime although its DLL was there -
         # the Player then never ran the scenario (Fluid-Sim, 6.0). Checked; built once more without the build cache.
         $clean = $null
-        $list = Join-Path ([IO.Path]::ChangeExtension($exe, $null).TrimEnd('.') + '_Data') 'ScriptingAssemblies.json'
+        $data = if ($exe -like '*.app') { Join-Path $exe 'Contents/Resources/Data' } else { [IO.Path]::ChangeExtension($exe, $null).TrimEnd('.') + '_Data' }
+        $list = Join-Path $data 'ScriptingAssemblies.json'
         if ($st -isnot [string] -and "$($st.result)" -eq 'Succeeded' -and (Test-Path -LiteralPath $list) -and [IO.File]::ReadAllText($list) -notmatch '"Harness\.Runtime\.dll"') {
             $clean = 'the incremental build kept an earlier build''s ScriptingAssemblies.json without Harness.Runtime: built again with CleanBuildCache'
             $st = & $build ($options + 'CleanBuildCache')
@@ -197,8 +198,19 @@ function Invoke-PlayerRun {
     $limit = [math]::Max([double]$TimeoutSec, [double]$p.durationSec + [double]$p.readyTimeoutSec + [double]$p.waitSec + 90)
     $sw = [Diagnostics.Stopwatch]::StartNew()
     # Started in the out folder: what the game writes to its working directory stays there (company project A: the Facebook
-    # Game SDK's fbg.log, in the project root when the Player started there).
-    $proc = Start-Process -FilePath $exe -ArgumentList ((@($a) | ForEach-Object { ConvertTo-HarnessArg $_ }) -join ' ') -WorkingDirectory $playerOut -PassThru
+    # Game SDK's fbg.log, in the project root when the Player started there). A macOS Player is an .app bundle: its executable
+    # is started directly (as the Editor is), which keeps the process to wait for and its exit code.
+    # Its standard output goes to a file there: a macOS Player writes its start-up (memory setup) to stdout before it takes
+    # -logFile, into this script's JSON.
+    $run = $exe
+    $streams = @{}
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { $streams = @{ RedirectStandardOutput = "$outAbs/Player.stdout.log"; RedirectStandardError = "$outAbs/Player.stderr.log" } }
+    if ($exe -like '*.app') {
+        $plist = [IO.File]::ReadAllText((Join-Path $exe 'Contents/Info.plist'))
+        $m = [regex]::Match($plist, '<key>CFBundleExecutable</key>\s*<string>([^<]+)</string>')
+        $run = Join-Path $exe "Contents/MacOS/$(if ($m.Success) { $m.Groups[1].Value } else { [IO.Path]::GetFileNameWithoutExtension($exe) })"
+    }
+    $proc = Start-Process -FilePath $run -ArgumentList ((@($a) | ForEach-Object { ConvertTo-HarnessArg $_ }) -join ' ') -WorkingDirectory $playerOut -PassThru @streams
     $null = $proc.Handle   # keeps ExitCode readable
     Step "Player started (pid $($proc.Id), $w x $h window)"
     $exited = $proc.WaitForExit([int]($limit * 1000))

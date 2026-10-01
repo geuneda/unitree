@@ -11,6 +11,9 @@ powershell -ExecutionPolicy Bypass -File tools/open.ps1   # 에디터를 열고(
 powershell -ExecutionPolicy Bypass -File tools/loop.ps1   # 한 바퀴: HarnessOut/latest/report.json (stdout에도 같은 JSON)
 powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 잡고 정상 종료
 ```
+macOS에서는 같은 스크립트를 PowerShell 7로: `pwsh tools/open.ps1`, `pwsh tools/loop.ps1`, `pwsh tools/uc.ps1 harness_ping`(이 문서의
+`powershell -ExecutionPolicy Bypass -File tools/x.ps1`은 모두 `pwsh tools/x.ps1`). 기준 이미지는 OS별 폴더(`golden/<버전>-macos/`), 플레이어는 `.app`이다.
+대화상자·Safe Mode를 창 제목으로 알아보려면 터미널 앱에 화면 기록 권한이 필요하다(없으면 Safe Mode만 에디터 로그로).
 
 - `open.ps1`은 에디터를 `-automated`로 연다: 에디터의 모달 대화상자(`EditorUtility.DisplayDialog`)가 사람을 기다리지 않고 기본값(취소)으로 바로 닫힌다.
   사람이 그 에디터에서 작업하면 `-Interactive`. `-Headless`는 창 없는 에디터(`-batchmode`, GPU로 렌더): Game 뷰가 없어 `"screen"` 캡처는 안 되고
@@ -68,7 +71,7 @@ powershell -ExecutionPolicy Bypass -File tools/player.ps1 [-Scenario tools/scena
 - 데스크톱(Standalone) 활성 빌드 타깃에서만(다른 타깃이면 전환하지 않고 알린다 — 전환은 프로젝트 전체 재임포트이고, 스크립팅 define이 타깃마다 달라 접속 서버·기능이
   바뀔 수 있으니 사람에게 묻는다). 첫 빌드는 오래 걸린다(셰이더). 빌드가 다시 쓴 프로젝트 설정은
   `player.buildRewrote`로 알린다(Unity가 빌드마다 하는 일 — 되돌리거나 커밋한다). 런타임 에러의 줄은 최적화 코드라 조금 어긋날 수 있다(`-Debugging`이면 정확).
-- 플레이어는 에디터와 다른 PlayerPrefs(`HKCU\Software\<회사>\<제품>`)를 쓰지만 `persistentDataPath`는 같고, 작업 폴더는 `HarnessOut/player/player`다.
+- 플레이어는 에디터와 다른 PlayerPrefs(Windows `HKCU\Software\<회사>\<제품>`, macOS `~/Library/Preferences/unity.<회사>.<제품>.plist`)를 쓰지만 `persistentDataPath`는 같고, 작업 폴더는 `HarnessOut/player/player`다.
   몇 초 동안 창이 포커스를 가져간다. 개발 빌드는 프로파일러 연결을
   네트워크에서 기다려서 처음 한 번 Windows 방화벽이 허용을 묻는다(허용·취소 모두 실행과 무관).
 - 플레이어가 끝나지 않으면(`stage=player`) `HarnessOut/player/Player.log`의 `[Harness] …` 줄로 어디까지 왔는지 본다. 에디터에서만 도는 코드(`OnValidate`,

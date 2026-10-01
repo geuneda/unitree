@@ -50,7 +50,7 @@ $env:VSLANG = '1033'   # English compiler messages
 $Module = @($Module | ForEach-Object { "$_" -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $total = [Diagnostics.Stopwatch]::StartNew()
 $runId = [guid]::NewGuid().ToString('N').Substring(0, 8)
-$tmpRoot = Join-Path $root "Temp\compile-check\$runId"
+$tmpRoot = Join-Path $root "Temp/compile-check/$runId"
 New-Item -ItemType Directory -Force $tmpRoot | Out-Null
 
 # The compiler exactly as the Editor runs it (P-1). Its build graph records every C# compile as
@@ -119,7 +119,7 @@ $projectNames = @{}   # every asmdef under Assets/ and embedded packages (for sy
 $guidName = @{}       # asmdef GUID -> name ("GUID:..." references)
 $asmdefByName = @{}   # name -> @{ path; json }
 $rootAsm = @{}        # folder (full path) -> assembly its code compiles into
-$harnessDir = Join-Path $work 'Packages\com.geuneda.agentharness'   # embedded (the sample); a git/registry package is not checked
+$harnessDir = Join-Path $work 'Packages/com.geuneda.agentharness'   # embedded (the sample); a git/registry package is not checked
 $assetsDir = Join-Path $work 'Assets'
 $scanRoots = @($assetsDir) + @(Get-ChildItem -LiteralPath (Join-Path $work 'Packages') -Directory -ErrorAction SilentlyContinue |
     Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'package.json') } | ForEach-Object { $_.FullName })
@@ -180,7 +180,7 @@ foreach ($f in $found['.cs']) {
 # with those silently skipped code under #if UNITY_EDITOR. The newest file is not the current one (Bee rewrites a
 # response file only when its inputs change).
 function Find-Rsp([string]$assembly) {
-    $all = @(Get-ChildItem (Join-Path $root 'Library\Bee\artifacts') -Recurse -Filter "$assembly.rsp" -ErrorAction SilentlyContinue)
+    $all = @(Get-ChildItem (Join-Path $root 'Library/Bee/artifacts') -Recurse -Filter "$assembly.rsp" -ErrorAction SilentlyContinue)
     $rank = { param($f) if ($f.Directory.Name -cmatch 'EDbg\.dag$') { 0 } elseif ($f.Directory.Name -cmatch 'E\.dag$') { 1 } else { 2 } }
     $all | Sort-Object @{ Expression = { & $rank $_ } }, @{ Expression = { $_.LastWriteTime }; Descending = $true } | Select-Object -First 1
 }
@@ -189,7 +189,7 @@ function Find-Rsp([string]$assembly) {
 # Module folders come from the config; an asmdef inside one is its assembly, a folder without one is (part of) a
 # predefined assembly, which is then checked whole (its other files included).
 $moduleDirs = @(@(@($cfg.moduleRoots) | ForEach-Object { $abs = Join-Path $work $_; if (Test-Path -LiteralPath $abs) { Get-ChildItem -LiteralPath $abs -Directory | ForEach-Object { $_.FullName } } }) +
-    @(@($cfg.modules) | ForEach-Object { $abs = Join-Path $work $_.path; if (Test-Path -LiteralPath $abs) { [IO.Path]::GetFullPath($abs).TrimEnd('\') } }))
+    @(@($cfg.modules) | ForEach-Object { $abs = Join-Path $work $_.path; if (Test-Path -LiteralPath $abs) { [IO.Path]::GetFullPath($abs).TrimEnd('\', '/') } }))
 $modulesOf = @{}   # assembly -> module names whose code it compiles
 function Add-ModuleOwner([string]$Assembly, [string]$File) {
     $m = ModuleOf $File
@@ -198,7 +198,7 @@ function Add-ModuleOwner([string]$Assembly, [string]$File) {
     if (-not $modulesOf[$Assembly].Contains($m)) { $modulesOf[$Assembly].Add($m) }
 }
 foreach ($dir in $moduleDirs) {
-    $prefix = $dir + '\'
+    $prefix = $dir + [IO.Path]::DirectorySeparatorChar   # module folders and found files are full paths of this OS
     foreach ($f in @($found['.asmdef']) + @($found['.asmref'])) { if ($f.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { Add-ModuleOwner $rootAsm[[IO.Path]::GetDirectoryName($f)] $f } }
     foreach ($f in $found['.cs']) { if ($f.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { $o = Get-OwnerAssembly $f; if ($o) { Add-ModuleOwner $o $f } } }
 }

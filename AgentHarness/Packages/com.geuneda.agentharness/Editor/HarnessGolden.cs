@@ -9,7 +9,8 @@ namespace Harness.Editor
 {
     /// <summary>
     /// Visual regression (G3-4): shots compared with golden images - &lt;root&gt;/&lt;Unity version&gt;/&lt;key&gt;/&lt;shot file&gt;.png,
-    /// one folder per Unity version (renders differ between versions, P-4), key = the scenario's name. A pixel counts as
+    /// one folder per Unity version (renders differ between versions, P-4) and OS (Direct3D on Windows, Metal on macOS:
+    /// &lt;version&gt;-macos, &lt;version&gt;-linux; P-3), key = the scenario's name. A pixel counts as
     /// changed when a channel differs by more than <see cref="PixelThreshold"/>; a shot is "same" while at most
     /// <see cref="SameRatio"/> of its pixels changed (isolated edge pixels) and the mean difference is at most
     /// <see cref="SameMean"/> (a small shift of the whole image, e.g. exposure, changes no pixel by much).
@@ -54,7 +55,8 @@ namespace Harness.Editor
         [CliCommand("harness_golden",
             "Compare shots (PNG) with golden images <golden>/<Unity version>/<key>/<file>, or write them (update=true). " +
             "Per shot: status same|changed|size|missing, meanDiff, changedRatio, ssim, rect (where it changed) and a diff image in <out>/golden/. " +
-            "A version without goldens uses those of the nearest version with the same major.minor. tools/loop.ps1 calls it after every loop.",
+            "A version without goldens uses those of the nearest version with the same major.minor. macOS and Linux Editors keep their own " +
+            "version folders (<version>-macos, <version>-linux). tools/loop.ps1 calls it after every loop.",
             Tags = new[] { "harness", "capture" })]
         public static object Golden(
             [CliArg("shots", "JSON array of {path, name, ignore:[{x,y,w,h}]} (ignore: fractions from the top left).")] string shots,
@@ -67,7 +69,7 @@ namespace Harness.Editor
             try { items = JsonUtility.FromJson<ShotList>("{\"items\":" + (string.IsNullOrWhiteSpace(shots) ? "[]" : shots) + "}").items ?? Array.Empty<ShotIn>(); }
             catch (Exception e) { return new { ok = false, error = "shots: invalid JSON: " + e.Message }; }
             var root = HarnessPaths.Resolve(string.IsNullOrWhiteSpace(golden) ? HarnessConfig.Current.goldenRoot : golden);
-            var version = Application.unityVersion;
+            var version = Application.unityVersion + PlatformSuffix;
             var folder = Sanitize(string.IsNullOrWhiteSpace(key) ? "default" : key);
             var results = new List<Result>();
 
@@ -184,6 +186,13 @@ namespace Harness.Editor
 
         static readonly Regex VersionPattern = new Regex(@"^(\d+)\.(\d+)\.(\d+)([abfp])(\d+)", RegexOptions.CultureInvariant);
 
+        /// <summary>
+        /// The version folder's suffix for this OS: shots rendered with another graphics API and fonts differ by more than the
+        /// tolerances (a macOS shot against the Windows goldens: ~0.1% of the pixels, the HUD's text and edges; P-3).
+        /// </summary>
+        static string PlatformSuffix =>
+            Application.platform == RuntimePlatform.OSXEditor ? "-macos" : Application.platform == RuntimePlatform.LinuxEditor ? "-linux" : "";
+
         static long[] ParseVersion(string v)
         {
             var m = VersionPattern.Match(v ?? "");
@@ -199,7 +208,7 @@ namespace Harness.Editor
 
         /// <summary>
         /// The version folder with goldens for <paramref name="key"/>: this version's, else the nearest of the same
-        /// major.minor (the newest older one, else the oldest newer one) - a patch release usually renders the same.
+        /// major.minor on this OS (the newest older one, else the oldest newer one) - a patch release usually renders the same.
         /// </summary>
         static string PickVersion(string root, string version, string key)
         {
@@ -212,7 +221,8 @@ namespace Harness.Editor
             {
                 var name = Path.GetFileName(d);
                 var v = ParseVersion(name);
-                if (v == null || v[0] != me[0] || v[1] != me[1] || !Directory.Exists(Path.Combine(d, key))) continue;
+                if (v == null || name.Substring(VersionPattern.Match(name).Length) != PlatformSuffix) continue;   // another OS's goldens
+                if (v[0] != me[0] || v[1] != me[1] || !Directory.Exists(Path.Combine(d, key))) continue;
                 if (CompareVersion(v, me) < 0) { if (belowV == null || CompareVersion(v, belowV) > 0) { below = name; belowV = v; } }
                 else if (aboveV == null || CompareVersion(v, aboveV) < 0) { above = name; aboveV = v; }
             }

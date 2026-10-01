@@ -176,9 +176,11 @@ if ($Player) {
 
 # ---- release build -------------------------------------------------------------------------------------------------
 if (-not $NoBuild) {
-    $exe = Join-Path $BuildDir "$name.exe"
+    # The Standalone Player of this OS (its build support comes with the Editor): a Windows .exe, a macOS .app bundle (P-3).
+    $mac = Test-HarnessMacOS
+    $exe = Join-Path $BuildDir $(if ($mac) { "$name.app" } else { "$name.exe" })
     if (Test-Path -LiteralPath $BuildDir) { Remove-Item -LiteralPath $BuildDir -Recurse -Force }
-    $req = [ordered]@{ target = 'StandaloneWindows64'; outputPath = $exe.Replace('\', '/'); confirm = $true }
+    $req = [ordered]@{ target = $(if ($mac) { 'StandaloneOSX' } else { 'StandaloneWindows64' }); outputPath = $exe.Replace('\', '/'); confirm = $true }
     if ($lastScene) { $req['scenes'] = @($lastScene) }
     $b = Step 'build' {
         $start = Invoke-Tool 'uc.ps1' @('build', ($req | ConvertTo-Json -Compress)) 120
@@ -188,7 +190,7 @@ if (-not $NoBuild) {
         $st.json.result
     }
     if ($b.PSObject.Properties.Name -contains 'error' -and $b.error -is [string]) { Fail $b.error }
-    $managed = @(Get-ChildItem -LiteralPath $BuildDir -Recurse -Filter *.dll -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match '_Data[\\/]Managed[\\/]' } | ForEach-Object { $_.Name } | Sort-Object)
+    $managed = @(Get-ChildItem -LiteralPath $BuildDir -Recurse -Filter *.dll -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match '(_Data|Resources[\\/]Data)[\\/]Managed[\\/]' } | ForEach-Object { $_.Name } | Sort-Object)
     $report.build = [ordered]@{ result = $b.result; sec = [math]::Round($b.buildTimeMs / 1000, 1); outputPath = $exe.Replace('\', '/'); managed = $managed.Count
         harness = @($managed | Where-Object { $_ -like 'Harness.*' }); pipeline = @($managed | Where-Object { $_ -like 'Unity.Pipeline*' -or $_ -like 'UnityPipeline.*' }) }
     if ($b.result -ne 'Succeeded') { $report.stage = 'build'; Fail "the release build did not succeed: $($b.result) $(@($b.errors | ForEach-Object { $_.message }) -join ' | ')" }

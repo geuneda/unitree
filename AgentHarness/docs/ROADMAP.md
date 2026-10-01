@@ -17,8 +17,9 @@
 - 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태·워크플로우 절 갱신 → 새로 드러난 항목 추가 →
   **저장소 루트 `README.md`와 `AgentHarness/CLAUDE.md`(필요하면 `Tools~/templates/AgentHarness.md`)에 바뀐 기능·측정값 반영** → 커밋(메시지에 항목 ID).
   README·ROADMAP 갱신은 워크플로우마다 빠뜨리지 않는다(W2 커밋은 README를 건드리지 않았고, W4 뒤에도 README "요구 사항"에 6.6의 옛 상태가 남아 있었다).
-- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W16은 모두 끝났다(2026-10-01).
-  남은 것은 상시(업스트림 — G2-4의 남은 Unity 쪽 비용, W13의 URP 데칼·W16의 Pipeline 빌드 메시지 신고 포함)와 마지막(macOS)이다.
+- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W16은 끝났고 W17(macOS)은 부분 완료다(2026-10-01).
+  남은 것: G3-17(Mac에서 UI Toolkit 작은 글자가 세션·이력에 따라 다름 — 다음 워크플로우 후보), 상시(업스트림 — G2-4의 남은 Unity 쪽 비용, W13의 URP 데칼·W16의 Pipeline
+  빌드 메시지 신고, W17이 바꾼 스크립트의 Windows 매트릭스 재확인).
 - 크기: S = 파일 1–2개 · M = 여러 파일 또는 새 커맨드 · L = 조사가 필요하거나 새 하위 시스템.
 
 | 순서 | 워크플로우 | 항목 | 크기 | 선행 | 상태 |
@@ -39,8 +40,9 @@
 | W14 | 여러 worktree의 ProjectSettings | G5-6 | M | — | 완료 (2026-10-01) |
 | W15 | 하늘과 씬 반사 | G4-5 | L | W13 | 완료 (2026-10-01) |
 | W16 | 사내 프로젝트 A의 플레이어 화면 | G3-8 (+G3-16) | S | — | 완료 (2026-10-01) |
-| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13(URP 데칼)·W15(카메라 상태) 신고, G2-4 재측정 | S | 새 버전이 나올 때 | — |
-| 마지막 | macOS | P-3 | L | 실제 Mac | 대기 |
+| W17 | macOS | P-3 (+G3-17) | L | 실제 Mac | 부분 완료 (2026-10-01; Mac에서 도구·매트릭스가 돈다. G3-17(Mac UI Toolkit 글자)·Windows 재확인·Mac의 BagelGame·사내 프로젝트 A가 남음) |
+| W18 | Mac의 UI Toolkit 글자 결정성 | G3-17 | M | W17, 실제 Mac | 대기 (다음 후보) |
+| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13(URP 데칼)·W15(카메라 상태) 신고, G2-4 재측정, W17의 Windows 재확인 | S | 새 버전이 나올 때 | — |
 
 ### W1 시나리오 입력 격리 (G3-6) — 완료 (2026-09-29, 아래 "해결됨")
 - 왜 먼저: `play.events`가 매번 같아야 매트릭스 1과 W3의 기준 이미지가 의미 있다. 지금은 루프 ~25회에 1회 어긋난다.
@@ -227,7 +229,24 @@
 - 끝: 공식 `attach-test.ps1 -Player`(출시 빌드 포함) 녹색 202 s → 클론을 Android로 되돌리고(배치 모드 73 s) 테스트 커밋을 버려 원래 HEAD, 매트릭스 10은 원래 절차
   (`brd-attach.json`, `-NoBuild`).
 
-### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13·W15 신고, G2-4 재측정)
+### W17 macOS (P-3 + G3-17) — 부분 완료 (2026-10-01, 아래 이식성 P-3)
+- 결과: Apple Silicon Mac(M4 Pro, macOS 26.7)에서 같은 도구·패키지로 돈다. 도구는 **PowerShell 7**(`pwsh tools/x.ps1`), Windows는 그대로 5.1(같은 스크립트: ASCII,
+  pwsh 전용 문법 없음). selftest 1–8이 에디터 트리에서 한 번 전부 녹색(588 s), 새 클론(6.3)의 루프 3회 녹색·fingerprint 같음 — 처음 돌렸을 때 이미 `open.ps1`·루프·
+  selftest 2–5는 그대로 돌았고(O-4·O-7·O-8에서 `/` 경로·`unity editors --installed`·현재 호스트로 써 둔 덕), 깨진 것은 실제로 돌려 보고서야 드러났다.
+- 고친 것: `compile-check`가 모듈 폴더를 `$dir + '\'`로 비교해 **macOS에서 모듈 어셈블리를 하나도 검사하지 않고 녹색**(Harness만), pwsh 7의 `ConvertFrom-Json`이 날짜를
+  `DateTime`으로 바꿔 `open.ps1`이 띄운 에디터를 못 알아봄(9시간 어긋남)·`playEnterSec` 정수 초, `Get-Item`이 숨김(점) 파일인 Pipeline 디스크립터를 못 찾음, **에디터가
+  `open.ps1`의 stdout 파이프를 물려받아 `pwsh tools/open.ps1 | …`가 끝나지 않음**(→ `/bin/sh`로 분리), 대화상자·Safe Mode의 창 제목(→ `CGWindowListCopyWindowInfo`, 화면 기록
+  권한 없으면 로그의 `ChangeMode(safe_mode)`), 플레이어 `.app` 실행·`ScriptingAssemblies.json` 위치·플레이어 stdout이 `player.ps1` JSON에 섞임, attach-test 출시 빌드
+  (`StandaloneOSX`), install의 Windows 전용 경고, selftest 7b의 경쟁(콜드 게이트가 A의 submit보다 길어 락 대기 0 → B의 게이트를 먼저 한 번). 기준 이미지는 **OS별 폴더**
+  (`<버전>-macos`; Mac 샷 vs Windows 기준 이미지 바뀐 픽셀 0.04–0.13%). `open.ps1 -Own`의 `Library/` 사본은 APFS 클론(6 s, 디스크 0).
+- 하다가 찾은 것(미해결): **G3-17** — Mac에서 HUD의 작은 UI Toolkit 글자(제목·힌트·토스트)가 같은 코드·같은 레이아웃인데 세션·이력에 따라 소수 픽셀 다르게 찍힌다(제목
+  ~490픽셀). selftest 1·3·6번의 "픽셀까지 같음"이 세션에 따라 빨갛다. 원인은 GPU 쪽까지 좁혔다(아래 G3-17). 그래서 Mac 기준 이미지는 커밋하지 않았다.
+- 결정: Windows는 PowerShell 5.1을 계속 쓴다(요구 사항을 늘리지 않음); macOS·Linux는 pwsh 7.4+. 기준 이미지 보장은 "같은 머신·같은 버전이면 픽셀까지 같다"를 OS별 폴더로
+  지킨다(다른 OS와의 허용치는 넓히지 않음 — HUD 글자·데칼 가장자리를 놓치게 된다). fingerprint는 OS마다 다르다(같은 Mac 안에서는 같음).
+- 남은 것: G3-17(다음 워크플로우 후보 — GPU 프레임 캡처로 두 상태의 텍스트 드로를 비교), 같은 스크립트로 **Windows 매트릭스 재확인**(상시), Mac의 BagelGame(Git LFS라
+  `git clone`이 필요 — 사람이 클론)·사내 프로젝트 A(이 머신에 없음) 붙이기, 6.0 Mac(설치 안 됨).
+
+### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13·W15 신고, G2-4 재측정, W17의 Windows 재확인)
 - 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존)과 G2-5의 인터프리터 2건(`try/catch` 미지원,
   교체 본문이 던진 예외를 줄 없이 로그하고 원래 본문으로 이어 돌림), Unity에 P-4의 원인
   (`Camera.RenderToCubemap(Cubemap)`: 6.6은 CPU 픽셀을 안 채우고 6.3은 sRGB로 인코딩 — 빈 씬 + 스카이박스 + half 큐브맵 한 개로 재현), O-6 Unity Search 예외,
@@ -249,38 +268,37 @@
   W8: Unity에 증분 플레이어 빌드가 앞선 빌드의 `ScriptingAssemblies.json`을 쓰는 것(출시 빌드 → 다른 폴더로 개발 빌드, define 제약으로 어셈블리 집합이
   달라짐; 6.0 Fluid-Sim에서 재현 — 고쳐지면 `player.ps1`의 `CleanBuildCache` 재빌드를 걷어낸다), 플레이어 첫 씬 파티클의 로드 시점 한 스텝(의도인지 문의).
   W16: Pipeline에 O-14(`build_status`의 에러가 줄을 파싱하고도 버림). 고쳐지면 `player.ps1`은 그대로 둬도 된다(빌드 단계 메시지를 먼저 읽음).
+  W17: **Windows에서 매트릭스 1–10 재확인**(W17은 Mac에서만 돌렸다 — 바뀐 `Harness.psm1`·`open.ps1`(Windows는 `Start-Process` 그대로)·`player.ps1`·`compile-check`·
+  `install.ps1`·`attach-test.ps1`·`selftest.ps1`·`HarnessGolden.cs`(Windows 폴더 이름은 그대로 `<버전>`)).
+  G3-17은 원인을 확정한 뒤 Unity에 신고(재현: 새 에디터 세션의 루프 두 번). Mac에서 매트릭스 10을 BagelGame(`git clone` + Git LFS를 사람이 받아 `../ah-p2/bagel`)으로. Mac의 핫 루프 인터프리터 비용이 Windows의 ~3배(0.151 vs 0.056–0.063 ms/프레임)인 것은 보고만.
 - 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
   install의 Input System 추가, `HarnessReleaseBuild`)를 걷어낼 수 있는지 본다. O-9: 새 버전에서 selftest 1번의 HUD 검사(`uiError` 없음)를 보고,
   UI Toolkit에 패널을 지금 그리는 공개 API가 생기면 리플렉션을 걷어낸다.
 
-### 마지막: macOS (P-3)
-- 실제 Apple Silicon Mac이 있을 때 한다. 그 전까지 모든 워크플로우에서 새 코드에 백슬래시 경로·`powershell.exe`·`C:\` 경로를 늘리지 않는다.
-- 결정성 기준("같은 머신 안에서 결정적")은 W3의 기준 이미지 정책을 정할 때 같이 정한다.
-
 ## 기준선 (비교용)
 
-1차 버전(2026-09-28), W5·W6a·W6c·W7·W8 뒤(2026-09-30)와 W12·W15 뒤(2026-10-01; 새로 연 에디터에서 각 3회, 이 머신; W8 측정 때는 다른 앱의 백그라운드 부하가 있었다). 워크플로우가 루프 시간을 바꾸면 열을 더한다(W6a: 파티클·링 애니메이션,
+1차 버전(2026-09-28), W5·W6a·W6c·W7·W8 뒤(2026-09-30)와 W12·W15 뒤(2026-10-01; 새로 연 에디터에서 각 3회, 이 머신; W8 측정 때는 다른 앱의 백그라운드 부하가 있었다). W17 열은 다른 머신(Apple Silicon Mac, selftest·루프의 값; 다른 프로젝트의 에디터 2개가 같이 떠 있었다). 워크플로우가 루프 시간을 바꾸면 열을 더한다(W6a: 파티클·링 애니메이션,
 W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 / 창 없는 에디터 `-Headless`, W8: 캡처가 카메라의 HDR 형식으로 렌더 + 플레이어 실행, W12(2026-10-01): 핫 루프의 새 메서드·인터프리터 계측, W15(2026-10-01): 구름 하늘·GGX 큐브맵·빌드 뒤 반사 프로브 256²; 잰 것만).
 
-| 항목 | 1차 버전 | W5 | W6a | W6c | W7 창(`-automated`) / 창 없음(`-Headless`) | W8 (창) | W12 (창) | W15 (창) |
-|---|---|---|---|---|---|---|---|---|
-| 루프: 코드 변경 없음 | 3.5–3.8s (build 0.7s 캐시 적중, play 2.6s) | 3.47–3.68s (build 0.47s, play 2.4–2.6s, 첫 캡처 1.75s) | 3.52–3.64s (build 0.51–0.53s, play 2.39–2.51s) | 3.73–3.91s (build 0.61–0.64s, play 2.49–2.66s) | 3.82–3.90s (build 0.59–0.61s, play 2.51–2.62s) / **2.36–2.50s** (build 0.52–0.54s, play 1.18–1.30s) | 4.08–4.37s (build 0.64–0.71s, play 2.71–2.95s; 샷 한 장 ~95 ms, 대부분 PNG 인코딩) | 3.82–4.72s (build 0.64–1.01s, play 2.52–3.00s; fps 101–130) | 4.03–4.28s (build 0.67–0.76s, play 2.64–2.80s, fps 113–120); 새로 연 에디터의 첫 루프 5.03s (build 1.29s — 프로브 0.22s 콜드) |
-| 루프: 셰이더만 수정 | ~4s (도메인 리로드 없음) | 3.79–3.83s | — | 4.06–4.50s | 3.94–4.27s / **2.47–2.68s** | — | — | — |
-| 루프: 모듈 C# 1줄 수정 | ~9.2s (compile+reload 4.1s, build 1.9s, play 2.8s) | 8.84–9.08s (compile 4.7–4.9s = Tundra 0.35s + 리로드 ~2.5s + 리로드 뒤 에디터 ~0.9s, build 0.93–1.0s, play 2.55s) | 8.88–9.39s (compile 4.64–5.09s, build 0.97–1.03s, play 2.57–2.63s) | 9.53–9.69s (compile 4.73–4.92s, build 1.14–1.23s, play 2.86–2.97s) | 9.27–9.67s (compile 4.61–4.99s, 리로드 2.73–2.77s, build 1.14–1.23s, play 2.73–2.87s) / **6.75–7.10s** (compile 3.23–3.42s, 리로드 2.07–2.10s, 리로드 뒤 에디터 작업 없음, build 1.33–1.35s, play 1.59–1.69s) | — | — | — |
-| 루프: `-Hot`(Tick 본문 1줄) | — | 3.00–3.06s (판정+교체 0.14s, 첫 캡처 1.27s); 도메인 리로드 뒤 첫 번째 3.81–3.89s (교체 0.9s) | 3.21–3.29s (교체 0.15s, play 2.42–2.50s); 리로드 뒤 첫 번째 3.97s (교체 0.94s) | 3.35–3.45s (교체 0.15s, play 2.51–2.62s); 리로드 뒤 첫 번째 4.11s | 3.14–3.42s; 리로드 뒤 첫 번째 4.34s / **1.96–2.18s**; 리로드 뒤 첫 번째 3.01s | — | 3.41–3.46s (교체 0.13s, play 2.49–2.55s, fps 124–131); 리로드 뒤 첫 번째 4.27s (교체 0.86s) | — |
-| 루프: `-Hot`(같은 변경을 Tick이 부르는 새 헬퍼 2개로, G2-5) | — | — | — | — | — | — | 3.44–3.51s (교체 0.16–0.17s, play 2.49–2.56s, fps 128–136) | — |
-| 핫 루프의 인터프리터 비용(Tick, `hot.interpreted`) | — | — | — | — | — | — | 0.056–0.063 ms/프레임 = 프레임의 0.7–0.8% (리로드 뒤 첫 플레이 0.13–0.14 ms); 플레이의 Tick 182회 | — |
-| 루프: C# 컴파일 에러 보고 | ~1s | 0.94–1.14s | — | — | — | — | — | — |
-| 빌드 단계(lint + `harness_build` + 셰이더; 웜 / 리로드 직후) | ~0.9s / 1.9s | 0.47s / 0.93–1.0s (리로드 뒤 에디터 ~0.9s는 이제 compile 쪽에서 기다림) | 0.51–0.53s / 0.97–1.03s (FX 스텝 7.5–8 ms) | 0.61–0.64s / 1.14–1.23s (소품 스텝 ~60 ms, 큰 메시 fingerprint ~60 ms) | 0.59–0.65s / 1.14–1.23s — 창 없음 0.52–0.60s / 1.33–1.35s | — | — | 0.67–0.76s (`harness_build` 577–632 ms: 환경 스텝 36–40 ms — 하늘 128² 큐브 두 번 + GGX mip + 비교 ~13–16 ms; 프로브 단계 36–56 ms — 256² 두 번 + GGX + 4 MB 비교, 바꾼 뒤 첫 빌드는 쓰기 포함 0.1–0.23s) |
-| compile-check csc / msbuild | 어셈블리당 ~0.1s / 웜 0.5–2s, 콜드 10–75s | 어셈블리당 0.13–0.16s / 웜 0.45–0.63s, 콜드 4–13s | — | — | — | — | — | — |
-| 스모크 씬 렌더 | batches ~46, SetPass ~43, tris ~60만 | 같음 (45.8 / 42.8 / 59만) | 50.9 / 47.8 / 61만 (링 2개 + 파티클) | 67.1 / 51.9 / 124만 (선돌·바위·아치·데칼, 그림자 캐스케이드 포함) | 같음 / 없음(Game 뷰가 그리지 않음, `render` null) | 같음(에디터 65 / 50 / 122만); 개발 빌드 플레이어 69 / 54 / 126만(D3D12) | — | 61 / 51 / 122만 (하늘이 `Skybox/Procedural`에서 `Harness/Sky`로) |
-| 에디터 열기(재시작, `open.ps1`이 준비될 때까지) | ~30s (첫 응답 뒤 Debug 재컴파일 + 리로드 ~10s 포함) | — | — | — | 14.3s (`-debugCodeOptimization`: 재컴파일 없음) / 12.1s | 17.3s | 13.5s | 15.9s |
-| 창 없는 에디터 유휴 CPU | — | — | — | — | 쉬지 않는 루프 1코어의 120% → `HarnessHeadless` 1코어의 ~8%, ping 17–22 → ~8 ms | — | — | — |
-| 루프 2개 동시 | 두 번째가 3.55s 대기 | — | — | — | 같은 에디터: 두 번째가 4.59s 대기 / worktree 전용 에디터(`-Own`): 둘 다 대기 0 (창 4.4–4.9s, 창 없음 2.7–2.9s) | — | — | — |
-| worktree 전용 에디터 준비(`open.ps1 -Own`) | — | — | — | — | 28.7–29.3s (`Library/` 사본 1.9 GB·2.7만 파일 11.4s + 스크립트 전체 재컴파일 ~17s), 첫 루프 9.8s (빌드 캐시 없음) | — | — | — |
-| 플레이어(개발 빌드, 1280x720 창, vSync 끔) 시나리오 fps / p95 | — | — | — | — | — | **452–516 / 2.8–3.6 ms** (같은 때 창 에디터 105–120 / ~11 ms, ×3.8–4.9) | — | 493 / 3.1 ms (같은 때 창 에디터 124, ×3.97; selftest 1번) |
-| `player.ps1` 한 바퀴 (에디터 루프 + 증분 빌드 + 플레이어 + 비교) | — | — | — | — | — | 15.4–17.4s (4.1–4.5 + 4.9–6.8 + 5.4–6.0 + 0.4s), `-NoBuild` 11.4s | — | — |
-| 플레이어 개발 빌드 처음 / 증분 | — | — | — | — | — | 116s(셰이더 81s) / 3–12s, 189 MB | — | — |
+| 항목 | 1차 버전 | W5 | W6a | W6c | W7 창(`-automated`) / 창 없음(`-Headless`) | W8 (창) | W12 (창) | W15 (창) | W17 Mac M4 Pro (창, macOS 26.7) |
+|---|---|---|---|---|---|---|---|---|---|
+| 루프: 코드 변경 없음 | 3.5–3.8s (build 0.7s 캐시 적중, play 2.6s) | 3.47–3.68s (build 0.47s, play 2.4–2.6s, 첫 캡처 1.75s) | 3.52–3.64s (build 0.51–0.53s, play 2.39–2.51s) | 3.73–3.91s (build 0.61–0.64s, play 2.49–2.66s) | 3.82–3.90s (build 0.59–0.61s, play 2.51–2.62s) / **2.36–2.50s** (build 0.52–0.54s, play 1.18–1.30s) | 4.08–4.37s (build 0.64–0.71s, play 2.71–2.95s; 샷 한 장 ~95 ms, 대부분 PNG 인코딩) | 3.82–4.72s (build 0.64–1.01s, play 2.52–3.00s; fps 101–130) | 4.03–4.28s (build 0.67–0.76s, play 2.64–2.80s, fps 113–120); 새로 연 에디터의 첫 루프 5.03s (build 1.29s — 프로브 0.22s 콜드) | 2.73–2.95s (build 0.47–0.51s, play 1.87–2.11s, fps 142–158; 새로 연 에디터의 첫 루프 4.5s) |
+| 루프: 셰이더만 수정 | ~4s (도메인 리로드 없음) | 3.79–3.83s | — | 4.06–4.50s | 3.94–4.27s / **2.47–2.68s** | — | — | — | 2.81–3.01s |
+| 루프: 모듈 C# 1줄 수정 | ~9.2s (compile+reload 4.1s, build 1.9s, play 2.8s) | 8.84–9.08s (compile 4.7–4.9s = Tundra 0.35s + 리로드 ~2.5s + 리로드 뒤 에디터 ~0.9s, build 0.93–1.0s, play 2.55s) | 8.88–9.39s (compile 4.64–5.09s, build 0.97–1.03s, play 2.57–2.63s) | 9.53–9.69s (compile 4.73–4.92s, build 1.14–1.23s, play 2.86–2.97s) | 9.27–9.67s (compile 4.61–4.99s, 리로드 2.73–2.77s, build 1.14–1.23s, play 2.73–2.87s) / **6.75–7.10s** (compile 3.23–3.42s, 리로드 2.07–2.10s, 리로드 뒤 에디터 작업 없음, build 1.33–1.35s, play 1.59–1.69s) | — | — | — | 6.58–8.95s (compile 3.6–5.7s) |
+| 루프: `-Hot`(Tick 본문 1줄) | — | 3.00–3.06s (판정+교체 0.14s, 첫 캡처 1.27s); 도메인 리로드 뒤 첫 번째 3.81–3.89s (교체 0.9s) | 3.21–3.29s (교체 0.15s, play 2.42–2.50s); 리로드 뒤 첫 번째 3.97s (교체 0.94s) | 3.35–3.45s (교체 0.15s, play 2.51–2.62s); 리로드 뒤 첫 번째 4.11s | 3.14–3.42s; 리로드 뒤 첫 번째 4.34s / **1.96–2.18s**; 리로드 뒤 첫 번째 3.01s | — | 3.41–3.46s (교체 0.13s, play 2.49–2.55s, fps 124–131); 리로드 뒤 첫 번째 4.27s (교체 0.86s) | — | 2.42–2.94s (교체 0.12–0.58s) |
+| 루프: `-Hot`(같은 변경을 Tick이 부르는 새 헬퍼 2개로, G2-5) | — | — | — | — | — | — | 3.44–3.51s (교체 0.16–0.17s, play 2.49–2.56s, fps 128–136) | — | 2.44s |
+| 핫 루프의 인터프리터 비용(Tick, `hot.interpreted`) | — | — | — | — | — | — | 0.056–0.063 ms/프레임 = 프레임의 0.7–0.8% (리로드 뒤 첫 플레이 0.13–0.14 ms); 플레이의 Tick 182회 | — | 0.151 ms/프레임 = 2.4% (Windows의 ~3배) |
+| 루프: C# 컴파일 에러 보고 | ~1s | 0.94–1.14s | — | — | — | — | — | — | 0.99–1.03s |
+| 빌드 단계(lint + `harness_build` + 셰이더; 웜 / 리로드 직후) | ~0.9s / 1.9s | 0.47s / 0.93–1.0s (리로드 뒤 에디터 ~0.9s는 이제 compile 쪽에서 기다림) | 0.51–0.53s / 0.97–1.03s (FX 스텝 7.5–8 ms) | 0.61–0.64s / 1.14–1.23s (소품 스텝 ~60 ms, 큰 메시 fingerprint ~60 ms) | 0.59–0.65s / 1.14–1.23s — 창 없음 0.52–0.60s / 1.33–1.35s | — | — | 0.67–0.76s (`harness_build` 577–632 ms: 환경 스텝 36–40 ms — 하늘 128² 큐브 두 번 + GGX mip + 비교 ~13–16 ms; 프로브 단계 36–56 ms — 256² 두 번 + GGX + 4 MB 비교, 바꾼 뒤 첫 빌드는 쓰기 포함 0.1–0.23s) | 0.47–0.51s / 0.8s |
+| compile-check csc / msbuild | 어셈블리당 ~0.1s / 웜 0.5–2s, 콜드 10–75s | 어셈블리당 0.13–0.16s / 웜 0.45–0.63s, 콜드 4–13s | — | — | — | — | — | — | 7개 1.6s (어셈블리당 ~0.2s) / 없음 |
+| 스모크 씬 렌더 | batches ~46, SetPass ~43, tris ~60만 | 같음 (45.8 / 42.8 / 59만) | 50.9 / 47.8 / 61만 (링 2개 + 파티클) | 67.1 / 51.9 / 124만 (선돌·바위·아치·데칼, 그림자 캐스케이드 포함) | 같음 / 없음(Game 뷰가 그리지 않음, `render` null) | 같음(에디터 65 / 50 / 122만); 개발 빌드 플레이어 69 / 54 / 126만(D3D12) | — | 61 / 51 / 122만 (하늘이 `Skybox/Procedural`에서 `Harness/Sky`로) | 60 / 50 / 122만 (Metal) |
+| 에디터 열기(재시작, `open.ps1`이 준비될 때까지) | ~30s (첫 응답 뒤 Debug 재컴파일 + 리로드 ~10s 포함) | — | — | — | 14.3s (`-debugCodeOptimization`: 재컴파일 없음) / 12.1s | 17.3s | 13.5s | 15.9s | 11–15s (새 체크아웃 첫 임포트 57.7s) |
+| 창 없는 에디터 유휴 CPU | — | — | — | — | 쉬지 않는 루프 1코어의 120% → `HarnessHeadless` 1코어의 ~8%, ping 17–22 → ~8 ms | — | — | — | — |
+| 루프 2개 동시 | 두 번째가 3.55s 대기 | — | — | — | 같은 에디터: 두 번째가 4.59s 대기 / worktree 전용 에디터(`-Own`): 둘 다 대기 0 (창 4.4–4.9s, 창 없음 2.7–2.9s) | — | — | — | 같은 에디터: 두 번째가 2.42s 대기 |
+| worktree 전용 에디터 준비(`open.ps1 -Own`) | — | — | — | — | 28.7–29.3s (`Library/` 사본 1.9 GB·2.7만 파일 11.4s + 스크립트 전체 재컴파일 ~17s), 첫 루프 9.8s (빌드 캐시 없음) | — | — | — | 25.6s (`Library/` APFS 클론 2.1 GB·2.9만 파일 6.1s, 디스크 0), 첫 루프 10.1s (창 없음) |
+| 플레이어(개발 빌드, 1280x720 창, vSync 끔) 시나리오 fps / p95 | — | — | — | — | — | **452–516 / 2.8–3.6 ms** (같은 때 창 에디터 105–120 / ~11 ms, ×3.8–4.9) | — | 493 / 3.1 ms (같은 때 창 에디터 124, ×3.97; selftest 1번) | 730–736 / 1.4–1.7 ms (Metal, 에디터 157, ×4.6) |
+| `player.ps1` 한 바퀴 (에디터 루프 + 증분 빌드 + 플레이어 + 비교) | — | — | — | — | — | 15.4–17.4s (4.1–4.5 + 4.9–6.8 + 5.4–6.0 + 0.4s), `-NoBuild` 11.4s | — | — | 15.2s (2.6 + 4.6 + 7.8 + 0.3s) |
+| 플레이어 개발 빌드 처음 / 증분 | — | — | — | — | — | 116s(셰이더 81s) / 3–12s, 189 MB | — | — | ~145s / 4.4–4.6s, 346 MB (.app) |
 
 ---
 
@@ -371,6 +389,20 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 - **G3-15 같은 코드의 루프끼리 closeup 샷의 픽셀 6–7개가 두 값 중 하나였다** (2026-10-01, W12에서 발견) → 같은 날 해결(W13, 아래 "해결됨").
   URP DBuffer 데칼의 가장자리 픽셀이 캡처 전에 에디터 GUI가 그렸는지에 따라 달랐고 SMAA가 그것을 키웠다. 샘플은 ScreenSpace 데칼로 바꿨고, DBuffer 쪽은 상시(신고).
 
+- [ ] **G3-17 Mac에서 같은 코드의 루프끼리 UI Toolkit의 작은 글자가 소수 픽셀 다르게 찍힌다** (2026-10-01, W17에서 발견)
+  - 현상: 샘플 HUD의 제목(13 px 굵게, 자간 3)·힌트(자간 1)·토스트(굵게)가 요소마다 따로 두 상태 중 하나로 찍힌다 — 제목 ~490픽셀(0.05%, 허용치 밖), 힌트 ~95픽셀,
+    토스트 ~210픽셀, 글자 세로 가장자리만(굵기 합은 같음 → 글자 전체가 소수 픽셀 가로로 밀린 모양). 같은 상태끼리는 픽셀까지 같다. 새 에디터 세션의 첫 플레이와 다음
+    플레이가 다르고, 세션마다 정착하는 상태가 다르며(재시작 뒤 워밍업 플레이 뒤에도 앞 세션과 다름), 파이프라인 전환·실제 입력 루프 같은 일 뒤에 바뀌기도 한다. 결과: Mac
+    selftest 1번(루프 2·3·RP 재생성·드리프트 뒤 기준 이미지)·3번(핫 되돌림)·6번(창 없는 전용 에디터의 첫 샷)이 세션에 따라 빨갛다(에디터 트리 1–8 전부 녹색 한 번, 새 클론 3·6 빨강).
+    Windows의 매트릭스(W3 이후 수백 루프)에서는 한 번도 나오지 않았다.
+  - 확인한 것: 캡처 순간의 레이아웃(요소 위치·크기·`MeasuredWidth`·배율 0.667)과 폰트 에셋(플레이마다 새 `NotInter` 인스턴스지만 글리프 사각형·아틀라스 위치·전진 폭·커닝이 같고,
+    CPU 아틀라스의 글리프 밖 텍셀은 0)이 두 상태에서 같다 → 차이는 GPU 쪽 그리기(셰이더 입력·상태)다. 아니었던 것: Game 뷰 다시 그리기, 다른 배율로 한 번 그리기, 다른 시나리오의
+    새 글자(UI 킷), 기본 폰트 워밍업, 에디터 비트맵 텍스트 경로(꺼짐, 라벨 SDF), 텍스트 잡의 생성기 공유(스레드별), 화면·포커스. 시도해 효과가 확인되지 않은 것: 캡처 전후
+    `MarkDirtyText()`(에디터 트리에서는 1·3번이 4/4 녹색이었지만 이미 정착한 세션이었고 새 클론에서 다시 빨감), 플레이 전 런타임 패널 폐기(`PanelSettings.DisposePanel`) — 둘 다 걷어냄.
+  - 방향: Xcode(Metal) GPU 프레임 캡처로 두 상태의 HUD 텍스트 드로(셰이더 입력·UIR 셰이더 정보 텍스처·버텍스)를 비교. UI Toolkit 요소별 설정을 담는 셰이더 정보 텍스처의 슬롯
+    배치가 이력을 따르고 Metal에서 그 읽기가 정확한 텍셀 중심이 아니라는 가설이 남아 있다. 재현: 새 에디터 세션에서 `loop.ps1` 두 번(첫 루프 ≠ 둘째).
+  - 그 전까지: Mac 기준 이미지는 커밋하지 않는다. Mac에서 HUD 글자 둘레만 바뀐 `changed`는 이것이다(diff의 `rect`가 텍스트 줄).
+
 ## 성질 4 — 에셋 없이도 완성도
 
 - **G4-1 CPU(C#) 텍스처 베이크가 느리다** → 2026-09-30 해결(W6c, 아래 "해결됨").
@@ -405,9 +437,9 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
 이 하네스는 이제 UPM 패키지(`com.geuneda.agentharness`, git URL `?path=`)이고 **설치 스크립트 한 번으로 기존 프로젝트에 붙였다 뗄 수 있다**(P-2).
 붙인 뒤의 격차(구 Input Manager 입력, `Assembly-CSharp` 검사, 부트 → 메뉴 → 레벨 흐름, 캡처 포즈, 머신 간 제거)는 P-5에서 메웠고, 공개 프로젝트 2개와
 사내 대형 프로젝트 1개에서 검증했다.
-Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 전부 녹색 — P-1, P-4), OS는 Windows 하나에서만 검증했다.
+Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 전부 녹색 — P-1, P-4), OS는 Windows와 macOS(Apple Silicon, W17 — P-3).
 
-순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트, 2026-09-29 해결) → P-5(붙인 뒤의 격차, 2026-09-29 해결) → P-3(macOS, 나중)**.
+순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트, 2026-09-29 해결) → P-5(붙인 뒤의 격차, 2026-09-29 해결) → P-3(macOS, 2026-10-01 부분 해결 — G3-17·Windows 재확인 남음)**.
 버전은 `tools/fresh-clone-test.ps1 -SelfTest -UnityVersion <v>`, 기존 프로젝트는 `tools/attach-test.ps1 -Project <클론>`으로 검증한다.
 
 - **P-1 Unity 버전이 6000.3.11f1로 고정돼 있다** → 2026-09-29 해결(아래 "해결됨"). 6.6에서 남은 렌더링 문제는 P-4.
@@ -418,35 +450,36 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 - **P-4 Unity 6.6(URP 17.6)에서 샘플 씬의 조명이 검게 나온다** → 2026-09-30 해결(W4, 아래 "해결됨"). 원인은 그림자가 아니라
   `Camera.RenderToCubemap(Cubemap)`이 6.6에서 CPU 픽셀을 채우지 않는 것(반사 큐브맵에 초기화 안 된 메모리가 저장됨)이었다. Unity 신고는 "상시".
 
-- [ ] **P-3 Windows에서만 동작한다 (macOS 지원은 나중)** — 기존 O-2를 옮겨 왔다.
-  - 작업 방식: P-1·P-2를 Windows에서 끝낸 뒤 실제 Mac에서 진행한다. 그 전까지 Windows 작업에서는 새 코드에
-    백슬래시 경로 리터럴이나 Windows 전용 호출(`powershell.exe`, `C:\...`, `.exe` 경로)을 늘리지 않는 것만 지킨다.
-  - 현상:
-    - 모든 도구가 Windows PowerShell 5.1 전용이다. 5.1은 BOM 없는 UTF-8을 깨뜨리므로 스크립트를 ASCII로만 쓴다.
-      `submit.ps1`은 compile-check 게이트를 `powershell.exe`로 직접 실행한다.
-    - 경로: `Join-Path $root 'Library\Harness\submit'`처럼 백슬래시 리터럴이 흔하고, 그 결과를 `[IO.File]::ReadAllText` 같은 .NET API에 그대로 넘긴다
-      (예: Pipeline 디스크립터 `Library\Pipeline\.unity-pipeline-port`). macOS에서는 `\`가 경로 구분자가 아니다.
-      `compile-check.ps1`은 `C:\Program Files\Unity\Hub\Editor\<ver>\Editor\Unity.exe`, `Data\NetCoreRuntime\dotnet.exe`,
-      `Data\DotNetSdkRoslyn\csc.dll`을 가정한다(macOS는 `Unity.app/Contents/...` 아래).
-    - 락: `Global\AgentHarnessEditor_<id>` 이름 있는 Mutex를 쓴다. .NET은 Unix에서도 이름 있는 뮤텍스를 지원하지만,
-      보유 프로세스가 죽었을 때 `AbandonedMutexException`이 오는지 확인하지 않았다. submit/land 저널 복구가 이 동작에 기댄다.
-    - msbuild 백엔드(vswhere)는 Windows 전용이다. macOS에서는 csc 백엔드만 쓴다.
-    - 에디터: Metal에서 셰이더 에러 형식이 `harness_shaders` 파싱과 맞는지, 포커스 없는 에디터(App Nap)에서도 플레이·캡처가 진행되는지
-      (F-1과 같은 종류의 문제) 확인해야 한다.
-    - 결정성: Apple Silicon(ARM64) JIT의 부동소수점 결과가 x64와 달라서 fingerprint가 OS·CPU마다 다를 수 있다(F-6처럼 절차적 베이크 결과가 바뀜).
-      기준을 "같은 머신 안에서 결정적"으로 둘지 먼저 정해야 한다.
-      (2026-09-30, W3에서 정함) 기준 이미지(`golden/`)는 Unity 버전별로 두고, 보장은 "같은 머신·같은 버전이면 픽셀까지 같다"(측정 diff 0, 새 클론 포함).
-      다른 GPU·드라이버·OS를 위한 허용치(채널 차이 24 초과 픽셀 ≤ 0.01%, 평균 차이 ≤ 0.5, `Editor/HarnessGolden.cs`)는 재지 않았다 → Mac(또는 다른 Windows
-      머신)에서 샘플 기준 이미지와의 점수를 재서 허용치를 정하고, 넘으면 머신별 폴더를 둘지 정한다.
-    - README에 macOS용 Unity CLI 설치 방법이 없다.
-    - O-4·O-7·O-8에서 만든 `open.ps1`·`quit.ps1`·`fresh-clone-test.ps1`은 경로를 `/`로 쓰고, 자식 PowerShell을 현재 호스트(`Get-HarnessPowerShell`)로,
-      에디터를 `unity editors --installed`의 위치로 띄운다(`.app`이면 `Contents/MacOS/Unity`). 그래도 macOS에서 확인할 것:
-      `Temp/UnityLockfile` 잠금 검사(`Test-HarnessProjectOpen`, Unix에서 .NET `FileShare.None`은 flock), 종료 직후 pid 판정(`HasExited`),
-      전역 로그 위치(`~/Library/Logs/Unity/Editor.log` — `-logFile`로 우회하므로 영향은 없어야 한다).
-  - 방향: 도구를 PowerShell 7(pwsh, 크로스플랫폼)로 옮긴다. Windows에서도 pwsh 7을 요구할지, 5.1 호환을 유지할지 정해야 한다.
-    경로는 `/`와 다단 `Join-Path`로 통일하고, 에디터·dotnet·csc 경로는 `unity editors --installed`나 실행 중인 에디터 프로세스에서 얻는다.
-    Unix에서는 락을 파일 락(배타 핸들)으로 바꾸는 것도 검토한다.
-  - 완료 기준: Apple Silicon Mac에서 새 클론 → `harness_setup` → 매트릭스 1–8 녹색(macOS 기준값은 따로 기록). 같은 스크립트로 Windows 매트릭스도 녹색.
+- [~] **P-3 Windows에서만 동작한다** (2026-10-01, W17: Mac에서 돈다; G3-17과 Windows 재확인이 남음)
+  - 머신: Apple M4 Pro, macOS 26.7, Retina 화면 하나, Unity 6000.3.11f1·6000.6.3f1(6.0은 설치 안 됨), PowerShell 7.6.6(관리자 권한 없이 `~/.local/bin/pwsh`), 다른 프로젝트의
+    에디터 2개가 같이 떠 있었다. 이 체크아웃은 처음 열었다(Library 없음).
+  - 그대로 된 것: `open.ps1`(새 체크아웃 첫 임포트 57.7 s), `harness_setup`, 루프(첫 루프부터 녹색), selftest 2·4·5(HLSL 에러의 Metal 형식 포함)·3의 핫 루프, `-automated`·
+    `-debugCodeOptimization`, `Temp/UnityLockfile` 잠금 판정(.NET `FileShare.None` = flock), 이름 있는 뮤텍스(`Global\…`), 백그라운드(App Nap) 에디터의 플레이·캡처.
+  - 실제로 돌려 보고 찾은 것(고침):
+    1. **`compile-check`가 macOS에서 모듈 어셈블리를 하나도 검사하지 않고 녹색**이었다(`Harness.*` 2개만): 모듈 폴더를 `$dir + '\'`로 비교 → `DirectorySeparatorChar`. pwsh의
+       `Join-Path`는 `\`를 `/`로 바꿔 주지만 문자열 비교·.NET API는 아니다. 이제 7개 1.6 s.
+    2. **pwsh 7의 `ConvertFrom-Json`이 ISO 날짜를 `DateTime`으로** 바꿔 `[DateTime]::Parse("$x")`가 소수 초를 버리고 로컬 시각(9시간 차)으로 읽었다 → `open.ps1`이 띄운 에디터를
+       알아보지 못함, `playEnterSec`가 정수 초(1.0) → `ConvertTo-HarnessUtc`(0.21–0.33 s).
+    3. Unix의 `Get-Item`이 점으로 시작하는 Pipeline 디스크립터를 숨김으로 보고 못 찾음(에러 출력, pid 재사용 검사가 빠짐) → `[IO.File]::GetLastWriteTime`.
+    4. **에디터가 `open.ps1`의 표준 출력 파이프를 물려받아 `pwsh tools/open.ps1 | …`가 에디터가 끝날 때까지 돌아오지 않았다**(셸 도구로 부른 에이전트가 멈춤) →
+       `Start-HarnessDetached`(`/bin/sh -c 'exec … </dev/null >/dev/null 2>&1 & echo $!'`; 자식이 아니어도 `WaitForExit`·`HasExited`는 됨). 파이프로 받은 `open.ps1` 11 s에 돌아옴.
+    5. 대화상자·Safe Mode의 창 제목이 Windows 전용 → `CGWindowListCopyWindowInfo`(첫 호출 ~1.1 s). 화면 기록 권한이 있는 터미널에서 `AgentHarness - SAFE MODE - 6000.3.11f1 <Metal>`,
+       없으면 Safe Mode는 에디터 로그의 마지막 `ModeService[...].ChangeMode(...)`로(둘 다 확인: 컴파일 에러를 넣고 연 창 에디터 → `safeMode`·`compileErrors` 64행, 6.6 s).
+    6. `player.ps1`: `.app`(디렉터리)을 `Start-Process`가 거부 → `Info.plist`의 `CFBundleExecutable`, `ScriptingAssemblies.json`은 `Contents/Resources/Data/`, **플레이어가 `-logFile`과
+       별개로 시작 메시지를 stdout에 써 `player.ps1`의 JSON이 깨짐** → `Player.stdout.log`. 플레이어 730–736 fps(에디터 ×4.6), `game` 샷의 실제 화면 = 캡처(평균 0.52).
+    7. `attach-test` 출시 빌드가 `StandaloneWindows64`·`.exe` 고정 → 그 OS의 Standalone(`StandaloneOSX`·`.app`). `install.ps1`의 Windows 전용 경고(260자·`%TEMP%`)는 Windows에서만,
+       안내 명령(`next`)은 OS에 맞게.
+    8. `open.ps1 -Own`의 `Library/` 사본: robocopy가 없으면 파일 하나씩 → macOS는 APFS 클론(`cp -cR`) 2.1 GB·2.9만 파일 6.1 s, 디스크 0(`seeded.cloned`).
+    9. selftest 7b가 새 클론에서 빨갰다("waited for the lock" 0): 새 worktree B의 콜드 게이트(7.95 s)가 A의 submit 전체(7.77 s)보다 길었다 → B의 게이트를 먼저 한 번.
+  - 결정: Windows는 Windows PowerShell 5.1 그대로(스크립트는 같은 파일 — ASCII, pwsh 전용 문법 없음), macOS·Linux는 pwsh 7.4+. 기준 이미지는 **OS별 폴더**(`<버전>-macos`,
+    `-linux`; 패치 대체도 같은 OS끼리) — Mac 샷 vs Windows 기준 이미지가 바뀐 픽셀 0.04–0.13%(HUD 글자·룬 원 가장자리·불씨, maxDiff 146–174)라 허용치를 넓히면 HUD 글자·데칼
+    가장자리 회귀를 놓친다. 보장은 그대로 "같은 머신·같은 버전이면 픽셀까지 같다" — Mac에서는 G3-17이 풀릴 때까지 UI Toolkit 글자 빼고. fingerprint는 OS마다 다르다(6.3 Mac
+    `4bb3e16d…` / Windows `609b54d2…`; 줄 단위 비교는 Windows의 `fingerprint.txt`가 없어 못 했다 — 후보는 메시 정점의 삼각함수 마지막 비트).
+  - 검증(이 Mac): 매트릭스 1–8 에디터 트리 녹색 587.6 s(`4bb3e16d`, 줄 64/71/77/99; 1번 77 s, 6번 47 s — `-Own` 준비 25.6 s, 그 에디터의 컴파일 에러 64행; 7번 77 s; 8번 207 s —
+    도중 kill 뒤 `recoveredSubmit`·`recoveredLand`, macOS 뮤텍스는 예외 없이 풀림) — 그 뒤 G3-17로 같은 1·3번이 새 세션에서 다시 빨갰다. 마지막 코드(G3-17 시도를 걷어낸 것)로
+    440.3 s: 2·4·5·7·8 녹색, 1(드리프트 뒤 제목 줄 `44,35,127,9`)·3(핫 되돌림 뒤 토스트 `652,34,62,10`)·6(전용 에디터 첫 샷의 글자 영역) 빨강 — 모두 G3-17. 9: 새 클론 6.3 763.7 s — 루프 3회 녹색·
+    `4bb3e16d`·종료 뒤 `git status` 깨끗, selftest는 1·2·4·5·8 녹색, 3·6 빨강(G3-17), 7 빨강(위 9번, 고침). 새 클론 6.6 녹색 116.6 s(루프 3회 `7c9005e6…` — Windows 6.6은 `cadaeca6…`, 2.41–2.58 s, 샷 정상; `git status`는 버전 전환 파일뿐). 10: Fluid-Sim(아카이브 + `git init`, 기준선 = 6000.3.11f1 배치 업그레이드) 녹색 49.4 s·28.5 s(루프 3회 `cb45f371…`, 출시 빌드 `.app` `Managed/` 106개·`Harness.*` 0개, 제거 뒤 `git status` 비어 있음).
+  - 남은 것: G3-17(W18), 같은 스크립트로 Windows 매트릭스 1–10 재확인(상시), Mac의 BagelGame(Git LFS — 사람이 클론)·사내 프로젝트 A, 6.0 Mac.
 
 ## 하네스 자체
 
@@ -524,8 +557,9 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 1. `loop.ps1` 3회 연속 녹색, `build.fingerprint`·`play.events` 동일, PNG를 Read로 확인(selftest: blank·dark·magenta 샷 없음, 모든 샷 1280x720에
    HUD 합성(`ui`) + `compile-check -IncludeHarness`
    + 기준 이미지(G3-4): 루프 1이 임시 폴더에 쓰고(`-UpdateGolden`) 2·3이 픽셀까지 같음(maxDiff 0 — 허용치 안의 `same`이 아니라), 모든 에디터 창을 매 업데이트마다
-   다시 그리는 플레이의 루프도 픽셀까지 같음(G3-15: 그 앞에 에디터 GUI가 그리면 DBuffer 데칼 가장자리가 달라졌다), 커밋된 이 버전의 기준 이미지와 같음(있을 때),
-   `harness_golden`의 `ignore`(왼쪽 위 기준)와 같은 major.minor의 다른 패치 폴더 대체
+   다시 그리는 플레이의 루프도 픽셀까지 같음(G3-15: 그 앞에 에디터 GUI가 그리면 DBuffer 데칼 가장자리가 달라졌다), 커밋된 이 버전·이 OS의 기준 이미지와 같음(있을 때;
+   macOS는 `<버전>-macos`), `harness_golden`의 `ignore`(왼쪽 위 기준)와 같은 major.minor·같은 OS의 다른 패치 폴더 대체
+   (Mac에서는 루프끼리 "픽셀까지 같음"이 G3-17로 세션에 따라 빨갈 수 있다)
    + 시나리오 도구 루프 한 번: `waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처
    + uGUI 합성(G3-1, 편집 모드 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·스택 UI 카메라의 캔버스 → 순서, 색 공간 블렌드 오차 ≤ 2, 되돌림)
    + 카메라(G3-7, 편집 모드 픽스처: 메인 카메라 자식인 스택 Overlay 카메라의 쿼드가 메인·다른 포즈 모두 화면 중앙, 미니맵 Base 카메라가 viewport에,
@@ -598,6 +632,7 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    TagManager 바이트·에디터의 레이어 20–25·HEAD·`git status` 그대로
 9. 새 클론(O-8): `tools/`·`ProjectSettings/`·`Packages/`·`.gitignore`·에디터 시작 코드를 바꿨으면 임시 커밋 후
    `tools/fresh-clone-test.ps1 -SelfTest -ExpectFingerprint <1의 fingerprint>` 녹색(클론이 메인 트리와 같은 fingerprint), `shots/`를 Read로 확인.
+   OS마다 돌린다(fingerprint·기준 이미지가 OS별 — macOS는 `pwsh tools/fresh-clone-test.ps1 …`, W17).
    루프 요약의 `golden`: 샘플 버전(6000.3.11f1)은 커밋된 기준 이미지와 `same=3`(새 Library의 첫 임포트도 같은 픽셀), 다른 버전은 `missing`.
    지원 버전(CLAUDE.md "Unity 버전")마다 `-UnityVersion <v>`로도 돌린다(fingerprint는 그 버전의 값)
 10. 기존 프로젝트(P-2): 하네스 패키지·설치/제거 스크립트·런타임을 바꿨으면, 기준선 커밋이 있는 테스트 클론마다
@@ -611,6 +646,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    사내 프로젝트 A의 `-Player`·출시 빌드(W16)는 클론을 Standalone으로 바꾸고 Windows 빌드용 테스트 커밋(`Handheld`의 `#if`, Standalone define `DEV`)을 얹어서만 된다 —
    `brd-attach-player.json`(부트 대화상자), 로비는 `brd-lobby-player.json`(에디터 서버 선택을 Dev로 둔 뒤, 플레이어에는 서버 버튼이 없다). 배포 경로를 바꿨으면
    `-Source git+file:///<저장소>?path=/AgentHarness/Packages/com.geuneda.agentharness#<브랜치>`(커밋된 것, 부트스트랩 포함)로도.
+   macOS(W17): 출시 빌드는 `StandaloneOSX`(`.app`의 `Contents/Resources/Data/Managed`), 클론은 `../ah-p2/fluid`(Fluid-Sim 아카이브 + `git init`, 기준선 커밋 = 6000.3.11f1
+   배치 업그레이드·`com.unity.ide.vscode` 제거). BagelGame은 Git LFS라 사람이 `git clone`해야 한다(상시), 사내 프로젝트 A는 이 Mac에 없다.
 
 ---
 

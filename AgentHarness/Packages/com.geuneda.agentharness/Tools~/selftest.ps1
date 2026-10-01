@@ -1687,7 +1687,9 @@ function Invoke-Item1 {
     $gi = Join-Path $outAbs 'golden-ignore'
     if (Test-Path -LiteralPath $gi) { Remove-Item -LiteralPath $gi -Recurse -Force }
     $v = "$($runs[2].unityVersion)" -split '\.'
-    $patch0 = "$($v[0]).$($v[1]).0a1"
+    # The golden version folder's OS suffix (-macos, -linux; none on Windows - P-3): a fallback only takes this OS's folders.
+    $suffix = [regex]::Match("$($runs[2].golden.version)", '^\d+\.\d+\.\d+[abfp]\d+(.*)$').Groups[1].Value
+    $patch0 = "$($v[0]).$($v[1]).0a1$suffix"
     $shot = @($runs[2].shots)[0]
     $gdir = Join-Path $gi "$patch0/ignore"
     [void][IO.Directory]::CreateDirectory($gdir)
@@ -2335,6 +2337,9 @@ function Invoke-Item7 {
     Write-TextFile (Get-Abs $B 'Assets/Game/Probe/Builders/Game.Probe.Builders.asmdef') $ProbeBuildersAsmdef
     Write-TextFile (Get-Abs $B $ProbeSettingsCs) $ProbeSettingsText
     $da = Get-OutDir '7b-forced'; $db = Get-OutDir '7b-newmodule'
+    # B's gate once beforehand: a cold first check in a new worktree took 8 s on a Mac, longer than A's whole submit, and B then
+    # never had to wait for the lock (P-3).
+    [void](Wait-Tool (Start-Tool $B 'compile-check.ps1' @('-Module', 'Probe', '-Dependents')))
     $ta = Start-Tool $A 'submit.ps1' @('-Module', 'Smoke', '-SkipCheck', '-Out', $da)
     [void](Wait-Until { Test-Path -LiteralPath $SubmitJournal } 60 $ta)
     $tb = Start-Tool $B 'submit.ps1' @('-Module', 'Probe', '-Out', $db)

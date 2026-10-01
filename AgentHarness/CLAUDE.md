@@ -34,6 +34,8 @@ powershell -ExecutionPolicy Bypass -File tools/open.ps1   # 에디터가 없으�
 powershell -ExecutionPolicy Bypass -File tools/loop.ps1
 powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 잡고 정상 종료, 프로세스가 끝날 때까지 대기
 ```
+**macOS**(P-3)에서는 같은 스크립트를 PowerShell 7로 부른다: `pwsh tools/open.ps1`, `pwsh tools/loop.ps1`, `pwsh tools/uc.ps1 harness_capture '{"preset":"all"}'`
+(이 문서의 `powershell -ExecutionPolicy Bypass -File tools/x.ps1`은 모두 `pwsh tools/x.ps1`). 다른 점은 아래 "macOS".
 
 `open.ps1`은 에디터 로그를 `Logs/Editor.log`(직전 것은 `Editor-prev.log`)에 따로 쓰게 하고, 응답한 뒤 2초간 idle일 때 돌아온다
 (재시작 ~14 s, 새 클론 첫 임포트는 수 분). `unity open`이나 Hub로 열면 `-logFile`이 없어 여러 에디터가 사용자 전역 `Editor.log` 하나를
@@ -206,7 +208,7 @@ tools/fresh-clone-test.ps1     새 클론 검증: 짧은 경로에 클론 → op
 tools/attach-test.ps1          기존 프로젝트 붙이기 검증: install → open → 루프 N회 → 출시 빌드 → quit → uninstall → git status
 tools/selftest.ps1             검증 매트릭스 1–8 자동 실행(에러 주입·동시 루프·worktree submit/land)
 tools/scenarios/*.json         플레이 시나리오        HarnessOut/           캡처·result.json·report.json, player-build/(개발 빌드 플레이어) (gitignore)
-golden/<Unity 버전>/<시나리오>/  기준 이미지(커밋): 루프 샷과 비교 (loop.ps1 -UpdateGolden이 씀)
+golden/<Unity 버전>[-macos]/<시나리오>/  기준 이미지(커밋, OS별): 루프 샷과 비교 (loop.ps1 -UpdateGolden이 씀)
 AgentScripts/                  eval_file / run_script 용 임시 C# (gitignore)
 ```
 
@@ -670,14 +672,14 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
 powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -UpdateGolden   # 녹색이고 샷이 맞을 때: 이 샷들을 기준 이미지로 (커밋한다)
 powershell -ExecutionPolicy Bypass -File tools/loop.ps1                 # 이후 매 루프: 기준 이미지와 비교 → report.golden, shotStats[].golden
 ```
-- 위치: `golden/<Unity 버전>/<시나리오 "name">/<샷 파일>.png`(설정 `goldenRoot`, worktree면 그 worktree의 것). `-UpdateGolden`은 그 폴더의 PNG를 이번 샷으로
+- 위치: `golden/<Unity 버전>/<시나리오 "name">/<샷 파일>.png`(macOS는 `<Unity 버전>-macos`, Linux는 `-linux` — 아래 "macOS"; 설정 `goldenRoot`, worktree면 그 worktree의 것). `-UpdateGolden`은 그 폴더의 PNG를 이번 샷으로
   바꾼다(없어진 샷의 PNG는 지움). 루프가 빨가면 쓰지 않는다(`golden.error`). `-NoPlay`의 샷은 `<버전>/capture/`.
-- Unity 버전마다 따로 둔다(URP 버전마다 렌더가 다르다, P-4). 그 버전 폴더가 없으면 같은 major.minor의 가장 가까운 패치 것과 비교한다(`golden.from`).
-  샘플은 6000.3.11f1의 `default` 시나리오 3장을 커밋해 두었다(다른 버전은 `missing`).
+- Unity 버전과 OS마다 따로 둔다(URP 버전마다 렌더가 다르다, P-4; Metal과 Direct3D도, P-3). 그 버전 폴더가 없으면 같은 OS·같은 major.minor의 가장 가까운 패치 것과
+  비교한다(`golden.from`). 샘플은 6000.3.11f1의 `default` 시나리오 3장을 Windows 것(`6000.3.11f1/`)으로 커밋해 두었다(다른 버전·macOS는 `missing` — macOS는 G3-17).
 - 판정(`Editor/HarnessGolden.cs`): 채널 차이가 24 넘는 픽셀이 0.01% 넘거나 평균 차이(`meanDiff`, 0..255)가 0.5 넘으면 `changed`. 같은 머신·같은 버전은
   **픽셀까지 같다**(고정 시간 간격: `maxDiff` 0 — 플레이 동안 에디터 창이 계속 다시 그려져도, selftest 1번). 예외는 URP의 **DBuffer 데칼**(데스크톱 Automatic의
   기본값): 마지막 카메라 렌더와 캡처 사이에 에디터 GUI가 그렸는지에 따라 데칼 가장자리 픽셀 몇 개가 달라진다(SMAA가 키움 — 샘플에서 6–7픽셀, 채널 차이 47,
-  허용치 안이라 `same`; 아래 "함정"). 픽셀까지 같아야 하면 ScreenSpace 데칼을 쓴다(샘플). 허용치는 다른 GPU·드라이버용인데 아직 재지 않았다(ROADMAP P-3). 크기가 다르면 `size`.
+  허용치 안이라 `same`; 아래 "함정"). 픽셀까지 같아야 하면 ScreenSpace 데칼을 쓴다(샘플). 다른 OS의 기준 이미지와는 허용치를 넘어서(Mac 샷 vs Windows 기준 이미지 바뀐 픽셀 0.04–0.13%) OS별 폴더를 둔다(P-3). 같은 OS의 다른 GPU는 재지 않았다. 크기가 다르면 `size`.
   `changed`면 `<Out>/golden/<샷>.diff.png`: 샷을 어둡게, 바뀐 픽셀 빨강(진할수록 많이), 뺀 영역 파랑, 바뀐 범위 노란 테두리(`rect` = `[x, y, w, h]`, 왼쪽 위 기준).
 - **실패로 치지 않는다** — 루프는 의도한 변경 중에도 녹색이다. 의도하지 않은 `changed`(다른 모듈 작업, 렌더 설정 이전 W4)를 잡는 용도.
 - 매번 다른 글자(시계·네트워크 값)가 있는 샷: 캡처에 `"ignore": [{"x": 0.8, "y": 0, "w": 0.2, "h": 0.1}]`(이미지 비율, 왼쪽 위 기준)로 그 영역을 빼거나
@@ -844,7 +846,8 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1           # 이 worktree
 powershell -ExecutionPolicy Bypass -File tools/submit.ps1 -Module Foo   # 여전히 에디터 트리로(트랜잭션). land.ps1도 같다
 powershell -ExecutionPolicy Bypass -File tools/quit.ps1           # 이 worktree의 에디터를 닫는다 (worktree를 지우기 전에)
 ```
-- `Library/`가 없는 worktree면 에디터 트리의 `Library/`를 복사해 둔다(에디터 트리의 락을 잡고 그 에디터가 idle일 때; 샘플 1.9 GB·2.7만 파일 ~11 s).
+- `Library/`가 없는 worktree면 에디터 트리의 `Library/`를 복사해 둔다(에디터 트리의 락을 잡고 그 에디터가 idle일 때; 샘플 1.9 GB·2.7만 파일 ~11 s, macOS는
+  APFS 클론이라 ~6 s에 디스크를 더 쓰지 않는다 — `seeded.cloned`).
   복사하지 않는 것: Pipeline 디스크립터(복사하면 이 worktree의 도구가 에디터 트리의 에디터에 붙는다), `Library/Harness`(submit/land 저널·소유 기록),
   락·pid 파일. 임시 폴더에 복사한 뒤 이름을 바꾸므로 반쯤 된 `Library/`는 생기지 않는다.
 - 그 뒤로 이 worktree는 `Library/`가 있는 프로젝트라 `loop.ps1`·`uc.ps1`·`quit.ps1`·`compile-check.ps1`이 자기 에디터를 쓰고(락도 따로),
@@ -933,7 +936,7 @@ powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -E
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
 - 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark/magenta 없음, 모든 샷 1280x720에 HUD 합성, 기준 이미지: 루프 1이 `HarnessOut/selftest/golden`에
-  쓰고 2·3이 픽셀까지 같음(maxDiff 0), 모든 에디터 창을 매 업데이트마다 다시 그리는 플레이의 루프도 픽셀까지 같음(G3-15), 커밋된 이 버전의 기준 이미지와 같음, `harness_golden`의 `ignore`·패치 버전 대체) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
+  쓰고 2·3이 픽셀까지 같음(maxDiff 0), 모든 에디터 창을 매 업데이트마다 다시 그리는 플레이의 루프도 픽셀까지 같음(G3-15), 커밋된 이 버전·이 OS의 기준 이미지와 같음, `harness_golden`의 `ignore`·패치 버전 대체(같은 OS 폴더만)) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
   uGUI 합성(편집 모드, 저장하지 않는 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·스택 UI 카메라의 캔버스 → 순서, 선형 공간 블렌드 오차 ≤ 2, 되돌림) +
   카메라(G3-7, 픽스처: 메인 카메라 자식인 스택 Overlay 카메라가 그리는 쿼드가 메인·다른 포즈 모두 화면 중앙, 미니맵 Base 카메라가 오른쪽 위, 앞 depth 카메라는 덮임,
   `"camera"`로 미니맵만, 메인 카메라·타깃·스택 되돌림, 씬 dirty 아님) + 플레이 중 픽스처(오버레이 캔버스·스택 카메라)와 연속 캡처(2x2 시트, `motion` > 0), 하늘만 보는 연속 캡처에서 구름이 게임 시간으로 흐름(G4-5) +
@@ -1013,6 +1016,40 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   `AGENTHARNESS_INPUT_SYSTEM`(입력 재생), `AGENTHARNESS_PHYSICS`(`ctx.Physics`). 없으면 그 기능만 빠지고 컴파일은 된다(Built-in·구 Input Manager 프로젝트).
   모듈 코드도 버전을 타는 API는 `UnityCompat`을 쓰거나 같은 방식으로 가른다.
 
+## macOS (P-3)
+
+Apple Silicon Mac(M4 Pro, macOS 26.7, Retina 화면 하나)에서 같은 도구·같은 패키지로 돈다(W17, 2026-10-01): 루프·`open`/`quit`·`compile-check`·`player.ps1`·
+새 클론·기존 프로젝트 붙이기, selftest 2·4·5·7·8(에러 주입·lint·계약·submit/land). 1·3·6번은 한 번 전부 녹색(588 s)이었지만 **UI Toolkit의 작은 글자가 에디터
+세션·이력에 따라 소수 픽셀 다르게 찍혀(G3-17, 미해결)** "픽셀까지 같음" 검사가 세션에 따라 빨갛다(마지막 실행 440 s: 1·3·6만, 모두 HUD 글자 줄). Windows와 다른 것만 적는다.
+
+- **PowerShell 7**(`pwsh` 7.4 이상, 검증 7.6.6)로 부른다: `pwsh tools/loop.ps1`, `pwsh tools/uc.ps1 harness_ping`(zsh·bash에서는 JSON 인자가 그대로 넘어간다).
+  스크립트는 Windows PowerShell 5.1과 같은 파일이라 계속 ASCII만, pwsh 전용 문법 없이 쓴다(Windows는 그대로 `powershell -ExecutionPolicy Bypass -File`).
+  관리자 권한 없이 설치: GitHub 릴리스의 `powershell-<버전>-osx-arm64.tar.gz`를 `~/.local/share/powershell/<버전>`에 풀고 `~/.local/bin/pwsh`로 링크
+  (`brew install --cask powershell`은 관리자 암호가 필요하고, Homebrew .NET에서 `dotnet tool install -g PowerShell`은 `DOTNET_ROOT` 없이 뜨지 않았다).
+  Unity CLI: `curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash`.
+- **기준 이미지는 OS별 폴더**: `golden/<버전>-macos/<시나리오>/`(Windows `golden/<버전>/`, Linux `-linux`). Metal과 Direct3D·OS 글꼴 래스터화가 달라 Windows 기준
+  이미지와는 바뀐 픽셀 0.04–0.13%(HUD 글자·룬 원 가장자리·불씨 몇 개, maxDiff 146–174)로 허용치를 넘는다. 같은 major.minor 패치 대체도 같은 OS 폴더끼리만.
+  샘플의 Mac 기준 이미지는 커밋하지 않았다 — G3-17이 풀릴 때까지 세션마다 HUD 글자가 `changed`로 나온다(Mac에서는 `missing`; 필요하면 그 세션에서 `-UpdateGolden`).
+- **fingerprint는 OS마다 다르다**(6.3: Mac `4bb3e16d…` / Windows `609b54d2…`, 6.6: Mac `7c9005e6…` / Windows `cadaeca6…`). 같은 Mac에서는 루프·selftest·새 클론 모두 같다. 줄 단위로 가르지는 못했다(Windows의
+  `Library/Harness/fingerprint.txt`가 없다) — 후보는 절차적 메시 정점의 삼각함수 마지막 비트(ARM64 libm).
+- 대화상자·Safe Mode: 에디터 창 제목을 창 서버 목록(CoreGraphics `CGWindowListCopyWindowInfo`)에서 읽는다(Safe Mode 창 제목 `AgentHarness - SAFE MODE - 6000.3.11f1 <Metal>`).
+  macOS는 **화면 기록 권한이 있는 터미널 앱에만** 다른 앱의 창 제목을 준다 — 없으면 Safe Mode는 에디터 로그의 `ModeService[...].ChangeMode(safe_mode)`로 잡고,
+  이용 약관처럼 Pipeline 서버가 뜨기 전의 대화상자는 `dialog`로 이름을 대지 못해 `open.ps1`이 시간 초과(`-TimeoutSec`)로 끝난다.
+- 에디터는 `open.ps1`의 표준 입출력을 물려받지 않게 `/bin/sh`로 띄운다(stdin/stdout/stderr = /dev/null, 로그는 `-logFile`). 물려받으면 `pwsh tools/open.ps1 | …`처럼
+  출력을 파이프로 받는 쪽(에이전트의 셸 도구)이 에디터가 끝날 때까지 돌아오지 않았다. 그렇게 띄운 에디터는 `open.ps1`의 자식이 아니라 종료 코드가 없다(쓰지 않음).
+- `open.ps1 -Own`의 `Library/` 사본은 APFS 클론(`cp -c`): 2.1 GB·파일 2.9만 개 ~6 s, 디스크를 더 쓰지 않는다(`seeded.cloned`).
+- 플레이어: 빌드 타깃 `StandaloneOSX`(`.app`, Mac 빌드 지원은 에디터에 들어 있다). `player.ps1`은 번들 안의 실행 파일을 직접 띄우고(종료 코드를 받으려고),
+  플레이어가 `-logFile`과 별개로 표준 출력에 쓰는 시작 메시지는 `HarnessOut/player/Player.stdout.log`로 보낸다. Retina에서도 창·`Screen`은 1280x720
+  (포인트 = 캡처 픽셀), 그래픽은 `Metal Apple M4 Pro`, 실제 화면 = 같은 프레임 캡처(`screen.vsShot` same, 평균 0.52).
+- `compile-check`: `csc` 백엔드만(msbuild는 Windows). 컴파일러는 에디터 빌드 그래프 그대로(`Unity.app/Contents/Resources/Scripting/...`).
+- 락: macOS의 이름 있는 뮤텍스(.NET)는 보유 프로세스가 `kill -9`로 죽으면 `AbandonedMutexException` 없이 그냥 풀린다 — submit/land 복구는 락을 잡은 쪽이 저널로 하므로
+  같다(selftest 7·8의 도중 kill → `recoveredSubmit`/`recoveredLand`).
+- 백그라운드: 다른 앱이 앞에 있어도(App Nap) 루프·플레이·캡처가 진행했다(`set_autotick`, `fps.editorFocused` false).
+- 측정(이 Mac, 6.3 창 에디터; 다른 프로젝트의 에디터 2개가 같이 떠 있었다): 새 체크아웃 첫 열기 57.7 s, 재시작 11–15 s, 종료 1.3–1.6 s, 코드 변경 없는 루프
+  2.73–2.95 s(play 1.9–2.1 s, fps 142–158), C# 1줄 수정 6.6–9.0 s, 컴파일 에러 보고 ~1.0 s, `-Hot` 2.4–2.9 s, `compile-check -IncludeHarness` 1.6 s(7개),
+  selftest 1–8 588 s, 플레이어 730–736 fps(에디터의 ×4.6, 증분 빌드 4.4–4.6 s, 첫 빌드 ~145 s). 새 클론 6.3 루프 3회 녹색(selftest는 G3-17로 3·6 빨강), 6.6 녹색
+  117 s, Fluid-Sim 붙이기(`../ah-p2/fluid`, 출시 빌드 `.app`) 녹색 28–49 s.
+
 ## 설정 (ProjectSettings/AgentHarness.json)
 
 하네스가 이 프로젝트를 어떻게 보는지. 에디터 커맨드(`Harness.HarnessConfig`, 파일이 바뀌면 다시 읽음)와 `tools/`(`Get-HarnessConfig`)가 같은 파일을 읽는다.
@@ -1090,7 +1127,7 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   `UnityEditor.PackageManager.Client`(eval)로 추가·제거한다 — packages-lock.json까지 맞게 바뀐다.
 - 새로 설치한 Unity 버전의 첫 실행은 **이용 약관 창**(Unity Editor Software Terms)을 띄운다. Pipeline 서버가 뜨기 전이라 `open.ps1`이
   `dialog.title`로 보고한다 → 사람이 동의해야 한다. 시작 시 컴파일 에러가 있으면 "Enter Safe Mode?"도 같은 식으로 보고된다(창 제목은
-  `Process.MainWindowTitle`로는 안 보여서 Win32 `EnumWindows`로 읽는다).
+  `Process.MainWindowTitle`로는 안 보여서 Windows는 Win32 `EnumWindows`, macOS는 `CGWindowListCopyWindowInfo`로 읽는다 — macOS는 화면 기록 권한이 필요, 아래 "macOS").
 - 템플릿에서 온 URP 에셋이 옛 직렬화 버전이면(`Mobile_RPAsset`이 `k_AssetVersion: 12`, URP 17.3은 13) 셰이더 재임포트 같은 작업 뒤
   URP가 모든 RP 에셋을 다시 써서 **에디터 종료 때** 저장한다 → 새 클론의 `git status`가 더러워졌다. W4부터 RP 에셋은 `ISettingsStep`이 그 버전으로
   만드는 생성물이라 커밋하지 않는다.
@@ -1337,6 +1374,20 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   있을 수도 없을 수도 있는 키는 `$h['text']`. `git status --porcelain` 경로는 저장소 루트 기준, `git ls-tree`·`hash-object`·`show <rev>:./x`는 `-C` 폴더 기준이다.
 - `CompilationPipeline.GetAssemblies(AssembliesType.Editor)`를 도메인 리로드 뒤 처음 부르면 ~60 ms다(Player 목록과 따로 캐시) — lint의 계약 검사가 그것과 Builders
   어셈블리까지 훑어 리로드 직후 83–158 ms였다 → static-reset이 이미 받은 Player 목록으로 21–30 ms.
+- **macOS(Metal)에서 UI Toolkit의 작은 글자가 같은 코드·같은 레이아웃인데 소수 픽셀 다르게 찍힌다**(W17, G3-17, 미해결): HUD 제목(13 px 굵게, 자간 3)·힌트·토스트가
+  요소마다 따로 두 상태 중 하나(제목 ~490픽셀 = 0.05%, 글자 세로 가장자리만 — 굵기 합은 같음). 새 에디터 세션의 첫 플레이와 다음 플레이가 다르고, 세션마다 정착하는
+  상태도 다르며, 파이프라인 전환 같은 일 뒤에 바뀌기도 한다. 캡처 순간의 레이아웃(요소 위치·크기·측정 폭·배율)과 폰트 에셋(글리프 사각형·아틀라스 위치·전진 폭·커닝,
+  아틀라스의 글리프 밖 텍셀 0)은 두 상태에서 같았다 → 차이는 GPU 쪽 그리기다. 아니었던 것: Game 뷰 다시 그리기·다른 배율로 그리기·다른 시나리오의 새 글자·폰트 엔진
+  워밍업·에디터 비트맵 텍스트 경로·텍스트 잡의 생성기 공유(스레드별), 시도해 효과가 없던 것: 캡처 전후 `MarkDirtyText()`, 플레이 전 런타임 패널 폐기(`PanelSettings.DisposePanel`).
+  Windows의 매트릭스에서는 한 번도 나오지 않았다. 그래서 Mac 기준 이미지를 커밋하지 않았다(위 "macOS").
+- **PowerShell 7의 `ConvertFrom-Json`은 ISO 8601 문자열을 `DateTime`으로 바꾼다**(5.1은 문자열). 그것을 `[DateTime]::Parse("$x")`로 다시 읽으면 소수 초가 사라지고
+  로컬 시각으로 읽혀(한국 시간이면 9시간) `open.ps1`이 띄운 에디터(`Logs/harness-editor.json`의 시작 시각)를 알아보지 못했고 `playEnterSec`가 정수 초였다 → `ConvertTo-HarnessUtc`.
+- **macOS·Linux에서 `Start-Process`로 띄운 프로그램은 스크립트의 표준 입출력을 물려받는다.** 에디터가 `open.ps1`의 stdout 파이프를 쥐고 있어 `pwsh tools/open.ps1 | …`(에이전트의
+  셸 도구)가 에디터가 꺼질 때까지 끝나지 않았다 → `Start-HarnessDetached`(`/bin/sh` + /dev/null). 플레이어(.app)는 `-logFile`과 별개로 시작 메시지를 stdout에 써서 `player.ps1`의
+  JSON 앞에 섞였다 → 파일로 돌린다.
+- **Unix의 `Get-Item`은 점으로 시작하는 파일을 숨김으로 보고 `-Force` 없이는 못 찾는다**(`Library/Pipeline/.unity-pipeline-port`: "Could not find item", pid 재사용 검사가
+  조용히 빠졌다) → 시각은 `[IO.File]::GetLastWriteTime`. pwsh의 `Join-Path`·`New-Item`은 `\`를 `/`로 바꿔 주지만 문자열 비교·.NET API는 아니다 — `compile-check`가
+  모듈 폴더를 `$dir + '\'`로 비교해 macOS에서 모듈 어셈블리를 하나도 검사하지 않고 녹색이었다(Harness만 검사). 새 코드는 `/`, 경로 구분자는 `[IO.Path]::DirectorySeparatorChar`.
 
 ## 문제 해결
 
