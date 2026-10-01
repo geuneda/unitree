@@ -7,7 +7,9 @@
     shot 1280x720 with the HUD composited (G3-1); golden images (G3-4): loop 1 writes them (-UpdateGolden, to
     HarnessOut), loops 2-3 are the same pixel for pixel (largest channel difference 0), so is a loop with every Editor
     window repainted on every Editor update of the play (G3-15: the Editor's GUI drawn before the captures flipped DBuffer
-    decal edges), the committed goldens of this Unity version (if any) are the same, and harness_golden leaves "ignore"
+    decal edges), so is a loop whose kerning pairs are flagged to drop their letter spacing during the play (G3-17: what
+    FontEngine's garbage flags did on macOS - the captures clear them), the committed goldens of this Unity version (if any)
+    are the same, and harness_golden leaves "ignore"
     regions (from the top left) out and falls back to another patch of the same major.minor; compile-check of every
     assembly (csc, the Editor's response files);
     one more loop with the scenario tools of P-5 (waitScene, waitTarget, a UI Toolkit click by name, KeyCode key names,
@@ -931,6 +933,77 @@ $RepaintStateText = @'
 return UnityEditor.SessionState.GetInt("AgentHarness.selftest.repaints", -1);
 '@
 
+# Item 1's kerning check (G3-17), eval_file bodies: on every Editor update of the next play session, every kerning pair of the
+# dynamic font assets gets IgnoreSpacingAdjustments - what the uninitialized flags FontEngine leaves on macOS did at random -
+# and the UI Toolkit text is generated again with it (the game's frames draw it). The captures clear the flags first
+# (KerningFlags), so the shots stay pixel for pixel as loop 1. Only text of the standard generator reads these pairs: 6.6 makes
+# the Advanced Text Generator the default (-unity-text-generator), which has none to flag. It disarms itself when play mode
+# exits (or unused, after 120 s). The state body: "<pairs flagged>/<text elements of the standard generator>".
+$KerningArmText = @'
+const string key = "AgentHarness.selftest.kerningFlagged";
+const string standardKey = "AgentHarness.selftest.kerningStandardText";
+UnityEditor.SessionState.SetInt(key, 0);
+UnityEditor.SessionState.SetInt(standardKey, 0);
+var generator = typeof(UnityEngine.UIElements.IResolvedStyle).GetProperty("unityTextGenerator");   // 6.3+; before it, all standard
+var any = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+var lookupField = typeof(UnityEngine.TextCore.Text.FontFeatureTable).GetField("m_GlyphPairAdjustmentRecordLookup", any);
+if (lookupField == null) throw new System.InvalidOperationException("FontFeatureTable.m_GlyphPairAdjustmentRecordLookup not found");
+var ignore = UnityEngine.TextCore.LowLevel.FontFeatureLookupFlags.IgnoreSpacingAdjustments;
+var deadline = System.DateTime.UtcNow.AddSeconds(120);
+var flagged = 0;
+UnityEditor.EditorApplication.CallbackFunction flag = () =>
+{
+    if (!UnityEngine.Application.isPlaying) return;
+    var standard = 0;
+    foreach (var doc in UnityEngine.Object.FindObjectsByType<UnityEngine.UIElements.UIDocument>(UnityEngine.FindObjectsSortMode.None))
+        if (doc.rootVisualElement != null)
+            UnityEngine.UIElements.UQueryExtensions.Query<UnityEngine.UIElements.TextElement>(doc.rootVisualElement).ForEach(t =>
+            {
+                if (generator == null || generator.GetValue(t.resolvedStyle).ToString() == "Standard") standard++;
+            });
+    if (standard > UnityEditor.SessionState.GetInt(standardKey, 0)) UnityEditor.SessionState.SetInt(standardKey, standard);
+    var keys = new System.Collections.Generic.List<uint>();
+    foreach (var font in UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.TextCore.Text.FontAsset>())
+    {
+        if (font.atlasPopulationMode == UnityEngine.TextCore.Text.AtlasPopulationMode.Static || font.fontFeatureTable == null) continue;
+        var lookup = (System.Collections.Generic.Dictionary<uint, UnityEngine.TextCore.LowLevel.GlyphPairAdjustmentRecord>)lookupField.GetValue(font.fontFeatureTable);
+        var start = keys.Count;
+        foreach (var kv in lookup) if (kv.Value.featureLookupFlags != ignore) keys.Add(kv.Key);
+        for (var i = start; i < keys.Count; i++)
+        {
+            var r = lookup[keys[i]];
+            r.featureLookupFlags = ignore;
+            lookup[keys[i]] = r;
+        }
+    }
+    if (keys.Count == 0) return;
+    flagged += keys.Count;
+    UnityEditor.SessionState.SetInt(key, flagged);
+    foreach (var doc in UnityEngine.Object.FindObjectsByType<UnityEngine.UIElements.UIDocument>(UnityEngine.FindObjectsSortMode.None))
+        if (doc.rootVisualElement != null)
+            UnityEngine.UIElements.UQueryExtensions.Query<UnityEngine.UIElements.TextElement>(doc.rootVisualElement).ForEach(t => t.MarkDirtyText());
+};
+System.Action<UnityEditor.PlayModeStateChange> onChange = null;
+onChange = c =>
+{
+    if (c == UnityEditor.PlayModeStateChange.EnteredPlayMode)
+    {
+        if (System.DateTime.UtcNow > deadline) { UnityEditor.EditorApplication.playModeStateChanged -= onChange; return; }
+        UnityEditor.EditorApplication.update += flag;
+    }
+    else if (c == UnityEditor.PlayModeStateChange.ExitingPlayMode)
+    {
+        UnityEditor.EditorApplication.update -= flag;
+        UnityEditor.EditorApplication.playModeStateChanged -= onChange;
+    }
+};
+UnityEditor.EditorApplication.playModeStateChanged += onChange;
+return "armed";
+'@
+$KerningStateText = @'
+return UnityEditor.SessionState.GetInt("AgentHarness.selftest.kerningFlagged", -1) + "/" + UnityEditor.SessionState.GetInt("AgentHarness.selftest.kerningStandardText", -1);
+'@
+
 # The real devices, the disabled ones among them, how many Space events the armed play queued (and had queued when it gave
 # focus back), UI Toolkit's "ignore input while unfocused" during that play and now (1 = ignores, 0 = takes input, -1 = none).
 $RealInputStateText = @'
@@ -1595,6 +1668,20 @@ function Invoke-Item1 {
     $rdMax = ($rd | Measure-Object -Maximum).Maximum
     Test-Check 'golden: a loop with every Editor window repainted on every update, pixel for pixel as loop 1' ([bool]$r.ok -and [int]$repaints -gt 0 -and $rd.Count -eq $written.Count -and $rdMax -eq 0 -and (Get-Events $r) -eq (Get-Events $runs[0])) "repaints=$repaints $((Get-Golden $r) -join ',') maxDiff=$rdMax $(Get-Summary $r)"
     $state.item['repaintLoop'] = "repaints=$repaints maxDiff=$rdMax"
+    # Kerning pairs flagged to drop their letter spacing during the play, as FontEngine's garbage flags did on macOS (G3-17).
+    $kerningFiles = @{ arm = (Join-Path $outAbs 'kerning-arm.cs').Replace('\', '/'); state = (Join-Path $outAbs 'kerning-state.cs').Replace('\', '/') }
+    Write-TextFile $kerningFiles.arm $KerningArmText
+    Write-TextFile $kerningFiles.state $KerningStateText
+    [void](Invoke-Eval $kerningFiles.arm)
+    $r = Invoke-Loop '1-loop-kerning' @('-Golden', $gold)
+    $kState = "$(Invoke-Eval $kerningFiles.state)".Split('/')
+    $flagged = [int]$kState[0]; $standardText = [int]$kState[1]
+    $kd = @($r.shotStats | ForEach-Object { if ($_.golden) { [double]$_.golden.maxDiff } })
+    $kdMax = ($kd | Measure-Object -Maximum).Maximum
+    # Text of the standard generator must have had pairs to flag; with the Advanced Text Generator alone (6.6 default) there are none.
+    $kNote = if ($standardText -gt 0) { "flagged=$flagged standardText=$standardText" } else { "flagged=$flagged standardText=0 (Advanced Text Generator only: no pairs to flag)" }
+    Test-Check 'golden: a loop whose kerning pairs were flagged to drop letter spacing, pixel for pixel as loop 1 (G3-17)' ([bool]$r.ok -and $flagged -ge 0 -and $standardText -ge 0 -and ($standardText -eq 0 -or $flagged -gt 0) -and $kd.Count -eq $written.Count -and $kdMax -eq 0 -and (Get-Events $r) -eq (Get-Events $runs[0])) "$kNote $((Get-Golden $r) -join ',') maxDiff=$kdMax $(Get-Summary $r)"
+    $state.item['kerningLoop'] = "$kNote maxDiff=$kdMax"
     # The goldens committed with the project, for this Unity version (another patch of it) if any.
     $items3 = @($runs[2].shots | ForEach-Object { [ordered]@{ path = $_; name = [IO.Path]::GetFileNameWithoutExtension($_) } })
     $committed = Invoke-GoldenCommand @{ shots = (ConvertTo-Json -InputObject $items3 -Depth 5 -Compress); key = 'default'; out = (Join-Path $outAbs 'golden-committed') }
@@ -2337,12 +2424,17 @@ function Invoke-Item7 {
     Write-TextFile (Get-Abs $B 'Assets/Game/Probe/Builders/Game.Probe.Builders.asmdef') $ProbeBuildersAsmdef
     Write-TextFile (Get-Abs $B $ProbeSettingsCs) $ProbeSettingsText
     $da = Get-OutDir '7b-forced'; $db = Get-OutDir '7b-newmodule'
-    # B's gate once beforehand: a cold first check in a new worktree took 8 s on a Mac, longer than A's whole submit, and B then
-    # never had to wait for the lock (P-3).
-    [void](Wait-Tool (Start-Tool $B 'compile-check.ps1' @('-Module', 'Probe', '-Dependents')))
+    # B's gate on its own (what submit runs: B's module and the modules that use the contracts), then B's submit without it, so
+    # that it asks for the lock while A holds it: the check took 1-8 s in a new worktree on a Mac, longer than A's whole submit
+    # in 2 full runs out of 3 even after one check beforehand, and B then did not have to wait (P-3, W18).
+    $tc = Start-Tool $B 'compile-check.ps1' @('-Module', 'Probe', '-Backend', 'csc', '-Dependents')
+    [void](Wait-Tool $tc)
+    $gate = $null
+    try { $gate = $tc.out.Result | ConvertFrom-Json } catch { }
+    $gateTargets = @($gate.targets | ForEach-Object { "$($_.assembly): $(if ($_.ok) { 'ok' } else { 'FAILED' })" })
     $ta = Start-Tool $A 'submit.ps1' @('-Module', 'Smoke', '-SkipCheck', '-Out', $da)
     [void](Wait-Until { Test-Path -LiteralPath $SubmitJournal } 60 $ta)
-    $tb = Start-Tool $B 'submit.ps1' @('-Module', 'Probe', '-Out', $db)
+    $tb = Start-Tool $B 'submit.ps1' @('-Module', 'Probe', '-SkipCheck', '-Out', $db)
     $ra = Read-ToolReport $da (Wait-Tool $ta)
     $rb = Read-ToolReport $db (Wait-Tool $tb)
     $e = Get-FirstError $ra
@@ -2357,11 +2449,11 @@ function Invoke-Item7 {
     $tmB = [IO.File]::ReadAllText((Get-Abs $B $TagManager))
     $projB = @($rb.build.settings.project.changed)
     Test-Check 'new module: its settings step''s layer in the Editor tree''s TagManager.asset, copied back to B' ($projB -contains 'Layer[20]: "" -> Probe' -and @($rb.submit.settingsWrittenBack) -contains $TagManager -and $tmB -eq $tmRoot -and $tmRoot.Contains("  - Probe`n")) "changed=[$($projB -join '; ')] back=[$(@($rb.submit.settingsWrittenBack) -join ',')] notBack=[$(@($rb.submit.settingsNotWrittenBack) -join ',')] same=$($tmB -eq $tmRoot)"
-    $state.item['newModuleCheck'] = @($rb.submit.check.targets)
+    $state.item['newModuleCheck'] = $gateTargets
     # The new contracts file is B's until it lands (G5-4), and the gate checked the modules that use the contracts (G5-3).
     $co = Get-HarnessContractOwners
     Test-Check 'new module: ProbeEvents.cs added, owned by B' (@($rb.submit.contractsAdded) -contains $ProbeEventsCs -and $co[$ProbeEventsCs] -and (Test-HarnessSamePath $co[$ProbeEventsCs].workRoot $B)) "added=$(@($rb.submit.contractsAdded) -join ',') owner=$($co[$ProbeEventsCs] | ConvertTo-Json -Compress)"
-    Test-Check 'new module: the gate compiled the contracts users too' (@($rb.submit.check.targets) -contains 'Game.Stage: ok' -and @($rb.submit.check.targets) -contains 'Game.Smoke: ok') (@($rb.submit.check.targets) -join ', ')
+    Test-Check 'new module: the gate compiled the contracts users too' ([bool]$gate.ok -and $gateTargets -contains 'Game.Stage: ok' -and $gateTargets -contains 'Game.Smoke: ok') ($gateTargets -join ', ')
     Invoke-Git $A @('checkout', '--', '.')
 
     # 7c. A runtime error submit is reverted, with the layer its new settings step wrote (G1-5: the ProjectSettings are backed up).

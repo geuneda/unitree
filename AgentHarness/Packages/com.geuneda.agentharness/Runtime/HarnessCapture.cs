@@ -137,6 +137,7 @@ namespace Harness
             CaptureCameras cameras = null;
             try
             {
+                KerningFlags.Clear();   // text with letter-spacing the same in every session (G3-17)
                 go = new GameObject("[HarnessCaptureCamera]") { hideFlags = HideFlags.HideAndDontSave };
                 var cam = go.AddComponent<Camera>();
                 if (template != null) cam.CopyFrom(template);

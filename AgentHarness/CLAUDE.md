@@ -176,7 +176,7 @@ Pipeline의 새 토큰이 늦게 적힌 것이다(C# 1줄 루프가 ~24 s, 하�
 Packages/com.geuneda.agentharness/        하네스 UPM 패키지 (package.json: com.unity.pipeline 의존)
   Runtime/                     런타임 계약: GameRoot, IGameModule, EventBus, HarnessProbe, HarnessConfig, ShotPreset(+ShotPose), ScriptedInput,
                                ScenarioInput(KeyNames, InputHookReplay), ScenarioRunner, HarnessCapture(+CaptureCameras: 화면의 카메라들,
-                               CaptureUi: 스크린 공간 UI 합성, ContactSheet: 연속 캡처 시트), ClipPlayer(Playables 클립 재생, ClipEvent),
+                               CaptureUi: 스크린 공간 UI 합성, ContactSheet: 연속 캡처 시트, KerningFlags: 커닝 쌍의 쓰레기 플래그 정리), ClipPlayer(Playables 클립 재생, ClipEvent),
                                PanelClock(시나리오 동안 UI Toolkit 시간 = 프레임), PlayerRun(플레이어에서 명령줄 시나리오, W8), UI/(Gauge, ToastStack: UI 킷 컨트롤),
                                SkyClock(하늘 구름의 게임 시간)
                                (asmdef Harness.Runtime: UNITY_EDITOR || DEVELOPMENT_BUILD || AGENTHARNESS_RUNTIME)
@@ -675,7 +675,7 @@ powershell -ExecutionPolicy Bypass -File tools/loop.ps1                 # 이후
 - 위치: `golden/<Unity 버전>/<시나리오 "name">/<샷 파일>.png`(macOS는 `<Unity 버전>-macos`, Linux는 `-linux` — 아래 "macOS"; 설정 `goldenRoot`, worktree면 그 worktree의 것). `-UpdateGolden`은 그 폴더의 PNG를 이번 샷으로
   바꾼다(없어진 샷의 PNG는 지움). 루프가 빨가면 쓰지 않는다(`golden.error`). `-NoPlay`의 샷은 `<버전>/capture/`.
 - Unity 버전과 OS마다 따로 둔다(URP 버전마다 렌더가 다르다, P-4; Metal과 Direct3D도, P-3). 그 버전 폴더가 없으면 같은 OS·같은 major.minor의 가장 가까운 패치 것과
-  비교한다(`golden.from`). 샘플은 6000.3.11f1의 `default` 시나리오 3장을 Windows 것(`6000.3.11f1/`)으로 커밋해 두었다(다른 버전·macOS는 `missing` — macOS는 G3-17).
+  비교한다(`golden.from`). 샘플은 6000.3.11f1의 `default` 시나리오 3장을 Windows 것(`6000.3.11f1/`)과 macOS 것(`6000.3.11f1-macos/`, W18)으로 커밋해 두었다(다른 버전은 `missing`).
 - 판정(`Editor/HarnessGolden.cs`): 채널 차이가 24 넘는 픽셀이 0.01% 넘거나 평균 차이(`meanDiff`, 0..255)가 0.5 넘으면 `changed`. 같은 머신·같은 버전은
   **픽셀까지 같다**(고정 시간 간격: `maxDiff` 0 — 플레이 동안 에디터 창이 계속 다시 그려져도, selftest 1번). 예외는 URP의 **DBuffer 데칼**(데스크톱 Automatic의
   기본값): 마지막 카메라 렌더와 캡처 사이에 에디터 GUI가 그렸는지에 따라 데칼 가장자리 픽셀 몇 개가 달라진다(SMAA가 키움 — 샘플에서 6–7픽셀, 채널 차이 47,
@@ -936,7 +936,7 @@ powershell -ExecutionPolicy Bypass -File tools/selftest.ps1 -Only 1,2,3,4,5,6 -E
 powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersion 6000.0.84f1 -SelfTest   # 9 + 다른 버전
 ```
 - 1 루프 3회(녹색, fingerprint·events 동일, 샷 blank/dark/magenta 없음, 모든 샷 1280x720에 HUD 합성, 기준 이미지: 루프 1이 `HarnessOut/selftest/golden`에
-  쓰고 2·3이 픽셀까지 같음(maxDiff 0), 모든 에디터 창을 매 업데이트마다 다시 그리는 플레이의 루프도 픽셀까지 같음(G3-15), 커밋된 이 버전·이 OS의 기준 이미지와 같음, `harness_golden`의 `ignore`·패치 버전 대체(같은 OS 폴더만)) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
+  쓰고 2·3이 픽셀까지 같음(maxDiff 0), 모든 에디터 창을 매 업데이트마다 다시 그리는 플레이의 루프도 픽셀까지 같음(G3-15), 동적 폰트의 커닝 쌍을 모두 자간 무시로 오염시킨 플레이의 루프도 픽셀까지 같음(G3-17), 커밋된 이 버전·이 OS의 기준 이미지와 같음, `harness_golden`의 `ignore`·패치 버전 대체(같은 OS 폴더만)) + 시나리오 도구 루프(`waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처) +
   uGUI 합성(편집 모드, 저장하지 않는 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·스택 UI 카메라의 캔버스 → 순서, 선형 공간 블렌드 오차 ≤ 2, 되돌림) +
   카메라(G3-7, 픽스처: 메인 카메라 자식인 스택 Overlay 카메라가 그리는 쿼드가 메인·다른 포즈 모두 화면 중앙, 미니맵 Base 카메라가 오른쪽 위, 앞 depth 카메라는 덮임,
   `"camera"`로 미니맵만, 메인 카메라·타깃·스택 되돌림, 씬 dirty 아님) + 플레이 중 픽스처(오버레이 캔버스·스택 카메라)와 연속 캡처(2x2 시트, `motion` > 0), 하늘만 보는 연속 캡처에서 구름이 게임 시간으로 흐름(G4-5) +
@@ -1019,8 +1019,8 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 ## macOS (P-3)
 
 Apple Silicon Mac(M4 Pro, macOS 26.7, Retina 화면 하나)에서 같은 도구·같은 패키지로 돈다(W17, 2026-10-01): 루프·`open`/`quit`·`compile-check`·`player.ps1`·
-새 클론·기존 프로젝트 붙이기, selftest 2·4·5·7·8(에러 주입·lint·계약·submit/land). 1·3·6번은 한 번 전부 녹색(588 s)이었지만 **UI Toolkit의 작은 글자가 에디터
-세션·이력에 따라 소수 픽셀 다르게 찍혀(G3-17, 미해결)** "픽셀까지 같음" 검사가 세션에 따라 빨갛다(마지막 실행 440 s: 1·3·6만, 모두 HUD 글자 줄). Windows와 다른 것만 적는다.
+새 클론·기존 프로젝트 붙이기, selftest 1–8 녹색(에디터 트리 582 s, W18). 같은 코드면 에디터 세션이 바뀌어도 샷이 픽셀까지 같고 Mac 기준 이미지도 커밋돼 있다 — W17에서
+세션마다 소수 픽셀 다르던 UI Toolkit 글자(G3-17)는 FontEngine이 커닝 쌍에 남긴 쓰레기 플래그 탓이었고 캡처가 그것을 지운다(아래 "함정"). Windows와 다른 것만 적는다.
 
 - **PowerShell 7**(`pwsh` 7.4 이상, 검증 7.6.6)로 부른다: `pwsh tools/loop.ps1`, `pwsh tools/uc.ps1 harness_ping`(zsh·bash에서는 JSON 인자가 그대로 넘어간다).
   스크립트는 Windows PowerShell 5.1과 같은 파일이라 계속 ASCII만, pwsh 전용 문법 없이 쓴다(Windows는 그대로 `powershell -ExecutionPolicy Bypass -File`).
@@ -1029,7 +1029,7 @@ Apple Silicon Mac(M4 Pro, macOS 26.7, Retina 화면 하나)에서 같은 도구�
   Unity CLI: `curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh | UNITY_CLI_CHANNEL=beta bash`.
 - **기준 이미지는 OS별 폴더**: `golden/<버전>-macos/<시나리오>/`(Windows `golden/<버전>/`, Linux `-linux`). Metal과 Direct3D·OS 글꼴 래스터화가 달라 Windows 기준
   이미지와는 바뀐 픽셀 0.04–0.13%(HUD 글자·룬 원 가장자리·불씨 몇 개, maxDiff 146–174)로 허용치를 넘는다. 같은 major.minor 패치 대체도 같은 OS 폴더끼리만.
-  샘플의 Mac 기준 이미지는 커밋하지 않았다 — G3-17이 풀릴 때까지 세션마다 HUD 글자가 `changed`로 나온다(Mac에서는 `missing`; 필요하면 그 세션에서 `-UpdateGolden`).
+  샘플은 Mac 기준 이미지(`6000.3.11f1-macos/default/`)도 커밋했다(W18 — 에디터 세션 5개·루프 9번이 모두 픽셀까지 같았다).
 - **fingerprint는 OS마다 다르다**(6.3: Mac `4bb3e16d…` / Windows `609b54d2…`, 6.6: Mac `7c9005e6…` / Windows `cadaeca6…`). 같은 Mac에서는 루프·selftest·새 클론 모두 같다. 줄 단위로 가르지는 못했다(Windows의
   `Library/Harness/fingerprint.txt`가 없다) — 후보는 절차적 메시 정점의 삼각함수 마지막 비트(ARM64 libm).
 - 대화상자·Safe Mode: 에디터 창 제목을 창 서버 목록(CoreGraphics `CGWindowListCopyWindowInfo`)에서 읽는다(Safe Mode 창 제목 `AgentHarness - SAFE MODE - 6000.3.11f1 <Metal>`).
@@ -1047,8 +1047,8 @@ Apple Silicon Mac(M4 Pro, macOS 26.7, Retina 화면 하나)에서 같은 도구�
 - 백그라운드: 다른 앱이 앞에 있어도(App Nap) 루프·플레이·캡처가 진행했다(`set_autotick`, `fps.editorFocused` false).
 - 측정(이 Mac, 6.3 창 에디터; 다른 프로젝트의 에디터 2개가 같이 떠 있었다): 새 체크아웃 첫 열기 57.7 s, 재시작 11–15 s, 종료 1.3–1.6 s, 코드 변경 없는 루프
   2.73–2.95 s(play 1.9–2.1 s, fps 142–158), C# 1줄 수정 6.6–9.0 s, 컴파일 에러 보고 ~1.0 s, `-Hot` 2.4–2.9 s, `compile-check -IncludeHarness` 1.6 s(7개),
-  selftest 1–8 588 s, 플레이어 730–736 fps(에디터의 ×4.6, 증분 빌드 4.4–4.6 s, 첫 빌드 ~145 s). 새 클론 6.3 루프 3회 녹색(selftest는 G3-17로 3·6 빨강), 6.6 녹색
-  117 s, Fluid-Sim 붙이기(`../ah-p2/fluid`, 출시 빌드 `.app`) 녹색 28–49 s.
+  selftest 1–8 588 s(W18 뒤 582 s), 플레이어 730–736 fps(에디터의 ×4.6, 증분 빌드 4.4–4.6 s, 첫 빌드 ~145 s). 새 클론 6.3 녹색(W18 뒤 selftest 1–8 포함 704 s),
+  6.6 루프 3회 녹색(selftest 1번은 6.6 Mac의 씬 반사 프로브가 빌드마다 달라 빨강 — ROADMAP G4-6), Fluid-Sim 붙이기(`../ah-p2/fluid`, 출시 빌드 `.app`) 녹색 28–49 s.
 
 ## 설정 (ProjectSettings/AgentHarness.json)
 
@@ -1374,12 +1374,14 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   있을 수도 없을 수도 있는 키는 `$h['text']`. `git status --porcelain` 경로는 저장소 루트 기준, `git ls-tree`·`hash-object`·`show <rev>:./x`는 `-C` 폴더 기준이다.
 - `CompilationPipeline.GetAssemblies(AssembliesType.Editor)`를 도메인 리로드 뒤 처음 부르면 ~60 ms다(Player 목록과 따로 캐시) — lint의 계약 검사가 그것과 Builders
   어셈블리까지 훑어 리로드 직후 83–158 ms였다 → static-reset이 이미 받은 Player 목록으로 21–30 ms.
-- **macOS(Metal)에서 UI Toolkit의 작은 글자가 같은 코드·같은 레이아웃인데 소수 픽셀 다르게 찍힌다**(W17, G3-17, 미해결): HUD 제목(13 px 굵게, 자간 3)·힌트·토스트가
-  요소마다 따로 두 상태 중 하나(제목 ~490픽셀 = 0.05%, 글자 세로 가장자리만 — 굵기 합은 같음). 새 에디터 세션의 첫 플레이와 다음 플레이가 다르고, 세션마다 정착하는
-  상태도 다르며, 파이프라인 전환 같은 일 뒤에 바뀌기도 한다. 캡처 순간의 레이아웃(요소 위치·크기·측정 폭·배율)과 폰트 에셋(글리프 사각형·아틀라스 위치·전진 폭·커닝,
-  아틀라스의 글리프 밖 텍셀 0)은 두 상태에서 같았다 → 차이는 GPU 쪽 그리기다. 아니었던 것: Game 뷰 다시 그리기·다른 배율로 그리기·다른 시나리오의 새 글자·폰트 엔진
-  워밍업·에디터 비트맵 텍스트 경로·텍스트 잡의 생성기 공유(스레드별), 시도해 효과가 없던 것: 캡처 전후 `MarkDirtyText()`, 플레이 전 런타임 패널 폐기(`PanelSettings.DisposePanel`).
-  Windows의 매트릭스에서는 한 번도 나오지 않았다. 그래서 Mac 기준 이미지를 커밋하지 않았다(위 "macOS").
+- **동적 폰트 에셋의 커닝 쌍이 macOS에서 쓰레기 플래그를 받는다**(W18, G3-17): FontEngine이 동적 `FontAsset`에 주는 `GlyphPairAdjustmentRecord`의 `featureLookupFlags`가
+  초기화되지 않은 값이다(레코드의 ~25%, 에디터 세션마다 다름; 6.3·6.6 Mac — Windows 매트릭스에서는 나오지 않았다). 텍스트 생성기는 그 값에 `IgnoreSpacingAdjustments`(0x100)가
+  있으면 그 쌍의 자간을 버린다 → **자간(`letter-spacing`) 있는 글자만** 쌍마다 소수 픽셀 밀리고(HUD 제목 "AG"·"GE" 0.27 px), 어느 쌍이 밀리는지가 세션마다 달라 기준 이미지가
+  `changed`였다. 그 레코드를 읽는 것은 UI Toolkit의 Standard 텍스트 생성기(6.0–6.4의 기본, 6.5는 확인 안 함)와 TMP다 — 6.6의 기본인 Advanced 생성기(`-unity-text-generator`)로 그리는 글자는
+  영향이 없다. 캡처는 그 전에 글자를 그린 동적 폰트 에셋의 플래그를 지우고 UI Toolkit 글자를 다시 만든다(`Runtime/KerningFlags.cs`, 동적 폰트 에셋 2,400개가 쌓인 세션에서 캡처당 4 ms) — **게임 자신의 화면(Game 뷰·
+  플레이어)은 첫 캡처 전까지 그대로다**. 세션마다 달라지는 글자를 보면 먼저 자간을 의심한다. TextMesh Pro도 같은 플래그를 검사한다(G3-18, 확인 안 됨). 찾은 방법: 캡처 순간의 UIR
+  정점(`renderData.firstHeadCommand.mesh`)을 두 상태로 덤프 → 같은 입력으로 메인 스레드에서 새로 생성해도 메시와 같음 → 생성 입력(설정·커닝 레코드)을 덤프. W17은 레이아웃과 폰트
+  에셋의 글리프·커닝 값이 같아서 GPU 쪽으로 봤는데, 커닝 레코드의 플래그는 비교하지 않았다.
 - **PowerShell 7의 `ConvertFrom-Json`은 ISO 8601 문자열을 `DateTime`으로 바꾼다**(5.1은 문자열). 그것을 `[DateTime]::Parse("$x")`로 다시 읽으면 소수 초가 사라지고
   로컬 시각으로 읽혀(한국 시간이면 9시간) `open.ps1`이 띄운 에디터(`Logs/harness-editor.json`의 시작 시각)를 알아보지 못했고 `playEnterSec`가 정수 초였다 → `ConvertTo-HarnessUtc`.
 - **macOS·Linux에서 `Start-Process`로 띄운 프로그램은 스크립트의 표준 입출력을 물려받는다.** 에디터가 `open.ps1`의 stdout 파이프를 쥐고 있어 `pwsh tools/open.ps1 | …`(에이전트의

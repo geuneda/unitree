@@ -173,9 +173,9 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
 
 - Windows 10/11(Windows PowerShell 5.1) 또는 **macOS**(Apple Silicon, PowerShell 7 `pwsh` 7.4+) — 도구 스크립트는 둘 다 같은 파일입니다. macOS에서는
   `powershell -ExecutionPolicy Bypass -File tools/x.ps1` 대신 `pwsh tools/x.ps1`. 기준 이미지는 OS별 폴더(`golden/<버전>-macos/`)이고 fingerprint도 OS마다 다릅니다
-  (같은 머신에서는 매번 같음). M4 Pro에서 루프·새 클론(6.3·6.6)·기존 프로젝트 붙이기가 녹색, 코드 변경 없는 루프 ~2.8 s. 다만 Mac에서는 UI Toolkit의 작은 글자가
-  에디터 세션에 따라 소수 픽셀 다르게 찍혀(ROADMAP G3-17, 미해결) 기준 이미지 비교가 그 글자에서 `changed`일 수 있고, Mac 기준 이미지는 아직 커밋하지 않았습니다
-  (자세한 것: `AgentHarness/CLAUDE.md` "macOS").
+  (같은 머신에서는 매번 같음). M4 Pro에서 루프·검증 매트릭스 1–8·새 클론(6.3·6.6)·기존 프로젝트 붙이기가 녹색이고, 코드 변경 없는 루프는 ~2.8 s입니다. 에디터 세션이
+  바뀌어도 같은 코드면 샷이 픽셀까지 같고 Mac 기준 이미지도 커밋돼 있습니다 — Mac의 FontEngine이 커닝 쌍에 남기는 쓰레기 플래그 때문에 자간 있는 UI Toolkit 글자가 세션마다
+  달라지던 것(ROADMAP G3-17)을 캡처가 지웁니다(자세한 것: `AgentHarness/CLAUDE.md` "macOS").
   pwsh는 관리자 권한 없이 GitHub 릴리스의 `powershell-<버전>-osx-arm64.tar.gz`를 풀어 `~/.local/bin/pwsh`로 링크하면 됩니다.
 - Unity **6.0 LTS 이상** + URP. 샘플 프로젝트는 **6000.3.11f1**(Unity 6.3 LTS)로 고정돼 있고, 새 클론에서 6000.0.84f1·6000.3.11f1·6000.6.3f1 모두
   검증 매트릭스가 전부 녹색입니다(6.6의 검은 조명은 W4에서 고침, ROADMAP P-4; 6.0에서는 6.3이 저장한 URP 에셋을 URP 17.0이 빌드에 받지 않아 플레이어 단계만
@@ -214,7 +214,7 @@ pwsh tools/quit.ps1
 들어가는데, `open.ps1`과 루프가 그 에러(file·line)를 로그에서 읽어 보고합니다(창 없는 에디터는 마지막으로 성공한 어셈블리로 떠서 루프가 에러를 보고).
 
 위 과정 전체(클론 → 열기 → 설정 → 루프 3회 → 종료 → 삭제)를 `tools/fresh-clone-test.ps1` 하나로 검증할 수 있습니다(이 머신에서 ~110 s).
-하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·실제 입력 격리(포커스 있음·없음)·동시 루프·worktree 전용 에디터·worktree submit/land·계약 규칙·프로젝트 설정 드리프트·두 worktree가 같은 ProjectSettings 파일을 바꾼 land·에디터 창을 계속 다시 그려도 픽셀까지 같은 샷·흐르는 구름과 씬을 비추는 반사 프로브)는 `tools/selftest.ps1`이 한 번에 돌리고(~9–14분),
+하네스 자체의 검증 매트릭스(에러 주입·핫 루프·플레이어 실행·실제 입력 격리(포커스 있음·없음)·동시 루프·worktree 전용 에디터·worktree submit/land·계약 규칙·프로젝트 설정 드리프트·두 worktree가 같은 ProjectSettings 파일을 바꾼 land·에디터 창을 계속 다시 그려도 픽셀까지 같은 샷·커닝 쌍을 오염시켜도 픽셀까지 같은 글자·흐르는 구름과 씬을 비추는 반사 프로브)는 `tools/selftest.ps1`이 한 번에 돌리고(~9–14분),
 `fresh-clone-test.ps1 -UnityVersion <버전> -SelfTest`는 그것을 다른 Unity 버전의 새 클론에서 돌립니다.
 
 개별 커맨드: `tools/uc.ps1 <command> '<JSON>'` (예: `tools/uc.ps1 harness_capture '{"preset":"all"}'`)
@@ -346,9 +346,10 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1         # worktree를 �
 AgentHarness/                              샘플 프로젝트 (하네스 패키지를 임베드해서 씀)
   CLAUDE.md                                에이전트용 사용법·규칙 (먼저 읽을 것)
   docs/ROADMAP.md                          아직 남은 격차 (워크플로우별 작업 순서 + 성질 1~5 + 이식성) + 검증 매트릭스
+  docs/upstream-reports.md                 Unity·Pipeline에 낼 신고서 초안 (+ upstream/: 재현 스크립트)
   Packages/com.geuneda.agentharness/       하네스 = UPM 패키지 (git URL: ...unitree.git?path=/AgentHarness/Packages/com.geuneda.agentharness)
     Runtime/                               GameRoot · IGameModule · EventBus · HarnessConfig · ShotPreset · ScriptedInput · ScenarioInput · ScenarioRunner · PlayerRun ·
-                                           HarnessCapture(+CaptureCameras · CaptureUi · ContactSheet) · ClipPlayer(Playables 클립 재생) · PanelClock · SkyClock(구름 시계) · UI/ ·
+                                           HarnessCapture(+CaptureCameras · CaptureUi · ContactSheet · KerningFlags) · ClipPlayer(Playables 클립 재생) · PanelClock · SkyClock(구름 시계) · UI/ ·
                                            Procedural/(MeshBuilder · Noise · Sdf · Spline · Scatter · TextureBaker)
     Editor/                                harness_* 에디터 커맨드(핫 루프 harness_hot, 플레이어 빌드 계획·이미지 비교, 계약 검사 harness_contracts 포함), lint, 에디터 모드(창 없는 에디터의 유휴 CPU 억제),
                                            BuildContext(머티리얼·파티클·애니메이션·GPU 베이크·데칼·하늘·반사 프로브 헬퍼) / IBuildStep,

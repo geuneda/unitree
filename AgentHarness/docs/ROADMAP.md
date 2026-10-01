@@ -17,9 +17,10 @@
 - 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태·워크플로우 절 갱신 → 새로 드러난 항목 추가 →
   **저장소 루트 `README.md`와 `AgentHarness/CLAUDE.md`(필요하면 `Tools~/templates/AgentHarness.md`)에 바뀐 기능·측정값 반영** → 커밋(메시지에 항목 ID).
   README·ROADMAP 갱신은 워크플로우마다 빠뜨리지 않는다(W2 커밋은 README를 건드리지 않았고, W4 뒤에도 README "요구 사항"에 6.6의 옛 상태가 남아 있었다).
-- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W16은 끝났고 W17(macOS)은 부분 완료다(2026-10-01).
-  남은 것: G3-17(Mac에서 UI Toolkit 작은 글자가 세션·이력에 따라 다름 — 다음 워크플로우 후보), 상시(업스트림 — G2-4의 남은 Unity 쪽 비용, W13의 URP 데칼·W16의 Pipeline
-  빌드 메시지 신고, W17이 바꾼 스크립트의 Windows 매트릭스 재확인).
+- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W16·W18은 끝났고 W17(macOS)은 부분 완료다(2026-10-01).
+  남은 것: 상시(업스트림 — G2-4의 남은 Unity 쪽 비용, 신고서 초안 [`docs/upstream-reports.md`](upstream-reports.md)의 제출, W17·W18이 바꾼 스크립트의 Windows 매트릭스
+  재확인), W17의 남은 것(Mac의 BagelGame·사내 프로젝트 A — 거기서 G3-18 TMP 커닝 확인), G4-6(6.6 Mac의 씬 반사 프로브가 빌드마다 다름 — 6.6 Mac 매트릭스 9의
+  selftest 1번이 빨감, 다음 워크플로우 후보), O-15(selftest가 빨갛게 멈추면 submit된 모듈이 에디터 트리에 남음).
 - 크기: S = 파일 1–2개 · M = 여러 파일 또는 새 커맨드 · L = 조사가 필요하거나 새 하위 시스템.
 
 | 순서 | 워크플로우 | 항목 | 크기 | 선행 | 상태 |
@@ -40,9 +41,9 @@
 | W14 | 여러 worktree의 ProjectSettings | G5-6 | M | — | 완료 (2026-10-01) |
 | W15 | 하늘과 씬 반사 | G4-5 | L | W13 | 완료 (2026-10-01) |
 | W16 | 사내 프로젝트 A의 플레이어 화면 | G3-8 (+G3-16) | S | — | 완료 (2026-10-01) |
-| W17 | macOS | P-3 (+G3-17) | L | 실제 Mac | 부분 완료 (2026-10-01; Mac에서 도구·매트릭스가 돈다. G3-17(Mac UI Toolkit 글자)·Windows 재확인·Mac의 BagelGame·사내 프로젝트 A가 남음) |
-| W18 | Mac의 UI Toolkit 글자 결정성 | G3-17 | M | W17, 실제 Mac | 대기 (다음 후보) |
-| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13(URP 데칼)·W15(카메라 상태) 신고, G2-4 재측정, W17의 Windows 재확인 | S | 새 버전이 나올 때 | — |
+| W17 | macOS | P-3 (+G3-17) | L | 실제 Mac | 부분 완료 (2026-10-01; Mac에서 도구·매트릭스가 돈다. Windows 재확인·Mac의 BagelGame·사내 프로젝트 A(+G3-18)가 남음; G3-17은 W18) |
+| W18 | Mac의 UI Toolkit 글자 결정성 | G3-17 | M | W17, 실제 Mac | 완료 (2026-10-01; 원인은 FontEngine의 커닝 플래그 — 신고는 상시, TMP는 G3-18; 6.6 Mac 매트릭스 9에서 G4-6 발견) |
+| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13(URP 데칼)·W15(카메라 상태)·W18(커닝 플래그) 신고([`docs/upstream-reports.md`](upstream-reports.md)), G2-4 재측정, W17·W18의 Windows 재확인 | S | 새 버전이 나올 때 | — |
 
 ### W1 시나리오 입력 격리 (G3-6) — 완료 (2026-09-29, 아래 "해결됨")
 - 왜 먼저: `play.events`가 매번 같아야 매트릭스 1과 W3의 기준 이미지가 의미 있다. 지금은 루프 ~25회에 1회 어긋난다.
@@ -239,14 +240,31 @@
   권한 없으면 로그의 `ChangeMode(safe_mode)`), 플레이어 `.app` 실행·`ScriptingAssemblies.json` 위치·플레이어 stdout이 `player.ps1` JSON에 섞임, attach-test 출시 빌드
   (`StandaloneOSX`), install의 Windows 전용 경고, selftest 7b의 경쟁(콜드 게이트가 A의 submit보다 길어 락 대기 0 → B의 게이트를 먼저 한 번). 기준 이미지는 **OS별 폴더**
   (`<버전>-macos`; Mac 샷 vs Windows 기준 이미지 바뀐 픽셀 0.04–0.13%). `open.ps1 -Own`의 `Library/` 사본은 APFS 클론(6 s, 디스크 0).
-- 하다가 찾은 것(미해결): **G3-17** — Mac에서 HUD의 작은 UI Toolkit 글자(제목·힌트·토스트)가 같은 코드·같은 레이아웃인데 세션·이력에 따라 소수 픽셀 다르게 찍힌다(제목
-  ~490픽셀). selftest 1·3·6번의 "픽셀까지 같음"이 세션에 따라 빨갛다. 원인은 GPU 쪽까지 좁혔다(아래 G3-17). 그래서 Mac 기준 이미지는 커밋하지 않았다.
+- 하다가 찾은 것: **G3-17** — Mac에서 HUD의 작은 UI Toolkit 글자(제목·힌트·토스트)가 같은 코드·같은 레이아웃인데 세션·이력에 따라 소수 픽셀 다르게 찍힌다(제목
+  ~490픽셀). selftest 1·3·6번의 "픽셀까지 같음"이 세션에 따라 빨갰다. 그때는 원인을 GPU 쪽으로 보고 Mac 기준 이미지를 커밋하지 않았다 → W18: 원인은 CPU 쪽(FontEngine이
+  커닝 쌍에 남긴 쓰레기 플래그)이었고 고친 뒤 Mac 기준 이미지를 커밋했다.
 - 결정: Windows는 PowerShell 5.1을 계속 쓴다(요구 사항을 늘리지 않음); macOS·Linux는 pwsh 7.4+. 기준 이미지 보장은 "같은 머신·같은 버전이면 픽셀까지 같다"를 OS별 폴더로
   지킨다(다른 OS와의 허용치는 넓히지 않음 — HUD 글자·데칼 가장자리를 놓치게 된다). fingerprint는 OS마다 다르다(같은 Mac 안에서는 같음).
-- 남은 것: G3-17(다음 워크플로우 후보 — GPU 프레임 캡처로 두 상태의 텍스트 드로를 비교), 같은 스크립트로 **Windows 매트릭스 재확인**(상시), Mac의 BagelGame(Git LFS라
-  `git clone`이 필요 — 사람이 클론)·사내 프로젝트 A(이 머신에 없음) 붙이기, 6.0 Mac(설치 안 됨).
+- 남은 것: 같은 스크립트로 **Windows 매트릭스 재확인**(상시), Mac의 BagelGame(Git LFS라 `git clone`이 필요 — 사람이 클론)·사내 프로젝트 A(이 머신에 없음; 붙이면 G3-18도
+  확인) 붙이기, 6.0 Mac(설치 안 됨).
 
-### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13·W15 신고, G2-4 재측정, W17의 Windows 재확인)
+### W18 Mac의 UI Toolkit 글자 결정성 (G3-17) — 완료 (2026-10-01, 아래 "해결됨")
+- 결과: 원인은 GPU가 아니라 **FontEngine이 동적 폰트 에셋에 주는 커닝 쌍 레코드의 초기화되지 않은 `featureLookupFlags`**였다(레코드의 ~25%, 세션마다 다른 값). 텍스트
+  생성기는 그 플래그에 `IgnoreSpacingAdjustments`(0x100)가 있으면 그 쌍의 자간을 버린다 → 자간 있는 글자만 쌍마다 0.27 px씩 밀렸다. 캡처 전에 동적 폰트 에셋(글자를 그린 것)의
+  플래그를 지우고 바뀌었으면 UI Toolkit 글자를 다시 만든다(`Runtime/KerningFlags.cs`). Mac 기준 이미지 커밋(`golden/6000.3.11f1-macos/default/`), selftest 1번에 커닝을
+  일부러 오염시킨 루프(Windows에서도 회귀를 잡는다), 7b의 락 대기 검사를 결정적으로(B는 게이트를 따로, submit은 `-SkipCheck`).
+- 방법: 진단 코드로 캡처 순간 UIR 정점을 덤프 → 두 상태의 제목은 'A'가 같고 'G'부터 0.405 pt씩 밀림(커닝 쌍) → 같은 입력으로 메인 스레드에서 새로 생성해도 메시와 같음
+  (생성은 결정적, 입력이 다름) → 생성 설정·커닝 레코드 덤프에서 "AG" 레코드의 플래그가 세션마다 0x100B6·0x10588·0x10457…(0x100 비트가 켜진 세션만 밀림). W17의
+  "폰트 에셋이 같다"는 글리프·전진 폭·커닝 값만 비교하고 플래그를 보지 않았다.
+- 신고: Unity(TextCore) — 최소 재현 프로젝트(`docs/upstream/KerningFlagsRepro.cs`, OS 폰트 Arial의 동적 폰트 에셋에 A–Z·a–z)로 6.3·6.6 각 3회 모두 재현(쌍 96개 중
+  40–58개에 플래그, 5–30개에 0x100, `0x6E69676E` = "ngin" 같은 메모리 내용). 초안은 [`docs/upstream-reports.md`](upstream-reports.md) U1.
+- 6.6: UI Toolkit의 기본 텍스트 생성기가 Advanced(네이티브)라 이 레코드를 읽지 않는다 — 6.6 클론의 커닝 검사는 오염할 쌍이 없어(`0/0`) Standard 글자가 있을 때만
+  오염을 요구한다. 6.6 Mac 매트릭스 9에서 무관한 G4-6(씬 반사 프로브가 빌드마다 다름)을 찾았다.
+- 남은 것: TMP(G3-18 — 같은 플래그 검사), G4-6, Unity가 고치면 `KerningFlags`와 selftest 1번의 커닝 루프를 걷어낸다(상시).
+
+### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13·W15·W18 신고, G2-4 재측정, W17·W18의 Windows 재확인)
+- **신고서 초안**: [`docs/upstream-reports.md`](upstream-reports.md) — 항목별 제목·환경·재현·기대 결과(영어 본문)와 상태(재현 확인 1 — W18의 커닝 플래그 / 원인 확인 7 / 재현 필요 7). Unity는 에디터의
+  Help > Report a Bug(이메일 + 재현 프로젝트), Pipeline은 공개 저장소가 없어 Unity Discussions(로그인). 사람이 제출한다(계정·이메일이 필요).
 - 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존)과 G2-5의 인터프리터 2건(`try/catch` 미지원,
   교체 본문이 던진 예외를 줄 없이 로그하고 원래 본문으로 이어 돌림), Unity에 P-4의 원인
   (`Camera.RenderToCubemap(Cubemap)`: 6.6은 CPU 픽셀을 안 채우고 6.3은 sRGB로 인코딩 — 빈 씬 + 스카이박스 + half 큐브맵 한 개로 재현), O-6 Unity Search 예외,
@@ -270,7 +288,9 @@
   W16: Pipeline에 O-14(`build_status`의 에러가 줄을 파싱하고도 버림). 고쳐지면 `player.ps1`은 그대로 둬도 된다(빌드 단계 메시지를 먼저 읽음).
   W17: **Windows에서 매트릭스 1–10 재확인**(W17은 Mac에서만 돌렸다 — 바뀐 `Harness.psm1`·`open.ps1`(Windows는 `Start-Process` 그대로)·`player.ps1`·`compile-check`·
   `install.ps1`·`attach-test.ps1`·`selftest.ps1`·`HarnessGolden.cs`(Windows 폴더 이름은 그대로 `<버전>`)).
-  G3-17은 원인을 확정한 뒤 Unity에 신고(재현: 새 에디터 세션의 루프 두 번). Mac에서 매트릭스 10을 BagelGame(`git clone` + Git LFS를 사람이 받아 `../ah-p2/bagel`)으로. Mac의 핫 루프 인터프리터 비용이 Windows의 ~3배(0.151 vs 0.056–0.063 ms/프레임)인 것은 보고만.
+  W18: Unity에 FontEngine 커닝 쌍의 초기화되지 않은 `featureLookupFlags`(신고서 U1, 재현 `docs/upstream/KerningFlagsRepro.cs` — 6.3·6.6 Mac에서 매번 재현). 고쳐지면
+  `KerningFlags`와 selftest 1번의 커닝 루프를 걷어낸다(그 루프는 플래그를 일부러 넣으므로 정리 없이는 빨갛다). Windows에서도 재현 스크립트를 한 번 돌려 볼 것(Windows
+  매트릭스에서는 한 번도 나오지 않았다). Mac에서 매트릭스 10을 BagelGame(`git clone` + Git LFS를 사람이 받아 `../ah-p2/bagel`)으로. Mac의 핫 루프 인터프리터 비용이 Windows의 ~3배(0.151 vs 0.056–0.063 ms/프레임)인 것은 보고만.
 - 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
   install의 Input System 추가, `HarnessReleaseBuild`)를 걷어낼 수 있는지 본다. O-9: 새 버전에서 selftest 1번의 HUD 검사(`uiError` 없음)를 보고,
   UI Toolkit에 패널을 지금 그리는 공개 API가 생기면 리플렉션을 걷어낸다.
@@ -389,19 +409,15 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 - **G3-15 같은 코드의 루프끼리 closeup 샷의 픽셀 6–7개가 두 값 중 하나였다** (2026-10-01, W12에서 발견) → 같은 날 해결(W13, 아래 "해결됨").
   URP DBuffer 데칼의 가장자리 픽셀이 캡처 전에 에디터 GUI가 그렸는지에 따라 달랐고 SMAA가 그것을 키웠다. 샘플은 ScreenSpace 데칼로 바꿨고, DBuffer 쪽은 상시(신고).
 
-- [ ] **G3-17 Mac에서 같은 코드의 루프끼리 UI Toolkit의 작은 글자가 소수 픽셀 다르게 찍힌다** (2026-10-01, W17에서 발견)
-  - 현상: 샘플 HUD의 제목(13 px 굵게, 자간 3)·힌트(자간 1)·토스트(굵게)가 요소마다 따로 두 상태 중 하나로 찍힌다 — 제목 ~490픽셀(0.05%, 허용치 밖), 힌트 ~95픽셀,
-    토스트 ~210픽셀, 글자 세로 가장자리만(굵기 합은 같음 → 글자 전체가 소수 픽셀 가로로 밀린 모양). 같은 상태끼리는 픽셀까지 같다. 새 에디터 세션의 첫 플레이와 다음
-    플레이가 다르고, 세션마다 정착하는 상태가 다르며(재시작 뒤 워밍업 플레이 뒤에도 앞 세션과 다름), 파이프라인 전환·실제 입력 루프 같은 일 뒤에 바뀌기도 한다. 결과: Mac
-    selftest 1번(루프 2·3·RP 재생성·드리프트 뒤 기준 이미지)·3번(핫 되돌림)·6번(창 없는 전용 에디터의 첫 샷)이 세션에 따라 빨갛다(에디터 트리 1–8 전부 녹색 한 번, 새 클론 3·6 빨강).
-    Windows의 매트릭스(W3 이후 수백 루프)에서는 한 번도 나오지 않았다.
-  - 확인한 것: 캡처 순간의 레이아웃(요소 위치·크기·`MeasuredWidth`·배율 0.667)과 폰트 에셋(플레이마다 새 `NotInter` 인스턴스지만 글리프 사각형·아틀라스 위치·전진 폭·커닝이 같고,
-    CPU 아틀라스의 글리프 밖 텍셀은 0)이 두 상태에서 같다 → 차이는 GPU 쪽 그리기(셰이더 입력·상태)다. 아니었던 것: Game 뷰 다시 그리기, 다른 배율로 한 번 그리기, 다른 시나리오의
-    새 글자(UI 킷), 기본 폰트 워밍업, 에디터 비트맵 텍스트 경로(꺼짐, 라벨 SDF), 텍스트 잡의 생성기 공유(스레드별), 화면·포커스. 시도해 효과가 확인되지 않은 것: 캡처 전후
-    `MarkDirtyText()`(에디터 트리에서는 1·3번이 4/4 녹색이었지만 이미 정착한 세션이었고 새 클론에서 다시 빨감), 플레이 전 런타임 패널 폐기(`PanelSettings.DisposePanel`) — 둘 다 걷어냄.
-  - 방향: Xcode(Metal) GPU 프레임 캡처로 두 상태의 HUD 텍스트 드로(셰이더 입력·UIR 셰이더 정보 텍스처·버텍스)를 비교. UI Toolkit 요소별 설정을 담는 셰이더 정보 텍스처의 슬롯
-    배치가 이력을 따르고 Metal에서 그 읽기가 정확한 텍셀 중심이 아니라는 가설이 남아 있다. 재현: 새 에디터 세션에서 `loop.ps1` 두 번(첫 루프 ≠ 둘째).
-  - 그 전까지: Mac 기준 이미지는 커밋하지 않는다. Mac에서 HUD 글자 둘레만 바뀐 `changed`는 이것이다(diff의 `rect`가 텍스트 줄).
+- **G3-17 Mac에서 같은 코드의 루프끼리 UI Toolkit의 작은 글자가 소수 픽셀 다르게 찍힌다** → 2026-10-01 해결(W18, 아래 "해결됨"): FontEngine이 동적 폰트 에셋의
+  커닝 쌍에 남긴 쓰레기 플래그(`IgnoreSpacingAdjustments`)가 그 쌍의 자간을 버리게 했다. 캡처 전에 지운다(`KerningFlags`). 6.6의 기본 텍스트 생성기(Advanced)는 영향 없음.
+
+- [ ] **G3-18 Mac에서 TextMesh Pro의 자간 있는 글자도 세션마다 다를 것이다** (2026-10-01, W18에서 발견, 확인 안 됨)
+  - 현상(예상): TMP(`TMP_Text`·`TextMeshPro`)도 커닝 쌍의 `IgnoreSpacingAdjustments`면 그 쌍의 자간을 버리고, 동적 `TMP_FontAsset`은 같은 `FontEngine.GetPairAdjustmentRecords`로
+    쌍을 받는다(`TMP_FontAsset.cs`). 하네스는 TextCore `FontAsset`(UI Toolkit)만 정리한다. 이 Mac에 TMP를 쓰는 프로젝트가 없어 확인하지 못했다.
+  - 방향: Mac에서 사내 프로젝트 A를 붙일 때(W17의 남은 것) 자간 있는 TMP 글자가 있는 샷을 에디터 세션 두 번으로 비교 → 다르면 `KerningFlags`가 `TMP_FontAsset`(이름으로
+    찾음 — TMP는 선택 의존)의 `fontFeatureTable`도 지우고 그 글자를 다시 만든다(`TMPro_EventManager.ON_FONT_PROPERTY_CHANGED`). 재현 스크립트(`docs/upstream/KerningFlagsRepro.cs`)를
+    TMP 동적 폰트 에셋으로 바꿔 보는 것이 먼저다.
 
 ## 성질 4 — 에셋 없이도 완성도
 
@@ -415,6 +431,14 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 
 - **G4-5 하늘과 반사가 아직 기본이다** → 2026-10-01 해결(W15, 아래 "해결됨"): 하네스 하늘(`ctx.Sky`, 게임 시간으로 흐르는 구름)과 빌드 뒤 씬을 찍는 반사 프로브
   (`ctx.ReflectionProbe`), 두 큐브맵의 GGX mip. 프로브는 Reflection Probe Static만 그린다(움직이는 것은 비치지 않음) — 실시간 프로브·SSR은 없다.
+
+- [ ] **G4-6 6.6 Mac에서 씬 반사 프로브 큐브맵이 빌드마다 다르다** (2026-10-01, W18의 매트릭스 9에서 발견)
+  - 현상: 새 클론을 6000.6.3f1(Mac, Metal)로 연 selftest 1번에서 루프 2·3이 `Assets/Generated/Smoke/Reflection_Probe.asset`(빌드 뒤 씬을 찍는 프로브, W15)을 다시 썼다 —
+    큐브맵 픽셀이 빌드마다 달라 쓰기를 건너뛰지 못했다(하늘 큐브맵 `SkyReflection.asset`은 루프 1만). 그 프로브를 비추는 샷이 루프끼리 maxDiff 7(허용치 안의 `same`)이라
+    "루프 2·3이 픽셀까지 같음"·"G3-15 다시 그리기 루프"·"큐브맵을 다시 쓰지 않음" 검사가 빨갰다. 6.3 Mac·6.6 Windows(W15 매트릭스 9)에서는 없었다. G3-17과는 무관하다
+    (커닝 정리는 캡처 경로만, 프로브는 빌드의 `RenderEnvironment`).
+  - 방향: 6.6 Mac에서 프로브 렌더를 두 번 연속 찍어 어느 면·텍셀이 다른지 본다(W15의 "카메라의 첫 렌더가 앞 카메라 상태를 이어받음"·O-11과 같은 종류인지 — 같은 카메라로
+    한 번 더 그리면 같아지는지). 그 전까지 6.6 Mac의 매트릭스 9는 selftest 1번의 이 세 검사가 빨갛다.
 
 ## 성질 5 — 병렬 작업이 쉽다
 
@@ -439,7 +463,7 @@ Three.js는 `npm install three` 한 줄로 이미 있는 프로젝트에 붙고,
 사내 대형 프로젝트 1개에서 검증했다.
 Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 전부 녹색 — P-1, P-4), OS는 Windows와 macOS(Apple Silicon, W17 — P-3).
 
-순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트, 2026-09-29 해결) → P-5(붙인 뒤의 격차, 2026-09-29 해결) → P-3(macOS, 2026-10-01 부분 해결 — G3-17·Windows 재확인 남음)**.
+순서: **P-1(버전, 2026-09-29 해결) → P-2(기존 프로젝트, 2026-09-29 해결) → P-5(붙인 뒤의 격차, 2026-09-29 해결) → P-3(macOS, 2026-10-01 부분 해결 — Windows 재확인 남음; G3-17은 W18에서 해결)**.
 버전은 `tools/fresh-clone-test.ps1 -SelfTest -UnityVersion <v>`, 기존 프로젝트는 `tools/attach-test.ps1 -Project <클론>`으로 검증한다.
 
 - **P-1 Unity 버전이 6000.3.11f1로 고정돼 있다** → 2026-09-29 해결(아래 "해결됨"). 6.6에서 남은 렌더링 문제는 P-4.
@@ -450,7 +474,7 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 - **P-4 Unity 6.6(URP 17.6)에서 샘플 씬의 조명이 검게 나온다** → 2026-09-30 해결(W4, 아래 "해결됨"). 원인은 그림자가 아니라
   `Camera.RenderToCubemap(Cubemap)`이 6.6에서 CPU 픽셀을 채우지 않는 것(반사 큐브맵에 초기화 안 된 메모리가 저장됨)이었다. Unity 신고는 "상시".
 
-- [~] **P-3 Windows에서만 동작한다** (2026-10-01, W17: Mac에서 돈다; G3-17과 Windows 재확인이 남음)
+- [~] **P-3 Windows에서만 동작한다** (2026-10-01, W17: Mac에서 돈다; Windows 재확인이 남음 — G3-17은 W18에서 해결)
   - 머신: Apple M4 Pro, macOS 26.7, Retina 화면 하나, Unity 6000.3.11f1·6000.6.3f1(6.0은 설치 안 됨), PowerShell 7.6.6(관리자 권한 없이 `~/.local/bin/pwsh`), 다른 프로젝트의
     에디터 2개가 같이 떠 있었다. 이 체크아웃은 처음 열었다(Library 없음).
   - 그대로 된 것: `open.ps1`(새 체크아웃 첫 임포트 57.7 s), `harness_setup`, 루프(첫 루프부터 녹색), selftest 2·4·5(HLSL 에러의 Metal 형식 포함)·3의 핫 루프, `-automated`·
@@ -471,15 +495,18 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
        안내 명령(`next`)은 OS에 맞게.
     8. `open.ps1 -Own`의 `Library/` 사본: robocopy가 없으면 파일 하나씩 → macOS는 APFS 클론(`cp -cR`) 2.1 GB·2.9만 파일 6.1 s, 디스크 0(`seeded.cloned`).
     9. selftest 7b가 새 클론에서 빨갰다("waited for the lock" 0): 새 worktree B의 콜드 게이트(7.95 s)가 A의 submit 전체(7.77 s)보다 길었다 → B의 게이트를 먼저 한 번.
+       W18에서 에디터 트리 전체 실행 3번 중 2번 다시 빨갰다(미리 돌린 뒤에도 B의 게이트 7.8 s, A가 락을 쥔 시간 ~6 s) → B의 게이트를 따로 돌려 그 결과로 검사하고 B의 submit은
+       `-SkipCheck`(곧바로 락을 청함 → A가 쥔 동안 반드시 기다림). 게이트 경로 자체는 7a·7h가 본다.
   - 결정: Windows는 Windows PowerShell 5.1 그대로(스크립트는 같은 파일 — ASCII, pwsh 전용 문법 없음), macOS·Linux는 pwsh 7.4+. 기준 이미지는 **OS별 폴더**(`<버전>-macos`,
     `-linux`; 패치 대체도 같은 OS끼리) — Mac 샷 vs Windows 기준 이미지가 바뀐 픽셀 0.04–0.13%(HUD 글자·룬 원 가장자리·불씨, maxDiff 146–174)라 허용치를 넓히면 HUD 글자·데칼
-    가장자리 회귀를 놓친다. 보장은 그대로 "같은 머신·같은 버전이면 픽셀까지 같다" — Mac에서는 G3-17이 풀릴 때까지 UI Toolkit 글자 빼고. fingerprint는 OS마다 다르다(6.3 Mac
+    가장자리 회귀를 놓친다. 보장은 그대로 "같은 머신·같은 버전이면 픽셀까지 같다"(Mac에서도 — G3-17은 W18에서 해결, Mac 기준 이미지 커밋). fingerprint는 OS마다 다르다(6.3 Mac
     `4bb3e16d…` / Windows `609b54d2…`; 줄 단위 비교는 Windows의 `fingerprint.txt`가 없어 못 했다 — 후보는 메시 정점의 삼각함수 마지막 비트).
   - 검증(이 Mac): 매트릭스 1–8 에디터 트리 녹색 587.6 s(`4bb3e16d`, 줄 64/71/77/99; 1번 77 s, 6번 47 s — `-Own` 준비 25.6 s, 그 에디터의 컴파일 에러 64행; 7번 77 s; 8번 207 s —
     도중 kill 뒤 `recoveredSubmit`·`recoveredLand`, macOS 뮤텍스는 예외 없이 풀림) — 그 뒤 G3-17로 같은 1·3번이 새 세션에서 다시 빨갰다. 마지막 코드(G3-17 시도를 걷어낸 것)로
     440.3 s: 2·4·5·7·8 녹색, 1(드리프트 뒤 제목 줄 `44,35,127,9`)·3(핫 되돌림 뒤 토스트 `652,34,62,10`)·6(전용 에디터 첫 샷의 글자 영역) 빨강 — 모두 G3-17. 9: 새 클론 6.3 763.7 s — 루프 3회 녹색·
     `4bb3e16d`·종료 뒤 `git status` 깨끗, selftest는 1·2·4·5·8 녹색, 3·6 빨강(G3-17), 7 빨강(위 9번, 고침). 새 클론 6.6 녹색 116.6 s(루프 3회 `7c9005e6…` — Windows 6.6은 `cadaeca6…`, 2.41–2.58 s, 샷 정상; `git status`는 버전 전환 파일뿐). 10: Fluid-Sim(아카이브 + `git init`, 기준선 = 6000.3.11f1 배치 업그레이드) 녹색 49.4 s·28.5 s(루프 3회 `cb45f371…`, 출시 빌드 `.app` `Managed/` 106개·`Harness.*` 0개, 제거 뒤 `git status` 비어 있음).
-  - 남은 것: G3-17(W18), 같은 스크립트로 Windows 매트릭스 1–10 재확인(상시), Mac의 BagelGame(Git LFS — 사람이 클론)·사내 프로젝트 A, 6.0 Mac.
+  - W18 뒤(이 Mac): 매트릭스 1–8 에디터 트리 녹색 582.4 s, 9: 새 클론 6.3 녹색(selftest 703.7 s, Mac 기준 이미지 same 3/3), 6.6은 selftest 1번이 G4-6으로 빨강(2–8 녹색).
+  - 남은 것: 같은 스크립트로 Windows 매트릭스 1–10 재확인(상시), Mac의 BagelGame(Git LFS — 사람이 클론)·사내 프로젝트 A(+G3-18), 6.0 Mac, G4-6. G3-17은 W18에서 해결.
 
 ## 하네스 자체
 
@@ -547,6 +574,11 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
     `line` 없음, `message`는 접두사를 뗀 나머지). 플레이어 빌드에서만 나는 컴파일 에러(사내 프로젝트 A의 `Handheld`)를 줄 없이 보고했다.
   - 우회: `player.ps1`이 같은 응답의 `buildSteps[].messages[]`(원문)를 하네스의 컴파일 메시지 파서로 읽는다(`compileErrors`·`player.build.errors`의 file·line·module).
   - 할 일(상시): Pipeline에 신고(`BuildIssue`에 `line`).
+- [ ] **O-15 selftest가 7번 도중 빨갛게 멈추면 다른 worktree가 submit한 모듈이 에디터 트리에 남는다** (2026-10-01, W18에서 발견)
+  - 현상: 7b 뒤의 검사가 빨가면 정리(`Remove-SelftestWorktrees`)가 worktree·브랜치·소유 기록만 지우고, B가 submit해 에디터 트리에 둔 `Assets/Game/Probe/`·
+    `Contracts/ProbeEvents.cs`(추적 안 됨)와 그 설정 스텝이 쓴 `ProjectSettings/TagManager.asset`(레이어 20)은 남긴다(정상 실행에서는 8번의 land가 처리) → `final`이
+    `git status changed`로 빨갛고 사람이 지워야 했다(W18에서 두 번, 원인은 7b의 시간 경쟁 — 위 P-3 9번).
+  - 방향: 정리에서 테스트 worktree가 소유했던 모듈 폴더·계약 파일이 에디터 트리에서 추적 안 된 채면 지우고, 시작 때 깨끗했던 추적 파일(`ProjectSettings/`)은 되돌린다.
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
@@ -558,8 +590,8 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    HUD 합성(`ui`) + `compile-check -IncludeHarness`
    + 기준 이미지(G3-4): 루프 1이 임시 폴더에 쓰고(`-UpdateGolden`) 2·3이 픽셀까지 같음(maxDiff 0 — 허용치 안의 `same`이 아니라), 모든 에디터 창을 매 업데이트마다
    다시 그리는 플레이의 루프도 픽셀까지 같음(G3-15: 그 앞에 에디터 GUI가 그리면 DBuffer 데칼 가장자리가 달라졌다), 커밋된 이 버전·이 OS의 기준 이미지와 같음(있을 때;
-   macOS는 `<버전>-macos`), `harness_golden`의 `ignore`(왼쪽 위 기준)와 같은 major.minor·같은 OS의 다른 패치 폴더 대체
-   (Mac에서는 루프끼리 "픽셀까지 같음"이 G3-17로 세션에 따라 빨갈 수 있다)
+   macOS는 `<버전>-macos`), 플레이 동안 동적 폰트의 커닝 쌍을 모두 `IgnoreSpacingAdjustments`로 오염시키고 글자를 다시 만든 루프도 픽셀까지 같음(G3-17: FontEngine이
+   Mac에서 남긴 쓰레기 플래그를 캡처가 지운다 — Windows에서도 회귀를 잡는다), `harness_golden`의 `ignore`(왼쪽 위 기준)와 같은 major.minor·같은 OS의 다른 패치 폴더 대체
    + 시나리오 도구 루프 한 번: `waitScene`·`waitTarget`·UI Toolkit `click`·KeyCode 키 이름·포즈/카메라 캡처
    + uGUI 합성(G3-1, 편집 모드 픽스처: 오버레이·메인 카메라의 Screen Space - Camera·스택 UI 카메라의 캔버스 → 순서, 색 공간 블렌드 오차 ≤ 2, 되돌림)
    + 카메라(G3-7, 편집 모드 픽스처: 메인 카메라 자식인 스택 Overlay 카메라의 쿼드가 메인·다른 포즈 모두 화면 중앙, 미니맵 Base 카메라가 viewport에,
@@ -610,7 +642,7 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    루프와 동시에 둘 다 녹색·대기 0·fingerprint·events 같음·`render` 없음(`fps.note`)·첫 샷들이 그 에디터 트리 루프의 샷과 허용치 안에서 같음(O-11 우회 확인,
    기준 이미지가 없는 버전에서도; 커밋된 기준 이미지도 `changed` 0) → `quit.ps1`로 닫힘
 7. worktree 격리(G5-2): 에이전트 worktree 2개. A가 깨진 코드를 `submit.ps1 -SkipCheck` → `stage=compile` + `reverted` + `restore.ok`,
-   그 사이 B의 `submit.ps1`은 락 대기 후 녹색. 게이트(`-SkipCheck` 없이)는 에디터 트리를 건드리지 않고 거부. submit 도중 kill →
+   그 사이 B의 `submit.ps1`은 락 대기 후 녹색(B의 게이트는 먼저 따로 돌리고 submit은 `-SkipCheck` — 락 대기를 시간 경쟁 없이, W18). 게이트(`-SkipCheck` 없이)는 에디터 트리를 건드리지 않고 거부. submit 도중 kill →
    다음 `loop.ps1`에 `recoveredSubmit`, 녹색. 끝나면 메인 트리 `git status`로 테스트 사본이 남지 않았는지 확인.
    계약(W9): B의 새 계약 파일은 B 소유(`contracts.json`)이고 게이트가 계약을 쓰는 Smoke·Stage도 컴파일(G5-3); 타입 해시가 주석·줄바꿈에는 같고 필드 타입에는
    다름; A가 올라간 `SpinnerLap`을 바꿈 → `stage=submit` + `contractChanged`; A가 B의 미병합 `ProbeEcho`와 같은 이름을 Smoke 파일에 덧붙임 →
@@ -654,6 +686,37 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G3-17 Mac에서 같은 코드의 루프끼리 UI Toolkit의 작은 글자가 소수 픽셀 다르게 찍힌다** (2026-10-01, W18; 발견은 W17)
+  - 현상(전): 샘플 HUD의 제목(13 px 굵게, 자간 3)·힌트(자간 1)·토스트(굵게, 자간 1)가 요소마다 따로 두 상태 중 하나로 찍혔다(제목 ~490픽셀 = 0.05%, 글자 세로 가장자리만).
+    새 에디터 세션의 첫 플레이와 다음 플레이가 다르고 세션마다 정착하는 상태가 달라, Mac selftest 1·3·6번이 세션에 따라 빨갰고 Mac 기준 이미지를 커밋하지 못했다.
+    Windows 매트릭스에서는 한 번도 나오지 않았다.
+  - 원인: **FontEngine이 동적 폰트 에셋에 주는 커닝 쌍 레코드(`GlyphPairAdjustmentRecord`)의 `featureLookupFlags`가 초기화되지 않은 값이다**(`FontAsset.UpdateGlyphAdjustmentRecords`
+    → `FontEngine.GetPairAdjustmentRecords`). 런타임 NotInter 폰트에서 5,490쌍 중 1,337–1,433쌍에 값이 있었고(정확히 0x100인 것 5개 포함), "AG" 쌍은 세션마다
+    `0x100B6`·`0x10588`·`0x10457`·`0x109D1`·`0x1075C`. TextCore 생성기(`TextGenerator`, 6.3·6.6 같음)는 쌍의 플래그에 `IgnoreSpacingAdjustments`(0x100)가 있으면 그 쌍의
+    자간을 0으로 한다 → 0x100이 켜진 세션에서만 "AG"·"GE" 뒤 글자가 0.405 pt(= 자간 3 px × 0.03 em × 9 px ÷ 배율 0.667, 캡처 0.27 px)씩 당겨졌다. 자간 없는 글자는 영향이 없다.
+  - 찾은 방법(임시 진단 코드, 커밋 안 함): 캡처 순간 각 `TextElement`의 UIR 정점(`renderData.firstHeadCommand.mesh.allocPage.vertices.cpuData`) 덤프 → 두 상태의 제목이 'A'까지 같고
+    'G'부터 0.405 pt씩 밀림 → 같은 설정으로 메인 스레드에서 `TextGenerator`를 새로 돌려도 메시와 같음(생성은 결정적, 입력이 다름) → 설정(글꼴 크기 9, 화면 사각형, 자간 3)은
+    같고 커닝 레코드의 플래그만 다름. W17의 "폰트 에셋이 같다"는 글리프·전진 폭·커닝 값만 비교했고 플래그를 보지 않아 GPU 쪽으로 잘못 좁혔다.
+  - 고친 것: `Runtime/KerningFlags.cs` — 모든 캡처(`HarnessCapture.Render`) 전에 폰트 기능 큐를 비우고(`FontAsset.UpdateFontAssetsInUpdateQueue`), 글자를 그린 동적 폰트 에셋
+    (조회 테이블이 채워진 것)의 쌍에서 플래그를 지우고(조회 테이블 `m_GlyphPairAdjustmentRecordLookup`과 목록 `glyphPairAdjustmentRecords`, internal), 지운 것이 있으면
+    런타임 패널의 `TextElement.MarkDirtyText()` → 캡처의 레이아웃·그리기가 깨끗한 쌍으로 다시 만든다. 폰트 파일에는 그 플래그가 없다(폰트 에셋에서 손으로 켜는 TMP 기능) —
+    정적 폰트 에셋은 건드리지 않는다. API는 6.0(UnityCsReference 6000.0)·6.3·6.6에 같다. 비용: 캡처당 4.0 ms(플레이 ~400번으로 동적 폰트 에셋 2,417개가 쌓인 세션; 처음엔
+    목록까지 모든 폰트를 훑어 75.6 ms였다 — 쓰이지 않은 폰트들의 목록이 210만 쌍이었다 → 조회 테이블이 빈 폰트는 건너뜀).
+  - 게임 자신의 화면(Game 뷰·플레이어)은 첫 캡처 전까지 쓰레기 플래그 그대로다(정리는 캡처 경로만) — 첫 캡처 뒤로는 글자가 다시 만들어져 깨끗하다.
+  - selftest: 1번에 커닝 루프 — 플레이 동안 매 에디터 업데이트마다 동적 폰트의 모든 쌍을 0x100으로 오염시키고 글자를 다시 만들게 한 루프가 루프 1과 **픽셀까지 같음**(40만 쌍
+    오염, maxDiff 0). 정리를 끄면 같은 루프가 세 샷 모두 `changed`(maxDiff 123–162, 제목~힌트 줄) — Windows에서도 회귀를 잡는다. 7b의 락 대기 검사를 결정적으로(P-3 9번).
+  - 검증(이 Mac, 6.3): 진단 중 에디터 세션 5개·루프 9번의 샷이 모두 같은 픽셀(maxDiff 0; 수정 전에는 세션마다 제목이나 힌트가 뒤집힘) → 그 샷을 Mac 기준 이미지로 커밋
+    (`golden/6000.3.11f1-macos/default/` 3장). 매트릭스 1–8 에디터 트리 녹색 582.4 s(`4bb3e16d`, 줄 64/71/77/99; 1번 86.6 s — 커밋된 Mac 기준 이미지 same 3/3, 플레이어
+    729.9 fps vs 에디터 196.4(×3.72); 7번 121.1 s — B가 42.9 s 기다림). 9: 새 클론 6.3 녹색 — 루프 3회 `4bb3e16d`·커밋된 Mac 기준 이미지와
+    same 3/3(새 에디터 세션), selftest 1–8 703.7 s. 새 클론 6.6 — 루프 3회 `7c9005e6`, selftest 2–8 녹색, 1번 빨강: 커닝 검사는 오염할 쌍이 0개였고(6.6은 UI Toolkit의 기본
+    텍스트 생성기가 Advanced — `-unity-text-generator` 초기값 `Advanced`, 6.3은 `Standard` — 이고 그 네이티브 생성기는 이 레코드를 읽지 않는다 → 검사가 Standard 글자가
+    있을 때만 오염을 요구하게 고침: 6.6 클론 `0/0`, 6.3 `129686/8`·selftest 1번 녹색), 나머지는 G4-6(새 항목, 무관).
+    재현 스크립트(`docs/upstream/KerningFlagsRepro.cs`, OS 폰트 Arial의 동적 폰트 에셋에 A–Z·a–z): 6.3 3회 쌍 96개 중 48/50/58개에 플래그(0x100 21/20/14개), 6.6 3회
+    40/41/54개(5/16/24개). 신고서 초안 [`upstream-reports.md`](upstream-reports.md) U1.
+  - 영향 범위: FontEngine의 레코드는 6.3·6.6 모두 쓰레기지만, 그것을 읽는 것은 TextCore의 managed 생성기(UI Toolkit의 Standard 생성기 — 6.0–6.4의 기본, 6.5는 확인 안 함)와 TMP다. 6.6의
+    기본(Advanced Text Generator)으로 그리는 UI Toolkit 글자는 영향이 없다.
+  - 남은 것: Unity 신고(상시), TMP의 같은 검사(G3-18), Windows에서 재현 스크립트 한 번(상시).
 
 - [x] **G3-8 에디터 캡처의 UI가 게임의 화면 크기 코드와 어긋날 수 있다**(사내 프로젝트 A 확인) · **G3-16 오버레이 캔버스의 TextMesh Pro 글자를 캡처가 더 날카롭게
   그렸다** (2026-10-01, W16; 경로는 W8)
