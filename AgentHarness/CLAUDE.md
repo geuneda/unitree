@@ -643,7 +643,9 @@ Pipeline 패키지 기본 커맨드도 쓸 수 있다: `recompile`/`recompile_st
   - 그 위에 Screen Space - Overlay 캔버스와 UI Toolkit 패널(sortingOrder 순, 같으면 UI Toolkit이 위). 레이어마다 투명 RT에 그려 프리멀티플라이드 알파로
     합성(프로젝트 색 공간, 선형이면 선형 공간).
   - 캔버스의 렌더 모드·카메라·plane distance, PanelSettings의 타깃 텍스처, 카메라 타깃을 잠깐 바꿨다가 같은 프레임에 되돌린다(레이아웃 포함). 그 사이 UI 코드의
-    `OnRectTransformDimensionsChange`·`GeometryChangedEvent`가 캡처 크기와 Game 뷰 크기로 한 번씩 더 불린다. `Screen.width`를 직접 읽어 배치한
+    `OnRectTransformDimensionsChange`·`GeometryChangedEvent`가 캡처 크기와 Game 뷰 크기로 한 번씩 더 불린다. 오버레이 캔버스(scaleFactor ≠ 1)의 TextMesh Pro 글자는
+    바꾼 뒤와 되돌린 뒤 다시 생성한다(`ForceMeshUpdate`, W16 G3-16 — TMP의 SDF 스케일이 렌더 모드마다 달라서, 안 하면 글자 가장자리가 1/scaleFactor배 날카롭게 찍혔다).
+    정점을 매 프레임 직접 움직이는 TMP 연출은 그 프레임에 풀린다. `Screen.width`를 직접 읽어 배치한
     UI는 Game 뷰 기준 그대로다. 게임이 그걸로 이상해지면 캡처에 `"ui": false`(`harness_capture {"ui":false}`; 다른 카메라의 캔버스 레이어도 뺀다). 게임이 실제로 그리는 화면은
   `tools/player.ps1`: 캡처 크기의 플레이어 창을 그대로 찍어 이 캡처와 비교한다(`screen.vsShot`/`screen.vsEditor`, 위 "플레이어에서 돌리기").
   - 빠지는 것: 타깃 텍스처가 있는 패널(게임의 render-to-texture UI), 다른 디스플레이 → `"screen"`. 캡처가 비었는데(`blank`) 화면에 그리는
@@ -739,6 +741,7 @@ result.json을 쓰고 종료 → 에디터 샷과 비교 → `HarnessOut/player/
   같은 게임 상태다. **예외: 첫 씬의 파티클은 플레이어에서 한 스텝(0.02 s) 앞선다** — Unity가 플레이어의 첫 씬을 불러오며 파티클을 한 번 진행해 둔다
   (스크립트가 바꿀 수 없는 로드 시점 dt). 샘플은 파티클 둘레만 달라 에디터 비교가 `changed`(바뀐 픽셀 0.02–0.65%)다(`compare.note`).
 - **프레임을 묶지 않는다**: vSync 0, 프레임 상한 없음(`player.vSyncCount`, `targetFrameRate`) → `fps`·`p95ms`가 게임의 일이다. 프로젝트 설정 그대로 재려면 `-Paced`.
+  게임이 첫 씬 뒤에 직접 상한을 다시 걸면(`Application.targetFrameRate = 60` — 사내 프로젝트 A) 그 값이 `player.targetFrameRate`에 남고 `fps.note`가 "fps는 그 상한"이라고 알린다.
   `fpsVsEditor` = 플레이어 fps / 에디터 fps. 샘플: 플레이어 ~450–515 fps(p95 ~3 ms) vs 창 에디터 ~105–120 fps(p95 ~11 ms), **×3.8–4.9**(BagelGame ×5.4). 개발 빌드라 프로파일러 마커가
   켜져 있다(출시 빌드보다 조금 느리다). `render`(batches·SetPass·tris)도 플레이어 값.
 - **실제 화면(G3-8)**: 게임 자신의 카메라로 찍는 캡처(`"main"`, 샷 프리셋이 없어 메인 카메라로 떨어진 `"auto"` — 포즈 샷은 게임 카메라가 거기 없으니 제외)는
@@ -748,10 +751,19 @@ result.json을 쓰고 종료 → 에디터 샷과 비교 → `HarnessOut/player/
 - **비교**: `shotStats[].vsEditor`(플레이어 샷 vs 에디터 샷, 파일 이름이 같은 것), `screen.*` — 각각 `status`·`meanDiff`·`changedRatio`·`rect`·`diff` PNG
   (`<Out>/compare/`). 규칙은 기준 이미지와 같고 평균만 1까지 같다고 본다(카메라·프로세스가 다르면 URP 디더링이 달라 평균 ~0.5). `compare.vsEditor/screen`에
   `same`/`changed`와 가장 큰 `changedRatio`·`meanDiff`.
+- **에디터와 다른 이유(`vsEditor.cause`, W16)**: 실제 화면이 있는 샷은 그 프레임의 화면으로 원인을 가른다 — `game`: 플레이어 화면 = 캡처(`screen.vsShot` same)라
+  차이는 게임이 에디터와 플레이어에서 다르게 그린 것(`#if UNITY_EDITOR`·`Application.isEditor` 안의 UI, 플랫폼 `#if`, `OnValidate`가 만든 데이터, `Screen.width`로 배치한
+  UI — 에디터의 Screen은 Game 뷰, 실시간(unscaled) 연출 — 프레임당 벽시계가 다르다, 첫 씬 파티클), `capture`: 캡처가 그 프레임의 화면과 다르다(하네스의 캡처 경로 — `.screen.png`가
+  게임이 보인 것). `compare.note`가 샷 이름과 함께 설명한다(화면 쌍이 없는 포즈·카메라 샷은 `cause` 없이 "가를 화면 없음 + 첫 씬 파티클" 안내). 사내 프로젝트 A:
+  강제 로그인 대화상자의 서버 선택 줄(`#if UNITY_EDITOR`) 14%, 로비의 실시간 등장 트윈 7.7% — `game`. 샘플은 `"main"` 샷이 파티클 차이로 `game`.
 - **report.json**: `ok`, `stage`(editor|compile|build|shader|lint = 에디터 루프가 먼저 실패 · playerBuild · player(안 끝남·크래시, `logTail`) · play · runtime · shots),
-  `editor`(ok·stage·fps·render·events·report 경로), `player`(`exe`, `target`, `build`{result, sec, sizeMB, code, cleanRebuild}, `buildRewrote`, `development`, `graphicsDevice`,
-  `screen`, `startupSec`, `exitCode`, `log`), `fps`, `render`, `fpsVsEditor`, `play`(에디터와 같은 모양), `eventsMatch`, `runtimeErrors`(`knownErrors` 따로),
-  `shots`, `shotStats`, `compare`, `timings`{lockWaitSec, editorSec, buildSec, playerSec, compareSec}, 빌드 전에 거부됐으면 `urpStale`.
+  `editor`(ok·stage·fps·render·events·report 경로), `player`(`exe`, `target`, `build`{result, sec, sizeMB, code, cleanRebuild, errors[]{file, line, msg, module}}, `buildRewrote`,
+  `development`, `graphicsDevice`, `screen`, `startupSec`, `exitCode`, `log`), `fps`(+`note`), `render`, `fpsVsEditor`, `play`(에디터와 같은 모양), `eventsMatch`,
+  `runtimeErrors`(`knownErrors` 따로), `compileErrors`(플레이어 빌드만 실패한 컴파일 에러, kind `player`), `shots`, `shotStats`(`vsEditor.cause`), `compare`(+`note`),
+  `timings`{lockWaitSec, editorSec, buildSec, playerSec, compareSec}, 빌드 전에 거부됐으면 `urpStale`.
+- **플레이어 빌드만 컴파일되지 않으면**(에디터 루프는 녹색, W16): `stage=playerBuild` + `compileErrors[]`(file·line·module, kind `player`)와 `error`의 원인 —
+  플레이어 타깃에 없는 API를 런타임 검사로만 막은 코드(`#if UNITY_EDITOR` 없는 `UnityEditor`, `#if UNITY_ANDROID || UNITY_IOS` 없는 `Handheld` — 사내 프로젝트 A의
+  `Handheld.Vibrate()`가 `Application.isMobilePlatform` 안에만 있었다). Pipeline `build_status`의 `errors[]`는 줄을 버려서(ROADMAP O-14) 빌드 단계 메시지(원문)를 읽는다.
 - **런타임 에러의 줄**: 개발 빌드 플레이어는 최적화 코드라 `runtimeErrors`의 줄이 몇 줄 어긋날 수 있다(파일·모듈·메서드는 맞다; 샘플 주입 71행 → 78행). 에디터
   루프(`editor/report.json`)가 정확한 줄이고, 플레이어에서만 나는 에러면 `-Debugging`(Script Debugging 빌드: 정확한 줄, 코드가 느림 — 샘플 ~350 fps).
 - **빌드**: 첫 빌드는 셰이더를 컴파일해서 길고(샘플 ~2분), 그 뒤는 증분(스크립트만 바뀌면 ~10 s, 아무것도 안 바뀌면 ~3–5 s). 한 바퀴 ~16 s(에디터 루프 ~4.5 s +
@@ -769,7 +781,13 @@ result.json을 쓰고 종료 → 에디터 샷과 비교 → `HarnessOut/player/
   끝나지 않으면(`stage=player`, `logTail`) 어디까지 왔는지 본다. 진행은 stderr에 `player.ps1: <단계> (s)`.
 - 개발 빌드는 프로파일러 연결(PlayerConnection)을 네트워크에서 기다려서, **새 exe 경로마다 Windows 방화벽이 한 번 허용을 묻는다**. 허용하든 취소하든 실행에는
   상관없다(창이 떠 있어도 플레이어는 돈다). 빌드 경로가 프로젝트마다 고정이라 프로젝트당 한 번이다.
-- 플레이어 창이 몇 초 동안 포커스를 가져간다. 기존 프로젝트의 플레이어는 에디터와 다른 PlayerPrefs(`HKCU\Software\<회사>\<제품>`)를 쓴다.
+- 플레이어 창이 몇 초 동안 포커스를 가져간다. 기존 프로젝트의 플레이어는 에디터와 다른 PlayerPrefs(`HKCU\Software\<회사>\<제품>`)를 쓴다. `persistentDataPath`
+  (`LocalLow\<회사>\<제품>`)는 에디터·플레이어·같은 회사·제품 이름의 원본 프로젝트가 함께 쓴다. 플레이어의 작업 폴더는 `<Out>/player`다(게임이 상대 경로로 쓰는 파일 —
+  사내 프로젝트 A의 Facebook SDK `fbg.log` — 이 프로젝트 루트에 떨어지지 않게).
+- **모바일 타깃 프로젝트**(W16, 사내 프로젝트 A): 활성 타깃이 Android면 `player.ps1`은 거부한다. 클론에서 `Unity -batchmode -quit -projectPath <클론> -buildTarget Win64`로
+  바꿔(그 프로젝트 101 s, 추적 파일 변경 없음; 되돌릴 때 `-buildTarget Android`) 돌린다. 모바일 전용 코드는 Windows에서 컴파일되지 않을 수 있고(위), 스크립팅 define이
+  타깃마다 달라 서버·기능이 바뀔 수 있다(그 프로젝트는 Standalone에 `DEV`가 없어 라이브 서버 환경이었다) — 플레이어가 어디에 접속하는지 먼저 본다. 에디터 루프의
+  fingerprint도 활성 타깃마다 다르다(플랫폼별 임포트).
 - **찾아 주는 것의 예**: Fluid-Sim은 입자 색 그라디언트 텍스처를 에디터 전용 `OnValidate`에서만 만들어서 빌드한 플레이어의 입자가 회색이었다 — 에디터 루프는
   녹색인데 `player.ps1`은 `vsEditor` 14% 변경 + 2색이라 `blank`(`stage=shots`), 실제 화면도 캡처와 같게 회색.
 - 출시 빌드와는 별개다: 하네스 런타임은 개발 빌드(`DEVELOPMENT_BUILD`)라 들어가고, 출시 빌드에는 여전히 없다(매트릭스 10).
@@ -973,7 +991,7 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
 - 지원: **Unity 6.0 LTS 이상**. 하한은 에디터 연결(`com.unity.pipeline` 0.8.0-exp.1)이 `"unity": "6000.0"`이라서다(2022.3 이하 불가).
 - 샘플 프로젝트(이 저장소)는 `ProjectVersion.txt`의 **6000.3.11f1**. 다른 설치 버전으로는 `tools/open.ps1 -UnityVersion <버전>`
   (`ProjectVersion.txt`를 그 버전으로 바꿔 "다른 버전으로 열기" 모달을 건너뛴다 → `git status`에 보인다).
-- 검증한 버전(2026-10-01 W15, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W15에서 샘플의 하늘(`Harness/Sky`)·반사 프로브·받침대·매듭 재질이 바뀌어 새 값
+- 검증한 버전(2026-10-01 W15, W16에서 다시 — 같은 fingerprint, `fresh-clone-test.ps1 -UnityVersion <v> -SelfTest`; fingerprint는 W15에서 샘플의 하늘(`Harness/Sky`)·반사 프로브·받침대·매듭 재질이 바뀌어 새 값
   — 6.6은 에디터 창이 있는 화면의 DPI에 따라 fingerprint가 달랐는데(150% 화면, ROADMAP G1-6) W11에서 고정했다. 세 버전 모두 selftest 1번의 루프끼리 `maxDiff` 0,
   하늘·프로브 큐브맵을 루프 2·3이 다시 쓰지 않음, 매듭이 프로브를 비춤(6.0은 `_FORWARD_PLUS`, 6.3·6.6은 `_CLUSTER_LIGHT_LOOP`)):
 
@@ -1056,7 +1074,9 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
 - attach-test 옵션: `-Scenario <파일>`(예: 부트를 기다리는 시나리오), `-KnownErrors`, `-InputShim`, `-NoBuild`.
 - attach-test 녹색 = install 성공, `harness_setup`이 아무것도 안 바꿈, install 뒤와 루프 뒤 `git status`가 install이 보고한 것 + lock뿐, 루프 N회 녹색·
   fingerprint·events 동일, 출시 빌드에 `Harness.*` 없음, uninstall 뒤 `git status` 비어 있음. 빌드가 다시 쓴 프로젝트 설정(하네스와 무관하게 Unity가
-  빌드 중 쓰고 종료 때 저장)은 `buildRewrote`로 보고하고 에디터를 닫은 뒤 되돌린다.
+  빌드 중 쓰고 종료 때 저장)은 `buildRewrote`로 보고하고 에디터를 닫은 뒤 되돌린다. 빌드가 만든 폴더(추적 파일 없음 — Addressables의
+  `AddressableAssetsData/<플랫폼>/`, 안의 content state는 gitignore)는 `.meta`와 함께 지운다(남기면 다음 에디터 시작이 `.meta`를 다시 쓴다).
+  빨간 attach-test는 에디터만 닫고 설치·빌드 산출물을 남긴다(조사용) — 다시 돌리기 전에 그 클론의 `tools/uninstall.ps1`과 `git status` 정리.
 
 ## 함정 (겪은 것)
 
@@ -1257,6 +1277,14 @@ powershell -ExecutionPolicy Bypass -File tools/attach-test.ps1 -Project <git 클
   바뀐 채다. `AssetDatabase.SaveAssetIfDirty(PlayerSettings)`·`SaveToSerializedFileAndForget`은 프로젝트 설정 파일을 다시 쓰지 않았고 `SaveAssets()`는 썼다.
   URP도 첫 빌드에 전역 설정의 런타임 목록과 기본 Volume 프로필(새 필드, 스크립트가 없는 컴포넌트 제거)을, PlayerSettings에 Standalone 배칭 항목을 쓴다.
 - PowerShell의 `[math]::Min(1, 170 / 1280)`은 첫 인자의 정수 오버로드를 골라 0이다 → 실수로 `[math]::Min(1.0, ...)`.
+- **TextMesh Pro는 글자마다 SDF 스케일(uv0.w)을 캔버스 렌더 모드별로 계산해 넣는다**(W16, G3-16; `TextMeshProUGUI.GenerateTextMesh`: Screen Space - Overlay는
+  `lossyScale / scaleFactor`, Screen Space - Camera는 `lossyScale`) — 그리고 그 뒤로는 lossyScale이 20% 넘게 바뀔 때만 고친다. 캔버스의 렌더 모드만 바꾸면 글자 메시는
+  옛 모드의 스케일 그대로라 SDF 가장자리 폭이 scaleFactor만큼 틀린다(캡처가 오버레이를 Camera로 그리던 동안: 사내 프로젝트 A의 scaleFactor 0.46 → ~2배 날카로움).
+  모드를 바꾼 뒤 `ForceMeshUpdate()`.
+- **Pipeline `build_status`의 `errors[]`에는 줄이 없다**(0.8.0-exp.1 `BuildIssue`: 줄을 파싱하고 `file`만 남김, ROADMAP O-14) → 같은 응답의 `buildSteps[].messages[]`
+  (`type`·`content` 원문)에서 읽는다.
+- **에디터에서 컴파일되는 코드가 플레이어 빌드에서 안 될 수 있다**: 에디터는 모든 플랫폼의 UnityEngine API를 갖고 있어 `Handheld.Vibrate()`(모바일 전용)가 런타임 검사
+  (`Application.isMobilePlatform`) 안에만 있어도 컴파일되고, Windows 플레이어 빌드는 CS0103으로 실패했다(사내 프로젝트 A) — 플랫폼 API는 `#if UNITY_ANDROID || UNITY_IOS`로.
 - **Unity 6.6에는 Render 분류의 `Batches Count`·`Draw Calls Count`가 없다**(종류별 `Standard`/`SRP Batcher`/`BRG`/… `Draw Calls Count`로 나뉨). 그 이름의
   `ProfilerRecorder.StartNew(ProfilerCategory.Render, …)`는 분류와 상관없이 **UI Toolkit의 같은 이름 카운터**에 붙어 0을 읽었다(W7까지 6.6 루프의 `render.batches` 0) →
   Render 분류에서 이름으로 찾고, 없으면 draw call은 종류별 합, batches는 null.

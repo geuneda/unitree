@@ -1084,7 +1084,7 @@ function Invoke-HarnessRecompile {
 # -> harness_console + harness_stats. Returns the report (see CLAUDE.md "report.json"); laps go into $Timings.
 # The caller holds the Editor lock and saves the report with Save-HarnessReport.
 
-# Fallback parser for recompile_status strings: "Assets\X.cs(12,5): error CS0103: msg"
+# Fallback parser for recompile_status strings and Player build messages (player.ps1): "Assets\X.cs(12,5): error CS0103: msg"
 function ConvertFrom-CompilerString([string]$s) {
     if ($s -match '^(?<file>.*?)\((?<line>\d+),(?<col>\d+)\):\s*error\s+(?<code>\w+):\s*(?<msg>.*)$') {
         $file = $Matches.file.Replace('\', '/')
@@ -1485,7 +1485,7 @@ function Save-HarnessReport {
 
 Export-ModuleMember -Function Get-HarnessProjectRoot, Get-HarnessWorkRoot, Test-HarnessWorktree, Get-HarnessEndpoint, Invoke-UnityCommand,
     Get-HarnessIntegrationRoot, Set-HarnessEditorRoot, Use-HarnessIntegrationRoot, Test-HarnessOwnEditor, Get-HarnessEditorArguments,
-    Get-HarnessLogCompileErrors, Test-HarnessSafeMode, Copy-HarnessLibrary,
+    Get-HarnessLogCompileErrors, ConvertFrom-CompilerString, Test-HarnessSafeMode, Copy-HarnessLibrary,
     Get-HarnessConfig, Get-HarnessModuleOf, Get-HarnessModuleFolder, Initialize-HarnessOut, Find-HarnessProjectAbove,
     Wait-UnityReachable, Get-HarnessEditorProcess, Get-HarnessLaunchedEditor, Save-HarnessLaunchedEditor, Get-HarnessWindowTitles, Test-HarnessProjectOpen,
     Get-HarnessProjectVersion, Get-HarnessInstalledEditors,

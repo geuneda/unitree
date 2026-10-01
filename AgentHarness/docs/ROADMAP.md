@@ -17,9 +17,8 @@
 - 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태·워크플로우 절 갱신 → 새로 드러난 항목 추가 →
   **저장소 루트 `README.md`와 `AgentHarness/CLAUDE.md`(필요하면 `Tools~/templates/AgentHarness.md`)에 바뀐 기능·측정값 반영** → 커밋(메시지에 항목 ID).
   README·ROADMAP 갱신은 워크플로우마다 빠뜨리지 않는다(W2 커밋은 README를 건드리지 않았고, W4 뒤에도 README "요구 사항"에 6.6의 옛 상태가 남아 있었다).
-- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W15는 모두 끝났다(2026-10-01). 남은 항목은 W16이다:
-  G3-8의 사내 프로젝트 확인(타깃 전환 허락받음 — 언제든).
-  그 뒤에 남는 것은 상시(업스트림 — G2-4의 남은 Unity 쪽 비용, W13의 URP 데칼 신고 포함)와 마지막(macOS)이다.
+- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W16은 모두 끝났다(2026-10-01).
+  남은 것은 상시(업스트림 — G2-4의 남은 Unity 쪽 비용, W13의 URP 데칼·W16의 Pipeline 빌드 메시지 신고 포함)와 마지막(macOS)이다.
 - 크기: S = 파일 1–2개 · M = 여러 파일 또는 새 커맨드 · L = 조사가 필요하거나 새 하위 시스템.
 
 | 순서 | 워크플로우 | 항목 | 크기 | 선행 | 상태 |
@@ -31,7 +30,7 @@
 | W5 | 루프 속도 | G2-3, G2-1 | L | — | 완료 (2026-09-30) |
 | W6 | 콘텐츠 헬퍼(a/b/c로 나눠 진행) | G1-3, G1-4, G4-1, G4-4 (+G3-10, G3-11) | L | W3, W4 (W6b는 W2) | 완료 (2026-09-30; 남은 하늘·반사는 G4-5) |
 | W7 | 에디터 밖·여러 에디터 | G2-2, G2-4, G1-2, G5-1 | L | — | 완료 (2026-09-30; G2-4는 Unity 쪽 리로드만 남음) |
-| W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 (+G3-12, G3-13) | L | W1 | 완료 (2026-09-30; G3-8은 사내 프로젝트 A 확인만 남음 — Android 타깃) |
+| W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 (+G3-12, G3-13) | L | W1 | 완료 (2026-09-30; G3-8의 사내 프로젝트 A 확인은 W16) |
 | W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 완료 (2026-09-30) |
 | W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 완료 (2026-09-30; 여러 worktree가 같은 ProjectSettings 파일을 바꾸는 경우는 G5-6 → W14) |
 | W11 | 백그라운드 에디터의 실제 입력 격리 | G3-9 (+G3-14, G1-6) | S | — | 완료 (2026-10-01) |
@@ -39,8 +38,8 @@
 | W13 | 같은 코드면 픽셀까지 같은 샷 | G3-15 | M | — | 완료 (2026-10-01; URP DBuffer 데칼의 흔들림·ScreenSpace 데칼의 NRE는 신고 — 상시) |
 | W14 | 여러 worktree의 ProjectSettings | G5-6 | M | — | 완료 (2026-10-01) |
 | W15 | 하늘과 씬 반사 | G4-5 | L | W13 | 완료 (2026-10-01) |
-| W16 | 사내 프로젝트 A의 플레이어 화면 | G3-8 | S | — | 대기 (타깃 전환 허락받음, 2026-10-01) |
-| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5·W13(URP 데칼)·W15(카메라 상태) 신고, G2-4 재측정 | S | 새 버전이 나올 때 | — |
+| W16 | 사내 프로젝트 A의 플레이어 화면 | G3-8 (+G3-16) | S | — | 완료 (2026-10-01) |
+| 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13(URP 데칼)·W15(카메라 상태) 신고, G2-4 재측정 | S | 새 버전이 나올 때 | — |
 | 마지막 | macOS | P-3 | L | 실제 Mac | 대기 |
 
 ### W1 시나리오 입력 격리 (G3-6) — 완료 (2026-09-29, 아래 "해결됨")
@@ -214,16 +213,21 @@
 - 매트릭스 1이 새 검사를 본다: `Harness/Sky`·플레이 뒤 시계 0, 하늘만 보는 연속 캡처에서 구름이 흐름(`motion` 4.4), 프로브(Custom 256, 박스 투영)의 아치 방향 텍셀이 돌,
   fingerprint의 큐브맵 줄이 모양, 프로브를 켜고 끈 closeup 렌더에서 받침대(평균 차 0.27, 잡음 0.00002)·매듭(하늘이 +0.15 밝음)이 그것을 비춤, 루프 2·3의 `cubemapsWritten` 없음.
 
-### W16 사내 프로젝트 A의 플레이어 화면 (G3-8)
-- 사람의 결정(2026-10-01): 사내 프로젝트 A 클론(`../../ah-p2/brd` — 사용자 본인의 프로젝트 폴더가 아니다)의 활성 빌드 타깃을 Standalone으로 바꿔도 된다.
-- 할 일: 클론을 Standalone으로 전환(프로젝트 전체 재임포트) → `attach-test.ps1 -Player`(또는 `player.ps1`)로 `brd-attach-player.json`(부트 대화상자, 아무것도 누르지 않음) →
-  플레이어 720x1280 창의 실제 화면과 같은 프레임의 에디터 `"auto"` 비교. 다르면 그 원인이 report에 나오는지가 완료 기준이다. 로비 시나리오는 PlayerPrefs를 바꾸므로
-  돌리기 전에 한 번 묻는다.
-- 주의: 재임포트·플레이어 빌드는 메모리를 많이 쓴다 — 사용자의 프로젝트 A 에디터가 열려 있으면 닫아도 되는지 먼저 묻는다. 끝나면 클론을 Android로 되돌려
-  매트릭스 10이 사내 프로젝트의 실제 타깃으로 돌게 둔다.
-- 하네스 코드가 바뀌지 않으면 매트릭스는 10만 돌리고 G3-8 상태·README만 갱신한다. 어긋남이 나오면 그 고침은 W8의 경로(`player.ps1`, `shotStats[].screen`)에 한다.
+### W16 사내 프로젝트 A의 플레이어 화면 (G3-8 + G3-16) — 완료 (2026-10-01, 아래 "해결됨")
+- 사람의 결정(2026-10-01): 클론(`../../ah-p2/brd`, 사용자 본인의 프로젝트 폴더가 아님)을 Standalone으로 바꿔도 된다, 로비 시나리오(개발 서버 로그인, PlayerPrefs)를
+  돌려도 된다, Windows 빌드에 필요한 게임 코드 패치는 클론의 로컬 커밋으로(푸시 안 함, 끝나면 원래 HEAD로).
+- 결과: 클론을 배치 모드 `-buildTarget Win64 -quit`로 전환(101 s) → 첫 플레이어 빌드가 **게임 코드의 플레이어 전용 컴파일 에러**로 실패
+  (`Handheld.Vibrate()`가 `Application.isMobilePlatform` 런타임 검사만 받음 — 에디터는 컴파일된다) → report가 그 줄을 못 짚어서 고침(`compileErrors`, kind `player`) →
+  패치 뒤 개발 빌드 211 s·426 MB, 부트 대화상자 2장과 로그인부터 **로비까지 4장 모두 플레이어 720x1280 창의 실제 화면 = 같은 프레임 캡처**(바뀐 픽셀 0) — 그 전에 캡처가
+  오버레이 캔버스의 TMP 글자를 더 날카롭게 그리던 것(G3-16)을 고쳤다. 에디터 샷과의 차이(7–15%)는 게임 쪽(에디터 전용 UI, 실시간 연출)이고 report가 `cause`로 가른다.
+- 하다가 찾은 것: 클론의 Standalone 스크립팅 define에는 `DEV`가 없어(Android에는 있음) Windows 플레이어는 라이브 서버 환경이었다(로그인 전에 확인, 로그인 없음) →
+  테스트 커밋에 `DEV`를 더해 개발 서버로. 개발 서버 로비 한 번에 게임의 차팅 동기화가 에디터 PlayerPrefs의 `charting.hash.*` 138개와 캐시 파일(`LocalLow/<회사>/<제품>/Charting`)을
+  지웠다(서버에 없는 테이블의 캐시 삭제 — 원본 에디터와 공유, 다음 부팅에 다시 받음; 되돌리면 해시와 파일이 어긋나므로 두었다). 플레이어는 작업 폴더에
+  Facebook SDK 로그(`fbg.log`)를 썼다 → 플레이어를 출력 폴더에서 띄운다.
+- 끝: 공식 `attach-test.ps1 -Player`(출시 빌드 포함) 녹색 202 s → 클론을 Android로 되돌리고(배치 모드 73 s) 테스트 커밋을 버려 원래 HEAD, 매트릭스 10은 원래 절차
+  (`brd-attach.json`, `-NoBuild`).
 
-### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5·W13·W15 신고, G2-4 재측정)
+### 상시: 업스트림·외부 의존 (O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, O-14, P-4·G2-5·W13·W15 신고, G2-4 재측정)
 - 코드보다 신고와 재검증: Pipeline에 2건(`RuntimeInputCommand.cs`의 `ENABLE_INPUT_SYSTEM` 조건, 출시 빌드 의존)과 G2-5의 인터프리터 2건(`try/catch` 미지원,
   교체 본문이 던진 예외를 줄 없이 로그하고 원래 본문으로 이어 돌림), Unity에 P-4의 원인
   (`Camera.RenderToCubemap(Cubemap)`: 6.6은 CPU 픽셀을 안 채우고 6.3은 sRGB로 인코딩 — 빈 씬 + 스카이박스 + half 큐브맵 한 개로 재현), O-6 Unity Search 예외,
@@ -244,6 +248,7 @@
   창 없는 에디터(O-11)에서만 남긴다. 반사 프로브를 같은 프레임에서 끄면 컬링이 다음 프레임에야 아는 것은 문서화된 동작으로 보여 신고하지 않는다(`UpdateCachedState`).
   W8: Unity에 증분 플레이어 빌드가 앞선 빌드의 `ScriptingAssemblies.json`을 쓰는 것(출시 빌드 → 다른 폴더로 개발 빌드, define 제약으로 어셈블리 집합이
   달라짐; 6.0 Fluid-Sim에서 재현 — 고쳐지면 `player.ps1`의 `CleanBuildCache` 재빌드를 걷어낸다), 플레이어 첫 씬 파티클의 로드 시점 한 스텝(의도인지 문의).
+  W16: Pipeline에 O-14(`build_status`의 에러가 줄을 파싱하고도 버림). 고쳐지면 `player.ps1`은 그대로 둬도 된다(빌드 단계 메시지를 먼저 읽음).
 - 계기: Pipeline 새 버전이나 Unity 6000.x 새 패치 → 매트릭스(9는 그 버전으로) 재검증 → 우회 코드(`Invoke-HarnessRecompile` 세대 번호,
   install의 Input System 추가, `HarnessReleaseBuild`)를 걷어낼 수 있는지 본다. O-9: 새 버전에서 selftest 1번의 HUD 검사(`uiError` 없음)를 보고,
   UI Toolkit에 패널을 지금 그리는 공개 API가 생기면 리플렉션을 걷어낸다.
@@ -340,21 +345,12 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 - **G3-7 캡처는 카메라 하나 + 스크린 공간 UI다** → 2026-09-30 해결(W3, 아래 "해결됨"). 스택 Overlay 카메라의 캔버스는 렌더 요청이 그리지 않아
   합성한다(아래 G3-8의 플레이어 캡처와 비교할 것).
 
-- [~] **G3-8 에디터 캡처의 UI가 게임의 화면 크기 코드와 어긋날 수 있다** (2026-09-29, W2에서 남은 것)
-  - 2026-09-30 W8(아래 "해결됨"): 플레이어 창(캡처 크기)의 실제 화면을 같은 프레임의 캡처·에디터 샷과 비교하는 경로(`player.ps1`, `shotStats[].screen`).
-    샘플(가로·세로 720x1280)과 BagelGame에서 실제 화면 = 캡처, 그 비교로 캡처의 HDR·MSAA 문제(G3-12)를 고쳤다.
-  - 남은 것: 완료 기준의 사내 프로젝트 A — 그 클론의 활성 빌드 타깃이 Android라 `player.ps1`이 빌드 전에 거부했다(전환은 프로젝트 전체 재임포트라 하지 않음).
-    Standalone 타깃으로 바꾼 사본(사람의 결정)에서 `brd-attach-player.json`(부트 대화상자, 아무것도 누르지 않음)이나 로비 시나리오로 확인한다(로비는 PlayerPrefs를 바꾼다).
-    2026-10-01 결정: 클론의 타깃을 바꿔도 된다 → W16.
-  - 아래는 W8 전의 기록이다.
-  - 현상: 에디터에서는 게임이 Game 뷰 크기로 돈다. 캡처는 UI만 캡처 크기로 잠깐 다시 배치하므로 (1) 크기 변화 콜백(`OnRectTransformDimensionsChange`,
-    `GeometryChangedEvent`)이 캡처마다 두 번 더 불리고, (2) `Screen.width/height`를 직접 읽어 배치한 UI·카메라(safe area 스크립트, 비율 맞춤 카메라)는
-    Game 뷰 기준 그대로 찍힌다. 지금 우회는 그 캡처에 `"ui": false` 또는 `"screen"`.
-    (3) (2026-09-30, W3) 스택 Overlay 카메라(UI 카메라)의 캔버스는 URP 렌더 요청이 그리지 않아 숨은 직교 UI 카메라로 그려 카메라들 위에 합성한다 →
-    그보다 뒤에 그리는 Base 카메라(미니맵)와의 앞뒤, 원근 UI 카메라로 기울여 그린 캔버스가 게임과 다를 수 있다.
-  - 방향: 개발 빌드 플레이어를 캡처 크기의 창으로 띄워 화면을 그대로 찍는 경로(W8) — 재배치 없음, `Screen.width` = 캡처 크기, 카메라 스택 포함.
-    에디터 캡처는 빠른 루프용으로 두고 플레이어 캡처와의 차이를 보고한다.
-  - 완료 기준: 사내 프로젝트 A 로비를 플레이어 720x1280 창으로 찍은 것과 에디터 `"auto"`가 같은 배치(다르면 원인이 report에 나옴).
+- **G3-8 에디터 캡처의 UI가 게임의 화면 크기 코드와 어긋날 수 있다** → 경로는 2026-09-30(W8), 사내 프로젝트 A 확인은 2026-10-01(W16) 해결(아래 "해결됨").
+  플레이어 720x1280 창의 실제 화면이 부트·타이틀·로비 4장 모두 같은 프레임의 캡처와 픽셀까지 같고, 에디터 샷과의 차이는 `vsEditor.cause`(`game`/`capture`)와
+  `compare.note`가 가른다. 에디터의 `Screen.width`가 Game 뷰라 생기는 차이는 여전히 에디터 캡처로는 고칠 수 없다 — `player.ps1`로 본다.
+
+- **G3-16 오버레이 캔버스의 TextMesh Pro 글자를 캡처가 더 날카롭게 그렸다** (2026-10-01, W16에서 발견) → 같은 날 해결(W16, 아래 "해결됨").
+  캡처가 Screen Space - Camera로 바꾼 캔버스에서 TMP가 Overlay용 SDF 스케일을 그대로 썼다(scaleFactor 0.46에서 가장자리 ~2배 날카로움, "0%" 글자 96픽셀).
 
 - **G3-11 빌더가 메시를 바꾼 첫 루프의 샷이 옛 메시를 그린다** (2026-09-30, W6c에서 발견) → 같은 날 해결(W6c, 아래 "해결됨").
 
@@ -513,6 +509,11 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
     돌아오고 `isApplicationActive`는 true로 남았다. 그동안 Input System도 포커스가 있다고 보고 플레이 진입 때 장치를 끄지 않는다.
   - 영향: `fps.editorFocused`는 프레임 시간을 읽을 때의 참고값이다. 격리(G3-9)와 UI Toolkit 입력(G3-14)은 이제 포커스와 무관하게 같게 돌아 루프 결과는 같다.
   - 할 일(상시): 빈 프로젝트로 재현해 Unity에 신고. 그 전에는 `fps.editorFocused`·`isApplicationActive`를 포커스 판정에 쓰지 않는다(selftest는 포커스를 Unity 안에서 만든다).
+- [ ] **O-14 Pipeline `build_status`의 에러에 줄이 없다** (2026-10-01, W16에서 발견, 우회함)
+  - 현상: `com.unity.pipeline` 0.8.0-exp.1의 `BuildIssue.From`이 `BuildMessage.Parse`로 `File.cs(line,col): ...`의 파일과 줄을 읽고도 `file`만 남긴다(`errors[]`에
+    `line` 없음, `message`는 접두사를 뗀 나머지). 플레이어 빌드에서만 나는 컴파일 에러(사내 프로젝트 A의 `Handheld`)를 줄 없이 보고했다.
+  - 우회: `player.ps1`이 같은 응답의 `buildSteps[].messages[]`(원문)를 하네스의 컴파일 메시지 파서로 읽는다(`compileErrors`·`player.build.errors`의 file·line·module).
+  - 할 일(상시): Pipeline에 신고(`BuildIssue`에 `line`).
 
 ### 검증 매트릭스 (하네스를 고친 뒤 매번)
 
@@ -606,7 +607,9 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    BagelGame(`-Module Game=Assets/Game,UI=Assets/UI`), Fluid-Sim(`-Scene "Assets/Scenes/Fluid Particles.unity"`), 사내 프로젝트 A(비공개 클론, 이 머신에만;
    `-Scenario ../../ah-p2/brd-attach.json`(부트 대화상자까지; 경로는 `AgentHarness/` 기준) 또는 `brd-lobby-auto.json`(테스트 서버로 로비까지, `"auto"`·`"screen"` 나란히; `brd-lobby-w3.json`은
    여기에 로비 연속 캡처를 더한 것 — 끝나면 에디터
-   PlayerPrefs `dev.force_login.server_environment`를 0으로), `-KnownErrors '^\[Firebase\] Dependency'`, `-NoBuild`). 배포 경로를 바꿨으면
+   PlayerPrefs `dev.force_login.server_environment`를 0으로), `-KnownErrors '^\[Firebase\] Dependency'`, `-NoBuild`; 클론의 실제 타깃 Android 그대로).
+   사내 프로젝트 A의 `-Player`·출시 빌드(W16)는 클론을 Standalone으로 바꾸고 Windows 빌드용 테스트 커밋(`Handheld`의 `#if`, Standalone define `DEV`)을 얹어서만 된다 —
+   `brd-attach-player.json`(부트 대화상자), 로비는 `brd-lobby-player.json`(에디터 서버 선택을 Dev로 둔 뒤, 플레이어에는 서버 버튼이 없다). 배포 경로를 바꿨으면
    `-Source git+file:///<저장소>?path=/AgentHarness/Packages/com.geuneda.agentharness#<브랜치>`(커밋된 것, 부트스트랩 포함)로도.
 
 ---
@@ -614,6 +617,53 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G3-8 에디터 캡처의 UI가 게임의 화면 크기 코드와 어긋날 수 있다**(사내 프로젝트 A 확인) · **G3-16 오버레이 캔버스의 TextMesh Pro 글자를 캡처가 더 날카롭게
+  그렸다** (2026-10-01, W16; 경로는 W8)
+  - 현상(전): W8의 플레이어 경로(실제 화면 = 같은 프레임 캡처 비교)는 샘플·BagelGame에서만 확인됐다. 완료 기준인 사내 프로젝트 A(uGUI·TMP·Addressables·Firebase,
+    세로 720x1280)는 활성 타깃이 Android라 `player.ps1`이 빌드 전에 거부했다.
+  - 절차(사람의 결정, 위 W16): 클론을 배치 모드 `Unity -batchmode -quit -projectPath <클론> -buildTarget Win64`로 전환(101 s — 텍스처 ~3,300개 재임포트, Library 5.3 GB;
+    추적 파일 변경 없음) → `attach-test.ps1 -Player`·`player.ps1` → 끝나면 `-buildTarget Android`로 되돌림.
+  - 찾은 것과 고친 것:
+    1. **에디터는 컴파일되는데 Windows 플레이어는 컴파일되지 않았다**: `VibrationService.cs:35`의 `Handheld.Vibrate()`가 `Application.isMobilePlatform` 런타임 검사만
+       받았다(`Handheld`는 모바일 플레이어에만 있다). report는 `stage=playerBuild`에 `error CS0103`과 파일만 줬다 — Pipeline `build_status`의 에러가 줄을 버린다(O-14).
+       → `player.ps1`이 같은 응답의 빌드 단계 메시지(원문)를 하네스의 컴파일 메시지 파서로 읽어 `player.build.errors[]`·`compileErrors[]`(kind `player`)에 file·line·module,
+       `error`에 "에디터는 컴파일했지만 플레이어 타깃에 없는 API(`#if UNITY_EDITOR` 없는 UnityEditor, `#if UNITY_ANDROID || UNITY_IOS` 없는 Handheld — 런타임 검사로는 안 됨)".
+       `attach-test.ps1`의 `player.compileErrors`에도. 실패한 빌드까지 35 s(빌드 38.9 s). 클론에는 테스트 커밋으로 `#if`를 넣었다.
+    2. **G3-16**: 패치 뒤 첫 개발 빌드 211 s·426 MB, 부트 대화상자 샷의 실제 화면과 캡처가 "0%" 로딩 글자에서만 달랐다(96픽셀 = 0.0104%, 채널 차이 최대 69, 평균 0.09 —
+       기준 이미지 규칙으로 `changed`). 정수 이동은 없고 캡처의 글자 가장자리가 ~2배 날카로웠다(화면 81·119·39 → 캡처 62·129·0). TMP는 글자마다 SDF 스케일(uv0.w)을
+       캔버스 렌더 모드별로 넣는다(`TextMeshProUGUI.GenerateTextMesh`: Overlay `lossyScale / scaleFactor`, Camera `lossyScale`)는데, 캡처가 오버레이 캔버스를 Screen Space -
+       Camera(1단위 = 1픽셀인 UI 카메라)로 바꿔도 lossyScale이 그대로라(그리고 TMP는 20% 넘는 변화만 따른다) 메시를 다시 만들지 않았다 → 기준 해상도 1440x3040, match 0.5,
+       720x1280에서 scaleFactor 0.46 → 1/0.46배 날카로움. 에디터 캡처도 같았다(그래서 에디터·플레이어 캡처끼리는 같았다). → `CaptureUi`가 오버레이였던 캔버스 중
+       scaleFactor가 1이 아닌 것의 `TextMeshProUGUI`를 Camera로 바꾼 뒤와 되돌린 뒤 `ForceMeshUpdate`(이름으로 찾음, TMP 의존 없음) → 실제 화면 = 캡처(바뀐 픽셀 0, maxDiff 10,
+       평균 0.084). 정점을 매 프레임 직접 움직이는 TMP 연출(`OnPreRenderText`를 쓰지 않는 것)은 그 프레임에 풀린다(다음 프레임에 돌아옴).
+    3. **에디터 샷과의 차이는 게임 쪽이었다**: 플레이어 샷 vs 에디터 샷 14–15% — 강제 로그인 대화상자의 서버 선택 줄이 게임 코드의 `#if UNITY_EDITOR` 안이라 개발 빌드에서는
+       감춰진다. report의 `compare.note`는 "첫 씬 파티클"만 말했다. → 실제 화면 비교로 원인을 가른다: `shotStats[].vsEditor.cause` = `game`(그 프레임의 플레이어 화면이 캡처와
+       같음 → 에디터·플레이어에서 게임이 다르게 그림: `#if UNITY_EDITOR`·`Application.isEditor`, 플랫폼 `#if`, `OnValidate` 데이터, `Screen.width` 기반 배치(에디터의 Screen은 Game 뷰),
+       실시간 연출, 첫 씬 파티클) 또는 `capture`(캡처가 그 프레임의 화면과 다름 → 하네스 캡처 경로, `.screen.png`가 게임이 보인 것), `compare.note`에 샷 이름과 함께.
+    4. 게임이 첫 씬 뒤에 `Application.targetFrameRate = 60`을 다시 걸어 플레이어 fps가 60(×1.0)이었다 → `fps.note`("게임이 직접 상한을 걸었다: fps는 그 상한").
+    5. 플레이어가 작업 폴더(프로젝트 루트)에 Facebook SDK 로그 `fbg.log`를 썼다 → 플레이어를 출력 폴더(`<Out>/player`)에서 띄운다.
+    6. 빌드가 Addressables의 `Assets/AddressableAssetsData/Windows/`(gitignore된 content state)와 그 `.meta`를 만들었다. attach-test는 `.meta`만 지우고 폴더를 남겨 다음 에디터
+       시작이 `.meta`를 다시 썼다(`stage=status`) → 추적 파일이 없는 그 폴더도 지운다.
+    7. 클론의 Standalone 스크립팅 define에 `DEV`가 없어(Android에는 있음) 플레이어는 라이브 서버 환경이었다(로그인 전, 대화상자에서 멈춤 — 통신 없음). 테스트 커밋에 `DEV`를
+       더했다. 활성 타깃이 바뀌면 에디터 루프의 fingerprint도 바뀐다(Android `6664b723` → Standalone `dad22744` — 에셋 의존 해시가 플랫폼별 임포트를 따른다; 루프끼리는 같음).
+  - 로비(`brd-lobby-player.json` = `brd-lobby-auto.json`에서 플레이어에 없는 서버 버튼 클릭을 뺀 것 + 에디터 PlayerPrefs 서버 선택을 Dev로 둔 뒤, 끝나고 0으로): 4장
+    (로그인 t=0.05, 타이틀 0.55, 로비 1.8, 로비 3.3) **모두 실제 화면 = 캡처**(바뀐 픽셀 0, maxDiff 10–25), `eventsMatch` 참, 대기 3개(스킵 버튼 2.2 s, 타이틀 3.2 s, 로비 씬 0.35 s).
+    에디터 샷과는 14.7%(서버 선택 줄)·8.3%(타이틀 캐릭터·로고 연출)·7.7%(로비 좌우 아이콘 열 ~140 px — 게임의 실시간(unscaled) 등장 트윈이 에디터와 다른 지점)·0.88%
+    (회전 빛줄기·남은 시간 글자) — 모두 `cause` `game`. 한 바퀴 123 s(에디터 21.8 + 증분 빌드 83.4(define 변경으로 스크립트 전체) + 플레이어 15.2 + 비교 1.1), 플레이어 fps 55.1
+    (상한 60, 로딩 히치 4). 하네스 런타임만 바뀐 증분 빌드 38.8 s, `-NoBuild` 부트 한 바퀴 ~35 s.
+  - 부수 효과(보고): 개발 서버 로비 한 번에 게임의 차팅 동기화가 서버에 없는 테이블의 캐시를 지웠다 — 에디터 PlayerPrefs `charting.hash.*` 138개와
+    `%USERPROFILE%/AppData/LocalLow/TeamSparta/BunkerTapTapDefense/Charting`의 파일(원본 에디터와 공유; 다음 부팅에 다시 받는다 — 해시만 되살리면 파일과 어긋나서 두었다).
+    플레이어 PlayerPrefs `HKCU\Software\TeamSparta\BunkerTapTapDefense`(23개)가 새로 생겼다.
+  - 검증: 사내 프로젝트 A(Standalone + 테스트 커밋) `attach-test.ps1 -Player` 녹색 201.5 s — 루프 3회 `dad22744`, 플레이어 부트 2장 실제 화면 = 캡처, 출시 빌드 46.5 s·DLL 225개에
+    `Harness.*` 없음(`Unity.Pipeline.Attributes`는 남음 — 그 게임이 설치 전부터 Pipeline 0.6을 쓴다), 제거 뒤 `git status` 깨끗(빌드가 만든 `AddressableAssetsData/Windows/` 포함).
+    매트릭스 1–8(에디터 트리) 녹색 813.8 s(`609b54d2…`, 줄 64/71/77/99; 1번 236.4 s — 플레이어 465.5 fps vs 에디터 115.5(×4.03), 하네스 런타임이 바뀐 첫 빌드 130.6 s,
+    `"main"` 샷 `vsEditor.cause` game(파티클), 실제 화면 = 캡처 평균 0.49). 9: 새 클론 6.3 968.4 s(루프 3회 `609b54d2`·기준 이미지 same=3, selftest 1–8), 6.0 783.5 s(`a0df2fa8`),
+    6.6 1070.3 s(`cadaeca6`) 녹색. 10: BagelGame `-Player` 100.8 s(플레이어 361.6 fps vs 115.0 ×3.14, 실제 화면 = 캡처 3/3, 에디터 차이 최대 0.056% → `cause` game, 출시 빌드에 `Harness.*` 없음),
+    Fluid-Sim 30.4 s, 사내 프로젝트 A(Android로 되돌린 원래 HEAD, `brd-attach.json` `-NoBuild`) 98.6 s(`6664b723` — W14·W15와 같음) 녹색. 매트릭스 뒤 `compare.note`의 샷 표기만
+    "이름 (t=…)"로 바꿨다(BagelGame의 같은 이름 샷 세 장이 "main, main, main") — 샘플 `player.ps1 -NoBuild`로 확인. selftest에 TMP 검사는 없다(샘플에 TMP 폰트 에셋이 없음 —
+    사내 프로젝트 A의 실제 화면 비교로 확인).
+  - 남은 것: 정점 연출 TMP의 그 프레임(위 2), 원근 UI 카메라로 기울여 그린 캔버스(G3-8 (3), 해당 게임 없음), Windows만(P-3).
 
 - [x] **G4-5 하늘과 반사가 아직 기본이다** (2026-10-01, W15)
   - 현상(전): 하늘은 Unity 내장 `Skybox/Procedural`을 코드로 설정한 것(구름 없음)이고, 반사·앰비언트는 하늘 큐브맵 하나라 씬 오브젝트(선돌·아치)가 금속 매듭·링·받침대에
@@ -928,7 +978,7 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
   - 남은 것: 발행 모듈은 모듈 루트의 asmdef 모듈만 본다(`modules[]`의 `Assembly-CSharp` 코드가 발행하는 계약은 파일 규칙에서 빠짐). 파일 사이로 옮긴 타입은
     "지움 + 새 타입"이라 올라간 뒤엔 거부된다. 역의존은 이 worktree의 소스로 컴파일한다(worktree가 뒤처졌으면 그 스냅샷 기준 — 최종 판정은 에디터 트리 루프).
 
-- [x] **G3-2 에디터 플레이 모드 FPS는 실제 성능을 대표하지 못한다** · **G3-8 에디터 캡처의 UI가 게임의 화면 크기 코드와 어긋날 수 있다**(경로; 사내 프로젝트 A 확인은 [~])
+- [x] **G3-2 에디터 플레이 모드 FPS는 실제 성능을 대표하지 못한다** · **G3-8 에디터 캡처의 UI가 게임의 화면 크기 코드와 어긋날 수 있다**(경로; 사내 프로젝트 A 확인은 W16)
   (+ **G3-12 캡처가 HDR 이미션·블룸을 잘랐다**, **G3-13 6.6의 render 카운터**, 2026-09-30, W8)
   - 현상(전): 성능은 에디터 플레이 모드 fps(에디터 오버헤드·autotick·Game 뷰)뿐이라 변경 전후 비교에만 쓸 수 있었다. 캡처는 UI를 캡처 크기로 다시 배치해
     합성하므로 `Screen.width`를 읽는 UI·크기 콜백·Overlay 카메라 캔버스가 게임과 다를 수 있는데, 게임이 실제로 그린 화면과 비교할 길이 없었다.
@@ -993,7 +1043,7 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
     batches 69 / SetPass 54(D3D12) vs 65 / 50. 루프(코드 변경 없음)는 4.08–4.37 s(W7 3.82–3.90 s; 샷 한 장 ~95 ms 중 HDR 변환은 수 ms, 나머지는 이날의 편차).
   - 남은 것: 출시(비개발) 빌드 성능(개발 빌드의 프로파일러 마커가 켜져 있음; `AGENTHARNESS_RUNTIME` 출시 빌드로 도는 옵션은 없다), 첫 씬 파티클 한 스텝(엔진),
     데스크톱 타깃·Windows만(P-3), IL2CPP 플레이어는 재지 않음, TAA처럼 앞 프레임을 쓰는 효과는 캡처 카메라에 이력이 없다. 사내 프로젝트 A(활성 타깃
-    Android)는 `player.ps1`이 빌드 전에 거부해 G3-8의 완료 기준은 확인하지 못했다(위 G3-8 `[~]`).
+    Android)는 `player.ps1`이 빌드 전에 거부해 G3-8의 완료 기준은 확인하지 못했다(→ W16, 위 G3-8·G3-16 해결).
 
 - [x] **G2-2 GUI 에디터가 떠 있어야 하고, 모달 다이얼로그가 뜨면 멈춘다** · **G1-2 빌더가 에디터 안에서만 실행된다** · **G5-1 에디터 1개 → 루프가 직렬화된다**
   (+ **G2-4** 측정, 2026-09-30, W7)

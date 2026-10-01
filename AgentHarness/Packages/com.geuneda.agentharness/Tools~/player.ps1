@@ -147,7 +147,12 @@ function Invoke-PlayerRun {
         $b = [ordered]@{ result = $st.result; sec = Round ([double]$st.buildTimeMs / 1000) 1; sizeMB = Round ([double]$st.totalSizeBytes / 1MB) 1; warnings = [int]$st.totalWarnings
             code = $(if ($Debugging) { 'debug (Script Debugging: exact lines, slower)' } else { 'release (optimized: runtime error lines can be a few lines off; the Editor loop has the exact line)' }) }
         if ($clean) { $b['cleanRebuild'] = $clean }
-        $errs = @($st.errors | Where-Object { $_ } | ForEach-Object { [ordered]@{ message = "$($_.message)"; file = "$($_.file)" } })
+        # build_status keeps only the file of a "File.cs(line,col): error CS..." message (Pipeline's BuildIssue); the build
+        # steps' messages have the whole text: file, line and module as the Editor loop's compileErrors.
+        $texts = @(@($st.buildSteps) | Where-Object { $_ } | ForEach-Object { @($_.messages) } | Where-Object { $_ -and "$($_.type)" -eq 'Error' } | ForEach-Object { "$($_.content)" })
+        if (-not $texts.Count) { $texts = @($st.errors | Where-Object { $_ } | ForEach-Object { if ($_.file) { "$($_.file): $($_.message)" } else { "$($_.message)" } }) }
+        $errs = @($texts | Select-Object -Unique | ForEach-Object { ConvertFrom-CompilerString $_ })
+        $compile = @($errs | Where-Object { $_.line -gt 0 -and $_.msg -match '^CS\d+' } | ForEach-Object { $_['kind'] = 'player'; $_ })
         if ($errs.Count) { $b['errors'] = $errs }
         $report.player['build'] = $b
         # Unity writes project settings while building a Player (URP runtime settings, the Input System's preloaded asset...),
@@ -162,7 +167,17 @@ function Invoke-PlayerRun {
         }
         if ("$($st.result)" -ne 'Succeeded') {
             $report.stage = 'playerBuild'
-            $report['error'] = "the development Player build $($st.result): $(@($errs | Select-Object -First 5 | ForEach-Object { $_.message }) -join ' | ')"
+            $where = { param($e) if ($e.file) { "$($e.file):$($e.line) $($e.msg)" } else { $e.msg } }
+            if ($compile.Count) {
+                # The Editor compiled these scripts (its loop ran first): code the Player's target does not have, behind a runtime
+                # check instead of #if - Handheld.Vibrate() under Application.isMobilePlatform in a mobile game (company project A).
+                $report['compileErrors'] = $compile
+                $report['error'] = "the scripts do not compile for the Player's target $($p.target), although the Editor compiled them: an API the target lacks " +
+                    "(UnityEditor without #if UNITY_EDITOR, another platform's API such as Handheld without #if UNITY_ANDROID || UNITY_IOS - a runtime check is not enough): " +
+                    (@($compile | Select-Object -First 5 | ForEach-Object { & $where $_ }) -join ' | ')
+            } else {
+                $report['error'] = "the development Player build $($st.result): $(@($errs | Select-Object -First 5 | ForEach-Object { & $where $_ }) -join ' | ')"
+            }
             return
         }
     }
@@ -181,7 +196,9 @@ function Invoke-PlayerRun {
     $a += @($PlayerArgs)
     $limit = [math]::Max([double]$TimeoutSec, [double]$p.durationSec + [double]$p.readyTimeoutSec + [double]$p.waitSec + 90)
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $proc = Start-Process -FilePath $exe -ArgumentList ((@($a) | ForEach-Object { ConvertTo-HarnessArg $_ }) -join ' ') -PassThru
+    # Started in the out folder: what the game writes to its working directory stays there (company project A: the Facebook
+    # Game SDK's fbg.log, in the project root when the Player started there).
+    $proc = Start-Process -FilePath $exe -ArgumentList ((@($a) | ForEach-Object { ConvertTo-HarnessArg $_ }) -join ' ') -WorkingDirectory $playerOut -PassThru
     $null = $proc.Handle   # keeps ExitCode readable
     Step "Player started (pid $($proc.Id), $w x $h window)"
     $exited = $proc.WaitForExit([int]($limit * 1000))
@@ -218,6 +235,11 @@ function Invoke-PlayerRun {
     $f = $r.fps
     $report.fps = [ordered]@{ avg = Round $f.avg 1; min = Round $f.min 1; avgMs = Round $f.avgMs; p95ms = Round $f.p95ms; p99ms = Round $f.p99ms; hitches = $f.hitches
         cpuMainAvgMs = Round $f.cpuMainAvgMs; samples = $f.samples; focused = $r.editorFocused }
+    # The Player unpaces itself before the first scene (vSync 0, no frame cap); a game that sets its own afterwards wins.
+    if (-not $Paced -and ([int]$pi.targetFrameRate -gt 0 -or [int]$pi.vSyncCount -gt 0)) {
+        $report.fps['note'] = "the game paced the Player itself after the harness unpaced it (targetFrameRate $($pi.targetFrameRate), vSyncCount $($pi.vSyncCount)): " +
+            'fps is that cap, not what a frame costs - compare frame times only below the cap, or take the pacing out of the game for the measurement'
+    }
     $rs = $r.render
     if ($rs -and [int]$rs.samples -gt 0) { $report.render = [ordered]@{ batches = $(if ([double]$rs.batches -lt 0) { $null } else { Round $rs.batches 1 }); setPassCalls = Round $rs.setPassCalls 1; drawCalls = Round $rs.drawCalls 1; triangles = [math]::Round($rs.triangles); vertices = [math]::Round($rs.vertices) } }
     if (-not $NoEditor -and $ed.fps -and [double]$ed.fps.avg -gt 0) { $report['fpsVsEditor'] = Round ([double]$f.avg / [double]$ed.fps.avg) }
@@ -315,10 +337,33 @@ function Invoke-PlayerRun {
         } else { $summary['error'] = if ($cmp.success) { $cmp.result.error } else { $cmp.error } }
     }
     if ($mark) { $summary['screenIgnore'] = $mark }
-    if ($summary.vsEditor.changed -gt 0) {
-        $summary['note'] = 'A Player simulates the particle systems of its first scene one step (Time.fixedDeltaTime) further than play mode does ' +
-            '(Unity steps them while it loads the scene): small changes around particles are expected. Anything else in the diff images is not.'
+    # Why a shot differs from the Editor's: the Player's own screen in that frame tells the game from the capture (G3-8).
+    $game = @(); $capturePath = @(); $unknown = @()
+    foreach ($s in @($report.shotStats)) {
+        if (-not $s['vsEditor'] -or $s.vsEditor.status -ne 'changed') { continue }
+        $label = "$($s.name) (t=$($s.t))"   # several shots can share a name ("main")
+        if (-not $s['screen'] -or -not $s.screen['vsShot']) { $unknown += $label; continue }
+        if ($s.screen.vsShot.status -eq 'same') { $s.vsEditor['cause'] = 'game'; $game += $label } else { $s.vsEditor['cause'] = 'capture'; $capturePath += $label }
     }
+    $notes = @()
+    if ($game.Count) {
+        $notes += "$($game -join ', '): the Player's own screen is this capture (screen.vsShot same), so the difference is the game's in the Editor and " +
+            'in the Player, not the capture: code under #if UNITY_EDITOR or Application.isEditor (Editor-only UI), platform #if, data only the Editor makes ' +
+            '(OnValidate), UI laid out from Screen.width/height (the Editor''s Screen is the Game view, the Player''s the capture size), animations on real ' +
+            'time (unscaled time, DOTween SetUpdate(true): a Player frame takes another wall time than an Editor frame), the first scene''s particles one ' +
+            'step ahead (a Player simulates them once while it loads the scene) - see the vsEditor diff images'
+    }
+    if ($capturePath.Count) {
+        $notes += "$($capturePath -join ', '): the capture is not the Player's own screen of that frame (screen.vsShot changed) - the harness's capture path " +
+            '(canvases of stacked overlay cameras composited over the cameras, a perspective UI camera, render-to-texture UI, effects that need the previous ' +
+            'frame such as TAA, text a script moves vertex by vertex): the .screen.png is what the game showed'
+    }
+    if ($unknown.Count) {
+        $notes += "$($unknown -join ', '): no screen of that frame (a pose or camera shot) to tell the game from the capture. A Player simulates the " +
+            'particle systems of its first scene one step (Time.fixedDeltaTime) further than play mode does (Unity steps them while it loads the scene): ' +
+            'small changes around particles are expected. Anything else in the diff images is not.'
+    }
+    if ($notes.Count) { $summary['note'] = $notes -join ' | ' }
     $report['compare'] = $summary
     $timings['compareSec'] = Round $sw.Elapsed.TotalSeconds
 

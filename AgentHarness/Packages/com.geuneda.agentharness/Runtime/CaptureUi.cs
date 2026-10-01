@@ -22,7 +22,8 @@ namespace Harness
     /// over the cameras, below the overlays.
     /// What it changes (a canvas's render mode, camera and plane distance, a PanelSettings' target texture and clear) is put
     /// back in the same frame, the layout included; UI code that reacts to a size change (OnRectTransformDimensionsChange,
-    /// GeometryChangedEvent) sees the capture size and then the Game view size again.
+    /// GeometryChangedEvent) sees the capture size and then the Game view size again. TextMesh Pro texts of an overlay canvas
+    /// whose scale factor is not 1 are generated again for the camera render and again after it (<see cref="RegenerateText"/>).
     /// </summary>
     sealed class CaptureUi : IDisposable
     {
@@ -241,25 +242,68 @@ namespace Harness
             var mask = 0;
             foreach (var l in group) mask |= 1 << l.canvas.gameObject.layer;
             cam.cullingMask = mask;
+            var regenerated = new List<Canvas>();
             // The target first: CanvasScaler (Canvas.renderingDisplaySize) and the text meshes follow the camera's pixel size.
             cam.targetTexture = target;
             try
             {
-                foreach (var l in group)
+                var scales = new float[group.Count];
+                for (var i = 0; i < group.Count; i++)
                 {
+                    var l = group[i];
+                    scales[i] = l.canvas.scaleFactor;
                     Save(l.canvas);
                     l.canvas.renderMode = RenderMode.ScreenSpaceCamera;
                     l.canvas.worldCamera = cam;
                     l.canvas.planeDistance = PlaneDistance;
                 }
                 Canvas.ForceUpdateCanvases();
+                for (var i = 0; i < group.Count; i++)
+                {
+                    var l = group[i];
+                    if (l.band != 1 || (Mathf.Approximately(scales[i], 1f) && Mathf.Approximately(l.canvas.scaleFactor, 1f))) continue;
+                    if (RegenerateText(l.canvas)) regenerated.Add(l.canvas);
+                }
                 RenderWithoutFeatures(cam);
             }
             finally
             {
                 cam.targetTexture = null;
                 RestoreCanvases();
+                foreach (var c in regenerated) RegenerateText(c);   // the overlay's SDF scale again, for the game's own frame
             }
+        }
+
+        // TextMesh Pro packs each glyph's SDF scale (uv0.w) for the render mode of the canvas it generated the text in
+        // (TextMeshProUGUI.GenerateTextMesh: Screen Space - Overlay lossyScale / scaleFactor, Screen Space - Camera lossyScale)
+        // and afterwards only follows lossy scale changes of more than 20%. An overlay canvas drawn in Screen Space - Camera by
+        // the UI camera (one unit = one pixel) keeps its lossy scale, so its text kept the overlay's SDF scale: edges
+        // 1 / scaleFactor times as sharp as on the screen (W16, company project A: reference 1440x3040 at 720x1280, scale factor
+        // 0.46 - a "0%" label 96 pixels different from the Player's own screen). TextMesh Pro is optional: found by name.
+        static Type s_TmpUgui;
+        static MethodInfo s_TmpForceMeshUpdate;
+        static bool s_TmpLooked;
+
+        /// <summary>Generate the TextMesh Pro texts of a canvas again for its current render mode (ForceMeshUpdate). False = none.</summary>
+        static bool RegenerateText(Canvas canvas)
+        {
+            if (!s_TmpLooked)
+            {
+                s_TmpLooked = true;
+                s_TmpUgui = Type.GetType("TMPro.TextMeshProUGUI, Unity.TextMeshPro");
+                if (s_TmpUgui != null)
+                    foreach (var m in s_TmpUgui.GetMethods(BindingFlags.Instance | BindingFlags.Public))
+                        if (m.Name == "ForceMeshUpdate" && Array.TrueForAll(m.GetParameters(), p => p.ParameterType == typeof(bool))
+                            && (s_TmpForceMeshUpdate == null || m.GetParameters().Length > s_TmpForceMeshUpdate.GetParameters().Length))
+                            s_TmpForceMeshUpdate = m;
+            }
+            if (s_TmpForceMeshUpdate == null || canvas == null) return false;
+            var texts = canvas.GetComponentsInChildren(s_TmpUgui, false);
+            if (texts.Length == 0) return false;
+            var args = new object[s_TmpForceMeshUpdate.GetParameters().Length];   // ignoreActiveState, forceTextReparsing: false
+            for (var i = 0; i < args.Length; i++) args[i] = false;
+            foreach (var t in texts) s_TmpForceMeshUpdate.Invoke(t, args);
+            return true;
         }
 
         /// <summary>

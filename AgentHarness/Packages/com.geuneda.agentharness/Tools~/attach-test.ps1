@@ -165,6 +165,8 @@ if ($Player) {
         if ($j.player.buildRewrote) { $report.player['buildRewrote'] = @($j.player.buildRewrote) }
         $pe = @($j.runtimeErrors | Where-Object { $_ })
         if ($pe.Count) { $report.player['runtimeErrors'] = @($pe | ForEach-Object { "$($_.msg) @ $($_.file):$($_.line)" }) }
+        $ce = @($j.compileErrors | Where-Object { $_ })   # scripts that do not compile for the Player's target (the Editor compiled them)
+        if ($ce.Count) { $report.player['compileErrors'] = @($ce | ForEach-Object { "$($_.msg) @ $($_.file):$($_.line)" }) }
         if ($j.error) { $report.player['error'] = "$($j.error)" }
         $pshots = Join-Path $outAbs 'shots-player'; [void](New-Item -ItemType Directory -Force $pshots)
         foreach ($s in @($j.shots) + @($j.shotStats | ForEach-Object { if ($_.screen) { $_.screen.path } })) { if ($s -and (Test-Path -LiteralPath $s)) { Copy-Item -LiteralPath $s -Destination $pshots } }
@@ -204,7 +206,15 @@ if ($rewrote.Count -gt 0 -and $NoBuild -and -not $Player) { $report.unexpected =
 $report.buildRewrote = $rewrote
 foreach ($p in $rewrote) {
     if ((Invoke-HarnessGit $proj @('ls-files', '--error-unmatch', '--', $p)).code -eq 0) { [void](Invoke-HarnessGit $proj @('checkout', '--', $p) -Check) }
-    else { Remove-Item -LiteralPath (Join-Path $proj $p) -Force }
+    else {
+        Remove-Item -LiteralPath (Join-Path $proj $p) -Force
+        # The .meta of a folder the build made, with nothing tracked in it (company project A: Addressables' AddressableAssetsData/Windows
+        # holding its gitignored content state): the folder goes too, or the next Editor start imports it and writes the .meta again.
+        $dir = if ($p.EndsWith('.meta')) { Join-Path $proj $p.Substring(0, $p.Length - 5) } else { $null }
+        if ($dir -and (Test-Path -LiteralPath $dir -PathType Container) -and -not (Invoke-HarnessGit $proj @('ls-files', '--', $p.Substring(0, $p.Length - 5))).out.Trim()) {
+            Remove-Item -LiteralPath $dir -Recurse -Force
+        }
+    }
 }
 $u = Step 'uninstall' { Invoke-Tool 'uninstall.ps1' @() 120 }
 if ($u.json) { [IO.File]::WriteAllText((Join-Path $outAbs 'uninstall.json'), $u.out, (New-Object Text.UTF8Encoding($false))) }

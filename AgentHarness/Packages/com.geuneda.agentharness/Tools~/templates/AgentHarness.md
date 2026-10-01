@@ -60,9 +60,16 @@ powershell -ExecutionPolicy Bypass -File tools/player.ps1 [-Scenario tools/scena
   이벤트 수), `runtimeErrors`, 플레이어 샷과 에디터 샷의 비교(`shotStats[].vsEditor`), 게임 카메라 캡처의 **실제 화면**(`shotStats[].screen`: 같은 프레임의
   캡처와 `vsShot`, 에디터 샷과 `vsEditor`, diff PNG). 에디터 캡처가 UI를 캡처 크기로 다시 배치하거나 `Screen.width`를 읽는 UI가 달라지는 게임은 여기서 드러난다.
 - 차이는 보고이지 실패가 아니다(종료코드 0 = 플레이어가 빌드되고 시나리오를 에러 없이 돌았다). 첫 씬의 파티클은 플레이어에서 한 스텝 앞서 조금 다르다.
-- 데스크톱(Standalone) 활성 빌드 타깃에서만(다른 타깃이면 전환하지 않고 알린다). 첫 빌드는 오래 걸린다(셰이더). 빌드가 다시 쓴 프로젝트 설정은
+  에디터 샷과 다른 샷은 `vsEditor.cause`로 원인이 갈린다: `game` = 그 프레임의 플레이어 화면이 캡처와 같다 → 게임이 에디터와 플레이어에서 다르게 그린다(`#if UNITY_EDITOR`
+  UI, 플랫폼 `#if`, `OnValidate` 데이터, `Screen.width` 기반 배치 — 에디터의 Screen은 Game 뷰, 실시간(unscaled) 연출), `capture` = 캡처 경로 문제(`.screen.png`가 게임이
+  보인 것). `compare.note`가 설명한다.
+- 에디터는 되는데 **플레이어 빌드만 컴파일되지 않으면** `stage=playerBuild` + `compileErrors`(file·line, kind `player`): 플레이어 타깃에 없는 API를 런타임 검사로만
+  막은 코드다(`UnityEditor`는 `#if UNITY_EDITOR`, `Handheld` 같은 모바일 API는 `#if UNITY_ANDROID || UNITY_IOS`로). 게임이 직접 프레임 상한을 걸면 `fps.note`.
+- 데스크톱(Standalone) 활성 빌드 타깃에서만(다른 타깃이면 전환하지 않고 알린다 — 전환은 프로젝트 전체 재임포트이고, 스크립팅 define이 타깃마다 달라 접속 서버·기능이
+  바뀔 수 있으니 사람에게 묻는다). 첫 빌드는 오래 걸린다(셰이더). 빌드가 다시 쓴 프로젝트 설정은
   `player.buildRewrote`로 알린다(Unity가 빌드마다 하는 일 — 되돌리거나 커밋한다). 런타임 에러의 줄은 최적화 코드라 조금 어긋날 수 있다(`-Debugging`이면 정확).
-- 플레이어는 에디터와 다른 PlayerPrefs(`HKCU\Software\<회사>\<제품>`)를 쓰고, 몇 초 동안 창이 포커스를 가져간다. 개발 빌드는 프로파일러 연결을
+- 플레이어는 에디터와 다른 PlayerPrefs(`HKCU\Software\<회사>\<제품>`)를 쓰지만 `persistentDataPath`는 같고, 작업 폴더는 `HarnessOut/player/player`다.
+  몇 초 동안 창이 포커스를 가져간다. 개발 빌드는 프로파일러 연결을
   네트워크에서 기다려서 처음 한 번 Windows 방화벽이 허용을 묻는다(허용·취소 모두 실행과 무관).
 - 플레이어가 끝나지 않으면(`stage=player`) `HarnessOut/player/Player.log`의 `[Harness] …` 줄로 어디까지 왔는지 본다. 에디터에서만 도는 코드(`OnValidate`,
   `#if UNITY_EDITOR`)에 기대는 게임은 여기서 다르게 그린다 — `vsEditor` diff를 연다.

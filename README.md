@@ -26,7 +26,7 @@ UI Toolkit HUD)만 들어 있습니다.
 |---|---|
 | 1. 모든 게 텍스트 | 씬은 `IBuildStep` 빌더 코드가 생성(YAML 직접 수정 금지), URP·Renderer 에셋은 `ISettingsStep` 코드가 생성하고 품질 레벨·레이어·색 공간·Time·Physics 같은 ProjectSettings 값도 같은 코드가 소유(Project Settings 창이나 YAML로 바꾸면 다음 루프가 되돌리며 보고). HLSL `.shader`, UI Toolkit UXML/USS(+ UI 킷: 디자인 변수·판·버튼·게이지·토스트, UXML 데이터 바인딩), 머티리얼·Volume·라이팅·파티클·애니메이션 클립도 코드 |
 | 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 메서드 본문(과 그 본문이 부르는 새 메서드)만 고쳤으면 컴파일 없이 바꿔 넣는 핫 루프(`loop.ps1 -Hot`), 모달 대화상자에 멈추지 않는 `-automated` 에디터와 창 없는 에디터(`open.ps1 -Headless`, 한 바퀴 ~2.4 s) |
-| 3. 눈으로 검증 | 캡처 PNG(화면의 카메라 스택·미니맵 + 스크린 공간 UI, 파이프라인의 HDR 그대로) + 이미지 통계, 연속 캡처 시트, 기준 이미지와의 diff 점수·바뀐 곳 PNG(시나리오 동안 UI Toolkit transition도 프레임 시계라 UI가 움직이는 중에도 픽셀까지 같음), 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로. 같은 시나리오를 개발 빌드 플레이어에서 돌려(`player.ps1`) 에디터 없는 프레임 시간과 게임이 그린 실제 화면을 에디터 샷과 비교 |
+| 3. 눈으로 검증 | 캡처 PNG(화면의 카메라 스택·미니맵 + 스크린 공간 UI, 파이프라인의 HDR 그대로) + 이미지 통계, 연속 캡처 시트, 기준 이미지와의 diff 점수·바뀐 곳 PNG(시나리오 동안 UI Toolkit transition도 프레임 시계라 UI가 움직이는 중에도 픽셀까지 같음), 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로. 같은 시나리오를 개발 빌드 플레이어에서 돌려(`player.ps1`) 에디터 없는 프레임 시간과 게임이 그린 실제 화면을 에디터 샷과 비교(다르면 원인이 게임 쪽인지 캡처 쪽인지, 플레이어 빌드만 실패하는 컴파일 에러의 줄까지) |
 | 4. 에셋 없이 완성도 | 절차적 메시(SDF → 서피스 네트, 스플라인 튜브, 바위)·포아송 스캐터·노이즈, GPU 텍스처 베이크(`ctx.BakeTexture`: HLSL이 C# 노이즈와 같은 무늬, 입력이 같으면 건너뜀), URP 데칼·디테일 맵, 코드로 만든 URP 후처리, 게임 시간으로 구름이 흐르는 하늘(`ctx.Sky`), 라이팅 베이크 없는 스카이 반사·앰비언트와 빌드가 끝난 뒤 그 자리에서 씬을 찍는 반사 프로브(`ctx.ReflectionProbe`, mip은 GGX로 거름), 키워드를 알아서 맞추는 `LitMaterial`, 설정 한 벌로 만드는 결정적 파티클(`ctx.Particles`), 키를 코드로 쓰는 애니메이션 클립을 Playables로 재생(`ctx.AnimationClip` + `ClipPlayer`, 틀린 경로·속성은 빌드 경고) |
 | 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 worktree + 트랜잭션 submit / land, worktree마다 따로 도는 창 없는 에디터(`open.ps1 -Own`, 루프가 서로 기다리지 않음), 기계가 지키는 공유 이벤트 폴더(모듈별 파일·같은 이름 금지·올라간 타입 불변 — 어기면 submit/land가 복사·병합 전에 거부), 여러 모듈의 설정 스텝이 같이 쓰는 ProjectSettings 파일은 land가 병합된 코드로 다시 써서 커밋(병합 순서 무관) |
 
@@ -103,13 +103,19 @@ powershell -ExecutionPolicy Bypass -File tools/player.ps1 -NoBuild        # 시�
 - 기존 프로젝트에서도: BagelGame(URP, MSAA 2x) 플레이어 ~730 fps vs 에디터 ~134 fps(×5.4), 실제 화면 = 캡처 3/3. 이 비교로 캡처가 MSAA도 끄고 찍던 것을
   찾아 고쳤습니다. **Fluid-Sim은 에디터 루프는 녹색인데 플레이어에서 입자가 회색**이었습니다 — 색 그라디언트 텍스처를 에디터 전용 `OnValidate`에서만 만들기
   때문(게임 쪽 버그)이고, `player.ps1`이 에디터 샷과 14% 다름·2색 화면으로 잡았습니다.
+- 비공개 사내 모바일 게임(uGUI·TextMesh Pro, 세로 720x1280 — 클론을 Windows 타깃으로 바꿔서)에서도 부트 대화상자부터 로비까지 **플레이어 창의 실제 화면 = 같은 프레임
+  캡처**(4장, 바뀐 픽셀 0)입니다. 이 비교로 캡처가 오버레이 캔버스의 TMP 글자를 더 날카롭게 그리던 것(TMP의 SDF 스케일이 캔버스 렌더 모드마다 다름)을 고쳤고,
+  에디터에서는 컴파일되는데 Windows 플레이어 빌드만 실패하는 게임 코드(`Handheld.Vibrate()`가 런타임 검사 안에만)를 report가 파일·줄로 짚게 했습니다.
+  에디터 샷과의 차이(에디터 전용 서버 선택 UI 14%, 실시간 등장 연출 7.7%)는 그 프레임의 실제 화면으로 원인을 가릅니다(`vsEditor.cause`: `game` = 게임이 에디터와
+  플레이어에서 다르게 그림, `capture` = 캡처 경로 문제).
 
 ![Fluid-Sim: 에디터 플레이 모드(왼쪽)와 같은 시나리오의 개발 빌드 플레이어 화면(오른쪽) — 플레이어에서만 입자 색이 빠진다](docs/images/player-fluid.jpg)
 
 - 차이는 보고이지 실패가 아닙니다. 플레이어는 첫 씬의 파티클을 불러오면서 한 스텝 먼저 진행해 두어(Unity 동작) 샘플은 파티클 둘레만 다릅니다.
+  게임이 직접 프레임 상한을 걸면(`targetFrameRate = 60`) fps는 그 상한이라고 알립니다(`fps.note`).
   개발 빌드 플레이어는 최적화 코드라 런타임 에러 줄이 몇 줄 어긋날 수 있습니다(에디터 루프가 정확한 줄, `-Debugging`이면 플레이어도 정확).
 - Pipeline 런타임 서버는 쓰지 않습니다: 플레이어는 명령줄로 받은 시나리오를 혼자 돌고 결과 파일을 씁니다(플레이어에 HTTP 서버·설정 파일 없음).
-  데스크톱(Standalone) 활성 타깃에서만 돕니다(안드로이드 같은 타깃이면 전환하지 않고 알림). 개발 빌드라 처음 한 번 Windows 방화벽이 네트워크 허용을
+  데스크톱(Standalone) 활성 타깃에서만 돕니다(안드로이드 같은 타깃이면 전환하지 않고 알림 — 전환은 클론에서 `-buildTarget Win64`로, ROADMAP W16). 개발 빌드라 처음 한 번 Windows 방화벽이 네트워크 허용을
   묻습니다(프로파일러 연결; 허용·취소 모두 실행과 무관).
 
 ## 기존 프로젝트에 붙이기
@@ -154,7 +160,8 @@ powershell -ExecutionPolicy Bypass -File tools/uninstall.ps1   # 설치가 더�
   출시 빌드의 `Managed/` DLL 목록이 하네스 없는 대조 빌드와 같음 → 제거 후 `git status` 깨끗. 절차 전체는 `tools/attach-test.ps1` 한 번(30–49 s,
   `-Player`면 개발 빌드 플레이어 실행까지 — BagelGame 87 s).
   그리고 비공개 사내 모바일 게임 1개(URP, Addressables, 씬 22개, asmdef 35개, C# 4,400개, 부트 → 로그인 → 타이틀 → 로비): 설치 → 루프 3회 녹색 →
-  제거 후 `git status` 깨끗(로비까지 도는 시나리오로 135 s). Fluid-Sim은 `HarnessInput`으로 구 Input Manager 입력(스페이스 일시정지, 마우스 궤도)까지.
+  제거 후 `git status` 깨끗(로비까지 도는 시나리오로 135 s). Windows 타깃으로 바꾼 그 클론에서는 개발 빌드 플레이어(실제 화면 = 캡처)와 출시 빌드
+  (`Harness.*` 없음)까지 `attach-test.ps1 -Player` 한 번 녹색(202 s). Fluid-Sim은 `HarnessInput`으로 구 Input Manager 입력(스페이스 일시정지, 마우스 궤도)까지.
 
 | BagelGame (URP) 메인 메뉴 | Fluid-Sim (Built-in) 입자 시뮬레이션 |
 |---|---|
