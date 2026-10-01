@@ -1090,7 +1090,11 @@ function Invoke-HarnessLoop {
         $Timings['hotSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
         if ($h.success -and $h.result.ok -and $h.result.hot) {
             $hotApplied = $true
-            $report['hot'] = [ordered]@{ applied = $true; reloaded = @($h.result.applied | ForEach-Object { [ordered]@{ file = $_.file; methods = @($_.methods); ms = $_.reloadMs } }) }
+            $report['hot'] = [ordered]@{ applied = $true; reloaded = @($h.result.applied | ForEach-Object {
+                $e = [ordered]@{ file = $_.file; methods = @($_.methods); ms = $_.reloadMs }
+                # G2-5: methods added since the compile, compiled by the Pipeline with the reloaded bodies that call them
+                if ($_.PSObject.Properties['newMethods'] -and @($_.newMethods).Count) { $e['newMethods'] = @($_.newMethods) }
+                $e }) }
             if ([int]$h.result.overridesCleared -gt 0) { $report.hot['overridesCleared'] = [int]$h.result.overridesCleared }
         } else {
             $why = if (-not $h.success) { "harness_hot failed: $($h.error)" } elseif (-not $h.result.ok) { $h.result.error } else { $h.result.reason }
@@ -1225,6 +1229,8 @@ function Invoke-HarnessLoop {
     if ($state -and $state.PSObject.Properties.Name -contains 'finishedSeq' -and [int]$state.finishedSeq -gt 0) { $conParams['until'] = [int]$state.finishedSeq }
     $con = Invoke-UnityCommand -Name 'harness_console' -Params $conParams -TimeoutSec 10
     $stats = if ($NoPlay) { $null } else { Invoke-UnityCommand -Name 'harness_stats' -TimeoutSec 10 }
+    # G2-5: what the reloaded methods cost in the interpreter during the play (their calls and time)
+    $calls = if ($hotApplied -and -not $NoPlay -and @($report.hot.reloaded).Count) { Invoke-UnityCommand -Name 'harness_hot' -Params @{ mode = 'calls' } -TimeoutSec 10 }
     $Timings['collectSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
 
     $runtimeErrors = @()
@@ -1283,6 +1289,23 @@ function Invoke-HarnessLoop {
             # batches -1: this Unity has no Render "Batches Count" (6.6)
             $report['render'] = [ordered]@{ batches = $(if ([double]$r.batches -lt 0) { $null } else { [math]::Round($r.batches, 1) }); setPassCalls = [math]::Round($r.setPassCalls, 1); drawCalls = [math]::Round($r.drawCalls, 1); triangles = [math]::Round($r.triangles); vertices = [math]::Round($r.vertices) }
         }
+    }
+    # G2-5: the reloaded methods ran in the interpreter, slower than compiled. Their calls and time during the play, and their
+    # share of a frame at this loop's fps: what separates this fps from a full loop's.
+    if ($calls) {
+        $it = [ordered]@{}
+        if ($calls.success -and $calls.result.ok) {
+            $it['methods'] = @($calls.result.methods | ForEach-Object {
+                [ordered]@{ method = $_.method; calls = [int64]$_.calls; frames = [int]$_.frames; ms = [math]::Round([double]$_.ms, 2)
+                    msPerCall = $(if ([int64]$_.calls -gt 0) { [math]::Round([double]$_.ms / [double]$_.calls, 4) } else { 0 }) } })
+            # Each method's time over the frames it ran in, summed (a Tick runs once a frame).
+            $perFrame = 0.0
+            foreach ($m in @($calls.result.methods)) { if ([int]$m.frames -gt 0) { $perFrame += [double]$m.ms / [double]$m.frames } }
+            $it['msPerFrame'] = [math]::Round($perFrame, 3)
+            if ($report.fps -and [double]$report.fps.avg -gt 0) { $it['frameShare'] = [math]::Round($perFrame * [double]$report.fps.avg / 1000.0, 4) }
+            if ($calls.result.error) { $it['error'] = $calls.result.error }
+        } else { $it['error'] = "harness_hot calls failed: $(if ($calls.success) { $calls.result.error } else { $calls.error })" }
+        $report.hot['interpreted'] = $it
     }
     if ($playResult) {
         $report['play'] = [ordered]@{ success = $playResult.success; error = $playResult.error; probeReady = $playResult.probeReady; readySec = [math]::Round($playResult.readySec, 2); wallSec = [math]::Round($playResult.wallSec, 2); gameSec = [math]::Round($playResult.gameSec, 2); frames = $playResult.frames; modules = @($playResult.modules); failedModules = @($playResult.failedModules); inputEventsApplied = $playResult.inputEventsApplied; events = @($playResult.events | ForEach-Object { [ordered]@{ name = $_.name; count = $_.count } }) }

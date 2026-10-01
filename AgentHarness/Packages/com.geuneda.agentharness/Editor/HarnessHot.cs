@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using Unity.Pipeline.CodeReload;
 using Unity.Pipeline.Commands;
@@ -18,13 +19,19 @@ using UnityPipeline.Microsoft.CodeAnalysis.Text;
 namespace Harness.Editor
 {
     /// <summary>
-    /// Hot loop (loop.ps1 -Hot, G2-1): when the only edits since the last compile are bodies of [CodeReload] methods, apply them
-    /// in place (the Pipeline's interpreter backend: no compile, no domain reload) and play the scenario as usual.
+    /// Hot loop (loop.ps1 -Hot, G2-1, G2-5): when the only edits since the last compile are bodies of [CodeReload] methods and new
+    /// methods they call, apply them in place (the Pipeline's interpreter backend: no compile, no domain reload) and play the
+    /// scenario as usual.
     ///
     /// What was compiled: every full loop snapshots the project's source files right before it compiles ("prepare": size, time,
     /// and the text of each .cs file that has [CodeReload]) and keeps the snapshot when the compile succeeded ("commit"). A hot
-    /// loop compares the files with it: a .cs file whose tokens differ only inside [CodeReload] method bodies is reloadable; any
-    /// other change (fields, signatures, another method, a new or deleted file, a shader, a scene, an asmdef) needs the full loop.
+    /// loop compares the files with it: a .cs file whose tokens differ only inside [CodeReload] method bodies, or by methods added
+    /// to its [CodeReload] class (non-generic, a name the compiled type does not have: the Pipeline compiles them with the reloaded
+    /// bodies), is reloadable; any other change (fields, signatures, the body of a compiled method without [CodeReload], a new or
+    /// deleted file, a shader, a scene, an asmdef) needs the full loop.
+    ///
+    /// The reloaded methods run in the interpreter, slower than compiled: every override is wrapped to count its calls and the time
+    /// in them (mode=calls after the play), so the loop reports what the interpreter cost the frames it measured.
     /// </summary>
     [InitializeOnLoad]
     public static class HarnessHot
@@ -38,6 +45,8 @@ namespace Harness.Editor
         {
             if (AssetDatabase.IsAssetImportWorkerProcess() || (Application.isBatchMode && !HarnessHeadless.IsHeadless)) return;
             if (TypeCache.GetMethodsWithAttribute<CodeReloadAttribute>().Count == 0) return;
+            // The calls of a play: counted from entering it (the overrides were applied in edit mode just before).
+            EditorApplication.playModeStateChanged += s => { if (s == PlayModeStateChange.ExitingEditMode) ResetCalls(); };
             System.Threading.ThreadPool.QueueUserWorkItem(_ =>
             {
                 try
@@ -79,11 +88,13 @@ namespace Harness.Editor
 
         [CliCommand("harness_hot",
             "Hot loop support (loop.ps1 -Hot). mode=apply (default): compare the project's files with the last compiled snapshot; when only " +
-            "[CodeReload] method bodies changed, clear earlier overrides and reload those files through the Pipeline interpreter (no compile, " +
-            "no domain reload) -> {hot:true, applied}; otherwise {hot:false, reason, changes}. mode=check: the same without applying. " +
-            "mode=prepare (before a full loop compiles: clears overrides, snapshots the sources) / commit (after it compiled).",
+            "[CodeReload] method bodies changed (and methods were added to their class), clear earlier overrides and reload those files " +
+            "through the Pipeline interpreter (no compile, no domain reload) -> {hot:true, applied}; otherwise {hot:false, reason, changes}. " +
+            "mode=check: the same without applying. mode=calls: the reloaded methods' calls and time since entering play mode " +
+            "{methods:[{method, calls, frames, ms}]}. mode=prepare (before a full loop compiles: clears overrides, snapshots the sources) / " +
+            "commit (after it compiled).",
             Tags = new[] { "harness", "scripts/codereload" })]
-        public static object Hot([CliArg("mode", "apply | check | prepare | commit")] string mode = "apply")
+        public static object Hot([CliArg("mode", "apply | check | calls | prepare | commit")] string mode = "apply")
         {
             var sw = Stopwatch.StartNew();
             mode = (mode ?? "apply").Trim().ToLowerInvariant();
@@ -108,8 +119,10 @@ namespace Harness.Editor
                 case "check":
                 case "apply":
                     return Apply(mode == "apply", sw);
+                case "calls":
+                    return Calls();
                 default:
-                    return new { ok = false, error = $"unknown mode '{mode}' (apply | check | prepare | commit)" };
+                    return new { ok = false, error = $"unknown mode '{mode}' (apply | check | calls | prepare | commit)" };
             }
         }
 
@@ -136,7 +149,7 @@ namespace Harness.Editor
             var now = Scan();
             var before = compiled.files.ToDictionary(f => f.path, StringComparer.Ordinal);
             var changes = new List<object>();
-            var reload = new List<(string path, List<string> methods)>();
+            var reload = new List<(string path, List<string> methods, List<string> added)>();
             var blocking = new List<string>();
             foreach (var f in now.Values.OrderBy(f => f.path, StringComparer.Ordinal))
             {
@@ -157,9 +170,10 @@ namespace Harness.Editor
                     changes.Add(new { file = f.path, kind = "context", line = diff.line, reason = diff.reason });
                     continue;
                 }
-                if (diff.methods.Count == 0) continue;   // whitespace or comments
-                reload.Add((f.path, diff.methods));
-                changes.Add(new { file = f.path, kind = "body", methods = diff.methods });
+                if (diff.methods.Count == 0 && diff.added.Count == 0) continue;   // whitespace or comments
+                // New methods alone (nothing reloaded calls them yet) run nowhere until a reloaded body or the next compile does.
+                if (diff.methods.Count > 0) reload.Add((f.path, diff.methods, diff.added));
+                changes.Add(new { file = f.path, kind = "body", methods = diff.methods, newMethods = diff.added });
             }
             foreach (var old in compiled.files)
                 if (!now.ContainsKey(old.path)) { blocking.Add("deleted " + old.path); changes.Add(new { file = old.path, kind = "deleted" }); }
@@ -171,7 +185,7 @@ namespace Harness.Editor
             // Earlier hot loops' overrides first: a method edited back to what was compiled must run compiled again.
             var cleared = ClearOverrides();
             var applied = new List<object>();
-            foreach (var (path, methods) in reload)
+            foreach (var (path, methods, added) in reload)
             {
                 var r = Reload(path);
                 if (!r.ok || methods.Any(m => !r.registered.Contains(m)))
@@ -183,27 +197,33 @@ namespace Harness.Editor
                         : "not applied: " + string.Join(", ", missing) + (r.diagnostics.Count > 0 ? " - " + string.Join("; ", r.diagnostics.Take(5)) : "");
                     return new { ok = true, hot = false, reason = path + ": the Pipeline interpreter could not reload it: " + why, changes, overridesCleared = cleared, ms = Ms(sw) };
                 }
-                applied.Add(new { file = path, methods, reloadMs = r.ms, diagnostics = r.diagnostics });
+                applied.Add(new { file = path, methods, newMethods = added, reloadMs = r.ms, diagnostics = r.diagnostics });
             }
-            return new { ok = true, hot = true, changes, applied, overridesCleared = cleared, ms = Ms(sw) };
+            Instrument();
+            return new { ok = true, hot = true, changes, applied, overridesCleared = cleared, callsError = s_CallsError, ms = Ms(sw) };
         }
 
         /// <summary>
         /// Tokens of <paramref name="after"/> against <paramref name="before"/> (trivia - whitespace, comments, inactive #if code - left out):
-        /// the [CodeReload] methods whose bodies differ, or why the change is not a body-only one (and its line).
+        /// the [CodeReload] methods whose bodies differ and the methods added to the file's [CodeReload] class ("Type.Method"), or why the
+        /// change is not one the hot loop takes (and its line).
         /// </summary>
-        static (List<string> methods, string reason, int line) Diff(string path, string before, string after)
+        static (List<string> methods, List<string> added, string reason, int line) Diff(string path, string before, string after)
         {
             var options = new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.None, SourceCodeKind.Regular, Defines(path));
-            var a = CSharpSyntaxTree.ParseText(before, options, path);
-            var b = CSharpSyntaxTree.ParseText(after, options, path);
+            var a = CSharpSyntaxTree.ParseText(before, options, path).GetRoot();
+            var b = CSharpSyntaxTree.ParseText(after, options, path).GetRoot();
             var error = b.GetDiagnostics().FirstOrDefault(d => d.Severity == DiagnosticSeverity.Error);
-            if (error != null) return (null, "syntax error: " + error.GetMessage(), error.Location.GetLineSpan().StartLinePosition.Line + 1);
+            if (error != null) return (null, null, "syntax error: " + error.GetMessage(), error.Location.GetLineSpan().StartLinePosition.Line + 1);
 
-            var ma = Tagged(a.GetRoot());
-            var mb = Tagged(b.GetRoot());
-            var ca = Context(a.GetRoot(), ma.Values.Select(m => m.body.FullSpan));
-            var cb = Context(b.GetRoot(), mb.Values.Select(m => m.body.FullSpan));
+            var ma = Tagged(a);
+            var mb = Tagged(b);
+            // Methods whose name the compiled text does not declare in that type: left out of the comparison, then checked
+            // against what the Pipeline compiles with reloaded bodies (below). An overload of a compiled method is not new.
+            var declared = new HashSet<string>(a.DescendantNodes().OfType<MethodDeclarationSyntax>().Select(MethodKey), StringComparer.Ordinal);
+            var added = b.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(m => !declared.Contains(MethodKey(m))).ToList();
+            var ca = Context(a, ma.Values.Select(m => m.body.FullSpan));
+            var cb = Context(b, mb.Values.Where(m => !added.Contains(m.method)).Select(m => m.body.FullSpan).Concat(added.Select(m => m.FullSpan)));
             var n = Math.Min(ca.Count, cb.Count);
             for (var i = 0; i <= n; i++)
             {
@@ -211,12 +231,102 @@ namespace Harness.Editor
                 if (i == n && ca.Count == cb.Count) break;
                 var at = i < cb.Count ? cb[i] : cb.Count > 0 ? cb[cb.Count - 1] : default;
                 var line = at.RawKind == 0 ? 0 : at.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-                return (null, $"changed outside [{Tag}] method bodies (line {line}): needs a compile", line);
+                var what = at.RawKind == 0 ? null : What(at, a);
+                return (null, null, $"changed outside [{Tag}] method bodies (line {line}): {(what != null ? what + " - " : "")}needs a compile", line);
+            }
+            foreach (var m in added)
+            {
+                var why = NotAddable(path, m, a, b);
+                if (why != null) return (null, null, why, Line(m.Identifier));
             }
             var methods = new List<string>();
             foreach (var kv in mb)
-                if (!ma.TryGetValue(kv.Key, out var old) || Tokens(old.body) != Tokens(kv.Value.body)) methods.Add(kv.Key);
-            return (methods, null, 0);
+                if (ma.TryGetValue(kv.Key, out var old) && Tokens(old.body) != Tokens(kv.Value.body)) methods.Add(kv.Key);
+            return (methods, added.Select(m => ((TypeDeclarationSyntax)m.Parent).Identifier.Text + "." + m.Identifier.Text).ToList(), null, 0);
+        }
+
+        static int Line(SyntaxToken t) => t.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+
+        /// <summary>A method by its type (the chain of type names) and name.</summary>
+        static string MethodKey(MethodDeclarationSyntax m) =>
+            string.Join(".", m.Ancestors().OfType<TypeDeclarationSyntax>().Reverse().Select(t => t.Identifier.Text)) + "." + m.Identifier.Text;
+
+        /// <summary>
+        /// Why the Pipeline would not compile <paramref name="m"/>, a method the compiled type does not have, with the reloaded bodies
+        /// (null: it does). It co-emits the non-generic methods of the one class it reloads per file - the first top-level class with a
+        /// [CodeReload] method (InPlaceReloadProcessor) - whose name that class does not have compiled (SourceCodeTransformer); a call
+        /// to any other new method would bind to a member the running code does not have.
+        /// </summary>
+        static string NotAddable(string path, MethodDeclarationSyntax m, SyntaxNode before, SyntaxNode after)
+        {
+            var name = $"new method {m.Identifier.Text}{m.TypeParameterList} (line {Line(m.Identifier)})";
+            var host = after.DescendantNodes().OfType<ClassDeclarationSyntax>()
+                .FirstOrDefault(c => c.DescendantNodes().OfType<MethodDeclarationSyntax>().Any(x => x.AttributeLists.SelectMany(l => l.Attributes).Any(IsTag)));
+            if (host == null || m.Parent != host || host.Parent is TypeDeclarationSyntax)
+                return $"{name} is not in {(host == null ? "a [CodeReload] class" : host.Identifier.Text)}, the class the Pipeline reloads in this file: needs a compile";
+            if (m.TypeParameterList != null) return $"{name} is generic: the Pipeline interpreter takes non-generic new methods only - needs a compile";
+            if (m.Body == null && m.ExpressionBody == null) return $"{name} has no body: needs a compile";
+            if (CompiledHas(path, host, before, m.Identifier.Text))
+                return $"{name} has the name of a member {host.Identifier.Text} has compiled: needs a compile";
+            return null;
+        }
+
+        /// <summary>
+        /// Whether the compiled <paramref name="host"/> declares a member named <paramref name="name"/> (all its partial parts: the
+        /// loaded type), or, when that type is not found, its compiled text does.
+        /// </summary>
+        static bool CompiledHas(string path, ClassDeclarationSyntax host, SyntaxNode before, string name)
+        {
+            var ns = string.Join(".", host.Ancestors().OfType<NamespaceDeclarationSyntax>().Reverse().Select(n => n.Name.ToString()));
+            var full = (ns.Length > 0 ? ns + "." : "") + host.Identifier.Text + (host.TypeParameterList != null ? "`" + host.TypeParameterList.Parameters.Count : "");
+            var asm = AssemblyOf(path);
+            var type = asm == null ? null : AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(x => x.GetName().Name == asm)?.GetType(full);
+            if (type != null)
+                return type.GetMember(name, BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static).Length > 0;
+            var old = before.DescendantNodes().OfType<ClassDeclarationSyntax>().FirstOrDefault(c => c.Identifier.Text == host.Identifier.Text);
+            return old != null && old.Members.Any(x => MemberNames(x).Contains(name));
+        }
+
+        static IEnumerable<string> MemberNames(MemberDeclarationSyntax m)
+        {
+            switch (m)
+            {
+                case BaseFieldDeclarationSyntax f: return f.Declaration.Variables.Select(v => v.Identifier.Text);
+                case MethodDeclarationSyntax x: return new[] { x.Identifier.Text };
+                case PropertyDeclarationSyntax x: return new[] { x.Identifier.Text };
+                case EventDeclarationSyntax x: return new[] { x.Identifier.Text };
+                case BaseTypeDeclarationSyntax x: return new[] { x.Identifier.Text };
+                default: return Array.Empty<string>();
+            }
+        }
+
+        /// <summary>
+        /// What a changed token of the edited text belongs to, for the reason of a context change ("field m_Extra", "method Reverse",
+        /// ...); <paramref name="before"/> is the compiled text.
+        /// </summary>
+        static string What(SyntaxToken t, SyntaxNode before)
+        {
+            for (var n = t.Parent; n != null; n = n.Parent)
+            {
+                switch (n)
+                {
+                    case UsingDirectiveSyntax _: return "a using directive";
+                    case MethodDeclarationSyntax m:
+                        if (m.AttributeLists.SelectMany(l => l.Attributes).Any(IsTag)) return $"the declaration of [{Tag}] method {m.Identifier.Text}";
+                        // The same declaration compiled: its body changed. Otherwise an overload or a new signature of a compiled name.
+                        var key = MethodKey(m);
+                        var sig = Tokens(m.ParameterList) + Tokens(m.ReturnType);
+                        return before.DescendantNodes().OfType<MethodDeclarationSyntax>().Any(x => MethodKey(x) == key && Tokens(x.ParameterList) + Tokens(x.ReturnType) == sig)
+                            ? $"method {m.Identifier.Text} (no [{Tag}]: its compiled body runs)"
+                            : $"method {m.Identifier.Text}{m.ParameterList} (an overload or a new signature of a compiled method)";
+                    case BaseFieldDeclarationSyntax f: return $"field {string.Join(", ", f.Declaration.Variables.Select(v => v.Identifier.Text))}";
+                    case PropertyDeclarationSyntax p: return $"property {p.Identifier.Text}";
+                    case EventDeclarationSyntax e: return $"event {e.Identifier.Text}";
+                    case ConstructorDeclarationSyntax _: return "a constructor";
+                    case BaseTypeDeclarationSyntax type: return $"type {type.Identifier.Text}";
+                }
+            }
+            return null;
         }
 
         /// <summary>[CodeReload] methods by the Pipeline's id ("Type.Method") with their body (block or expression body).</summary>
@@ -262,22 +372,103 @@ namespace Harness.Editor
         }
 
         /// <summary>The scripting defines of the assembly that compiles <paramref name="path"/> (so #if regions read as compiled).</summary>
-        static string[] Defines(string path)
+        static string[] Defines(string path) => CompiledBy(path)?.defines ?? Array.Empty<string>();
+
+        static string AssemblyOf(string path) => CompiledBy(path)?.name;
+
+        static UnityEditor.Compilation.Assembly CompiledBy(string path)
         {
             foreach (var asm in HarnessPaths.Assemblies(AssembliesType.Editor))
                 foreach (var f in asm.sourceFiles)
-                    if (string.Equals(f.Replace('\\', '/'), path, StringComparison.OrdinalIgnoreCase)) return asm.defines;
-            return Array.Empty<string>();
+                    if (string.Equals(f.Replace('\\', '/'), path, StringComparison.OrdinalIgnoreCase)) return asm;
+            return null;
         }
 
         // ---- Pipeline --------------------------------------------------------------------------------------------------
 
         static int ClearOverrides()
         {
+            s_Calls.Clear();
+            s_CallsError = null;
             var n = CodeReloadRegistry.GetStats().ActiveOverrideCount;
             if (n > 0) CodeReloadRegistry.ClearAllOverrides();
             return n;
         }
+
+        // ---- Interpreter calls (G2-5) ----------------------------------------------------------------------------------
+
+        sealed class CallStats
+        {
+            public long calls, ticks;
+            public int frames, lastFrame = -1;
+        }
+
+        static readonly Dictionary<string, CallStats> s_Calls = new Dictionary<string, CallStats>(StringComparer.Ordinal);
+        static string s_CallsError;
+
+        /// <summary>
+        /// Wraps the interpreter dispatch of every active override to count its calls, the frames it ran in and the time in it
+        /// (nested new methods included: they run inside it). Pipeline internals (CodeReloadRegistry.m_MethodOverrides,
+        /// MethodOverride.InterpreterInvoke) - without them the loop reports callsError and nothing else changes.
+        /// </summary>
+        static void Instrument()
+        {
+            s_Calls.Clear();
+            s_CallsError = null;
+            try
+            {
+                var field = typeof(CodeReloadRegistry).GetField("m_MethodOverrides", BindingFlags.NonPublic | BindingFlags.Static);
+                if (!(field?.GetValue(null) is IDictionary overrides)) { s_CallsError = "this Pipeline has no CodeReloadRegistry.m_MethodOverrides: calls are not counted"; return; }
+                foreach (var key in overrides.Keys.Cast<object>().ToList())
+                {
+                    var mo = overrides[key];
+                    var dispatch = mo?.GetType().GetProperty("InterpreterInvoke", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (!(dispatch?.GetValue(mo) is Func<object, object[], object> inner))
+                    {
+                        s_CallsError = $"{key}: no interpreter dispatch (MethodOverride.InterpreterInvoke) to count";
+                        continue;
+                    }
+                    var stats = new CallStats();
+                    s_Calls[key.ToString()] = stats;
+                    dispatch.SetValue(mo, (Func<object, object[], object>)((instance, args) => Counted(stats, inner, instance, args)));
+                }
+            }
+            catch (Exception e) { s_CallsError = "counting the calls failed: " + e.GetBaseException().Message; }
+        }
+
+        static object Counted(CallStats s, Func<object, object[], object> inner, object instance, object[] args)
+        {
+            var t0 = Stopwatch.GetTimestamp();
+            try { return inner(instance, args); }
+            finally
+            {
+                System.Threading.Interlocked.Add(ref s.ticks, Stopwatch.GetTimestamp() - t0);
+                System.Threading.Interlocked.Increment(ref s.calls);
+                if (UnityEditorInternal.InternalEditorUtility.CurrentThreadIsMainThread() && Time.frameCount != s.lastFrame)
+                {
+                    s.lastFrame = Time.frameCount;
+                    s.frames++;
+                }
+            }
+        }
+
+        static void ResetCalls()
+        {
+            foreach (var s in s_Calls.Values) { s.calls = 0; s.ticks = 0; s.frames = 0; s.lastFrame = -1; }
+        }
+
+        static object Calls() => new
+        {
+            ok = true,
+            methods = s_Calls.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => new
+            {
+                method = kv.Key,
+                kv.Value.calls,
+                kv.Value.frames,
+                ms = Math.Round(kv.Value.ticks * 1000.0 / Stopwatch.Frequency, 3),
+            }).ToList(),
+            error = s_CallsError,
+        };
 
         /// <summary>
         /// reload_file_editor_interpreter on one file (the interpreter reaches private members; the Assembly.Load backend of

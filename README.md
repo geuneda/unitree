@@ -24,7 +24,7 @@ URP 후처리 + 회전 오브젝트 + 코드로 만든 파티클·애니메이�
 | Three.js 환경의 성질 | 이 하네스의 복원 방법 |
 |---|---|
 | 1. 모든 게 텍스트 | 씬은 `IBuildStep` 빌더 코드가 생성(YAML 직접 수정 금지), URP·Renderer 에셋은 `ISettingsStep` 코드가 생성하고 품질 레벨·레이어·색 공간·Time·Physics 같은 ProjectSettings 값도 같은 코드가 소유(Project Settings 창이나 YAML로 바꾸면 다음 루프가 되돌리며 보고). HLSL `.shader`, UI Toolkit UXML/USS(+ UI 킷: 디자인 변수·판·버튼·게이지·토스트, UXML 데이터 바인딩), 머티리얼·Volume·라이팅·파티클·애니메이션 클립도 코드 |
-| 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 메서드 본문만 고쳤으면 컴파일 없이 바꿔 넣는 핫 루프(`loop.ps1 -Hot`), 모달 대화상자에 멈추지 않는 `-automated` 에디터와 창 없는 에디터(`open.ps1 -Headless`, 한 바퀴 ~2.4 s) |
+| 2. 초 단위 루프 | Domain Reload off, 모듈별 asmdef, 빌드 캐시, 에디터 없는 컴파일 체크, `[CodeReload]` 메서드 본문(과 그 본문이 부르는 새 메서드)만 고쳤으면 컴파일 없이 바꿔 넣는 핫 루프(`loop.ps1 -Hot`), 모달 대화상자에 멈추지 않는 `-automated` 에디터와 창 없는 에디터(`open.ps1 -Headless`, 한 바퀴 ~2.4 s) |
 | 3. 눈으로 검증 | 캡처 PNG(화면의 카메라 스택·미니맵 + 스크린 공간 UI, 파이프라인의 HDR 그대로) + 이미지 통계, 연속 캡처 시트, 기준 이미지와의 diff 점수·바뀐 곳 PNG(시나리오 동안 UI Toolkit transition도 프레임 시계라 UI가 움직이는 중에도 픽셀까지 같음), 컴파일/런타임/셰이더 에러(file·line·module), FPS·batches·tris를 JSON으로. 같은 시나리오를 개발 빌드 플레이어에서 돌려(`player.ps1`) 에디터 없는 프레임 시간과 게임이 그린 실제 화면을 에디터 샷과 비교 |
 | 4. 에셋 없이 완성도 | 절차적 메시(SDF → 서피스 네트, 스플라인 튜브, 바위)·포아송 스캐터·노이즈, GPU 텍스처 베이크(`ctx.BakeTexture`: HLSL이 C# 노이즈와 같은 무늬, 입력이 같으면 건너뜀), URP 데칼·디테일 맵, 코드로 만든 URP 후처리, 라이팅 베이크 없는 스카이 반사·앰비언트, 키워드를 알아서 맞추는 `LitMaterial`, 설정 한 벌로 만드는 결정적 파티클(`ctx.Particles`), 키를 코드로 쓰는 애니메이션 클립을 Playables로 재생(`ctx.AnimationClip` + `ClipPlayer`, 틀린 경로·속성은 빌드 경고) |
 | 5. 병렬 작업 | `GameRoot.Register(IGameModule)` + `EventBus`, 모듈 폴더 격리, 에디터 조작 뮤텍스, 에이전트별 worktree + 트랜잭션 submit / land, worktree마다 따로 도는 창 없는 에디터(`open.ps1 -Own`, 루프가 서로 기다리지 않음), 기계가 지키는 공유 이벤트 폴더(모듈별 파일·같은 이름 금지·올라간 타입 불변 — 어기면 submit/land가 복사·병합 전에 거부) |
@@ -33,7 +33,7 @@ URP 후처리 + 회전 오브젝트 + 코드로 만든 파티클·애니메이�
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/loop.ps1
-powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -Hot   # [CodeReload] 메서드 본문만 고쳤을 때 (아래)
+powershell -ExecutionPolicy Bypass -File tools/loop.ps1 -Hot   # [CodeReload] 메서드 본문(+ 새 헬퍼 메서드)만 고쳤을 때 (아래)
 ```
 
 recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 → 셰이더 검사 → 플레이 모드 시나리오(입력 재생 + 3컷) →
@@ -52,7 +52,8 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 ```
 
 실패하면 `stage`(compile / build / shader / play / runtime / lint / shots)와 함께 `{"file","line","msg","module"}`가 나옵니다.
-샷은 커밋된 기준 이미지(`golden/<Unity 버전>/<시나리오>/`)와 비교됩니다. 같은 머신·같은 에디터 모드면 픽셀까지 같아서, 셰이더 한 줄(스펙큘러 절반)도
+샷은 커밋된 기준 이미지(`golden/<Unity 버전>/<시나리오>/`)와 비교됩니다. 같은 머신·같은 에디터 모드면 픽셀까지 같아서(받침대 모서리의 픽셀 몇 개만 실행마다
+두 값 중 하나 — ROADMAP G3-15, 허용치 안), 셰이더 한 줄(스펙큘러 절반)도
 `changed` + 바뀐 곳을 칠한 diff PNG로 드러납니다(실패로 치지는 않음). 의도한 변경이면 `loop.ps1 -UpdateGolden`으로 갱신합니다.
 
 | 상황 (측정) | 창 에디터 | 창 없는 에디터 (`open.ps1 -Headless`) |
@@ -60,18 +61,20 @@ recompile → (C# 컴파일 에러면 즉시 중단) → lint → 씬 빌드 →
 | 코드 변경 없음 | ~3.9–4.3 s | **~2.4 s** |
 | 셰이더만 수정 | ~4.1 s | ~2.6 s |
 | 모듈 C# 1줄 수정 | ~9.5 s (Unity 컴파일 ~0.4 s + 도메인 리로드 ~2.7 s + 리로드 뒤 에디터 자체 작업 ~0.9 s 포함) | ~7.0 s (리로드 ~2.1 s, 리로드 뒤 작업 없음) |
-| 같은 수정이 `[CodeReload] Tick` 본문 안이면 `loop.ps1 -Hot` | **~3.3 s** | **~2.1 s** |
+| 같은 수정이 `[CodeReload] Tick` 본문 안이면 `loop.ps1 -Hot` (본문이 부르는 새 헬퍼 메서드를 더해도 같음) | **~3.4 s** | **~2.1 s** |
 | C# 컴파일 에러 보고 | ~1.1 s | — |
 
-C# 수정 행은 W7 측정값입니다. 2026-09-30 이 머신에서는 도메인 리로드 뒤 Pipeline의 새 토큰이 ~14 s 늦게 보여 같은 루프가 ~24 s인 경우가 있었습니다(하네스 코드와 무관, ROADMAP O-12).
+C# 수정 행은 W7, `-Hot` 창 에디터는 W12(2026-10-01) 측정값입니다. 2026-09-30 이 머신에서는 도메인 리로드 뒤 Pipeline의 새 토큰이 ~14 s 늦게 보여 같은 루프가 ~24 s인 경우가 있었습니다(하네스 코드와 무관, ROADMAP O-12).
 
 창 없는 에디터는 GPU로 렌더하고 캡처·기준 이미지·이벤트가 창 에디터와 같습니다(디더링 한 단계 차이, 허용치 안). Game 뷰가 없어서 플레이 동안
 아무것도 그리지 않으니 빠르고, 대신 `"screen"` 캡처와 batches 같은 렌더 통계가 없습니다.
 
-`-Hot`은 마지막 전체 루프가 컴파일한 소스와 Roslyn 토큰으로 비교해, 바뀐 것이 `[CodeReload]` 메서드 본문뿐이면 Unity Pipeline 패키지의 인터프리터로
-그 본문만 바꿔 넣고(컴파일·도메인 리로드·씬 빌드 없음) 같은 시나리오를 처음부터 돕니다 — 이벤트 수·기준 이미지 비교가 전체 루프와 그대로 맞고, 같은 코드면
-픽셀까지 같습니다. 필드·시그니처·새 파일·에셋이 바뀌었거나 인터프리터가 못 돌리는 구문이거나 바꾼 본문이 예외를 던지면 알아서 전체 루프를 돌고
-이유(`hot.fallback`, 필요하면 그 줄)를 남깁니다.
+`-Hot`은 마지막 전체 루프가 컴파일한 소스와 Roslyn 토큰으로 비교해, 바뀐 것이 `[CodeReload]` 메서드 본문과 그 본문이 부르는 새 메서드(컴파일된 타입에 없는
+이름의 비제네릭 메서드 — 인스턴스·static)뿐이면 Unity Pipeline 패키지의 인터프리터로 바꿔 넣고(컴파일·도메인 리로드·씬 빌드 없음) 같은 시나리오를 처음부터
+돕니다 — 이벤트 수·기준 이미지 비교가 전체 루프와 그대로 맞고, 같은 코드면 픽셀까지 같습니다. 필드·시그니처·오버로드·표식 없는 메서드의 본문·새 파일·에셋이
+바뀌었거나 인터프리터가 못 돌리는 구문이거나 바꾼 본문이 예외를 던지면 알아서 전체 루프를 돌고 이유(`hot.fallback` — 그 줄과 무엇인지, 예: `field m_Extra`)를
+남깁니다. 인터프리터로 돈 메서드의 호출 수·시간은 `hot.interpreted`에 나옵니다(샘플 Tick은 프레임당 ~0.06 ms, 프레임의 ~0.8% — 핫 루프의 fps는 전체 루프와
+구분되지 않습니다).
 
 ## 플레이어에서 돌리기 (`tools/player.ps1`)
 
@@ -335,7 +338,7 @@ AgentHarness/                              샘플 프로젝트 (하네스 패키
 ## 에이전트와 함께 쓰기
 
 `AgentHarness/CLAUDE.md`에 루프 사용법, report.json 해석, 규칙(YAML 직접 수정 금지, 텍스트 우선 형태, 모듈 폴더 밖 수정 금지,
-에디터 조작은 순서대로), 모듈·빌더 템플릿(`[CodeReload] Tick` 포함 — 본문만 고치면 `loop.ps1 -Hot`), 렌더·프로젝트 설정 스텝, 머티리얼·파티클·애니메이션·UI 킷·GPU 베이크·절차적 메시 헬퍼, 개발 빌드 플레이어 실행(`player.ps1` — 실제 성능·실제 화면), 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
+에디터 조작은 순서대로), 모듈·빌더 템플릿(`[CodeReload] Tick` 포함 — 본문(과 거기서 부르는 새 메서드)만 고치면 `loop.ps1 -Hot`), 렌더·프로젝트 설정 스텝, 머티리얼·파티클·애니메이션·UI 킷·GPU 베이크·절차적 메시 헬퍼, 개발 빌드 플레이어 실행(`player.ps1` — 실제 성능·실제 화면), 겪은 함정이 정리돼 있습니다. 하네스 자체를 개선할 때는 `docs/ROADMAP.md`의 "작업 순서"에서 다음 워크플로우를 고르세요.
 병렬 에이전트는 위의 worktree + `submit.ps1` + `land.ps1` 흐름을 쓰고(G5-2, G5-5), 루프를 나란히 돌리려면 worktree마다 `open.ps1 -Own`(G5-1)입니다.
 모듈 사이의 공유 이벤트는 모듈별 `<모듈>Events.cs`에 덧붙이기만 합니다(G5-4 — 이름·타입·소유를 submit/land가 지킴).
 

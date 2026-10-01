@@ -44,9 +44,12 @@
     tree as it was
   2 C# compile error in Smoke -> stage=compile at the injected file/line, module Smoke; reverted -> green
   3 runtime exception in Smoke -> stage=runtime at the injected line; reverted -> green. Hot loop (G2-1): an edit of the
-    [CodeReload] Tick body -> loop.ps1 -Hot reloads it (no compile, build or domain reload), same events, golden changed;
-    reverted -> the override cleared, golden same; a new field -> the full loop (the fallback names its line); a reloaded
-    Tick that throws -> the full loop, stage=runtime at the injected line
+    [CodeReload] Tick body -> loop.ps1 -Hot reloads it (no compile, build or domain reload), same events, golden changed,
+    the interpreted Tick's calls and time reported (G2-5); the same change through new methods the Tick calls (instance,
+    static) -> still hot, the shots are the inline edit's; harness_hot check: a generic new method and an overload of a
+    compiled method are not hot (named at their line), a new method nothing calls is; reverted -> the override cleared,
+    golden same; a new field -> the full loop (the fallback names its line and the field); a reloaded Tick that throws ->
+    the full loop, stage=runtime at the injected line
   4 HLSL error in the Smoke shader -> stage=shader at the injected line, again in the next loop (no reimport);
     reverted -> green (and the golden images of item 4). A one-line shader change (specular halved) -> golden
     "changed" with a diff image, loop green. A material the pipeline cannot draw (Standard in URP, G3-5) -> magenta
@@ -136,6 +139,10 @@ $HotMarker = 'Mathf.Sin(m_Time * 1.6f) * 0.3f'   # in the [CodeReload] Tick: the
 $HotChanged = 'Mathf.Sin(m_Time * 1.6f) * 1.2f'
 $HotFieldMarker = 'float m_Time;'
 $HotFieldAdded = 'float m_Time; float m_SelftestField;'   # outside the method bodies: needs a compile
+# G2-5: the same bob through new methods the Tick calls (an instance one reading a private field, a static one), added before Reverse
+$HotHelperCall = 'SelftestBob(1.2f)'
+$HotHelperAnchor = 'void Reverse()'
+$HotHelperAdded = 'float SelftestBob(float height) { return SelftestWave(m_Time) * height; } static float SelftestWave(float t) => Mathf.Sin(t * 1.6f); void Reverse()'
 
 $report = [ordered]@{ ok = $false; stage = ''; project = $root.Replace('\', '/'); projectVersion = (Get-HarnessProjectVersion); unityVersion = $null
     items = @(); fingerprint = $null; events = $null; lines = [ordered]@{}; shots = @() }
@@ -336,6 +343,24 @@ function Invoke-GoldenCommand([hashtable]$Params) {
     [void](Enter-HarnessLock)
     try { $r = Invoke-UnityCommand -Name 'harness_golden' -Params $Params -TimeoutSec 120 } finally { Exit-HarnessLock }
     if (-not $r.success) { throw "harness_golden failed: $($r.error)" }
+    $r.result
+}
+
+# harness_compare under the Editor lock: two loops' shots of the same names, pair by pair.
+function Invoke-CompareShots($Shots, $Against, [string]$Out) {
+    $by = @{}; foreach ($p in @($Against)) { $by[[IO.Path]::GetFileName($p)] = $p }
+    $pairs = @(@($Shots) | ForEach-Object { [ordered]@{ name = [IO.Path]::GetFileNameWithoutExtension($_); path = $_; against = $by[[IO.Path]::GetFileName($_)] } })
+    [void](Enter-HarnessLock)
+    try { $r = Invoke-UnityCommand -Name 'harness_compare' -Params @{ pairs = (ConvertTo-Json -InputObject $pairs -Depth 4 -Compress); out = $Out } -TimeoutSec 120 } finally { Exit-HarnessLock }
+    if (-not $r.success) { throw "harness_compare failed: $($r.error)" }
+    $r.result
+}
+
+# harness_hot check (judges the edited sources against the last compile, applies and compiles nothing) under the Editor lock.
+function Invoke-HotCheck {
+    [void](Enter-HarnessLock)
+    try { $r = Invoke-UnityCommand -Name 'harness_hot' -Params @{ mode = 'check' } -TimeoutSec 60 } finally { Exit-HarnessLock }
+    if (-not $r.success) { throw "harness_hot check failed: $($r.error)" }
     $r.result
 }
 
@@ -1774,15 +1799,53 @@ function Invoke-Item3 {
     Test-Check 'hot: the Tick body reloaded, no compile, no build' ([bool]$r.ok -and [bool]$r.hot.applied -and ($reloaded -join ',') -eq 'SmokeModule.Tick' -and -not $r.timings.compileSec -and [bool]$r.build.skipped) "$(Get-Summary $r) hot=$($r.hot | ConvertTo-Json -Compress -Depth 5)"
     $moved = @(Get-Golden $r | Where-Object { $_ -like '*:changed' })
     Test-Check 'hot: same play.events, the knot bobs higher (golden changed), no domain reload' ((Get-Events $r) -eq (Get-Events $base) -and $moved.Count -gt 0 -and (& $reloads) -eq $reloads0) "events=$(Get-Events $r) golden=[$((Get-Golden $r) -join ',')] domainReloads $reloads0 -> $(& $reloads)"
-    $state.item['hot'] = [ordered]@{ sec = $r.durationSec; hotSec = $r.timings.hotSec; playSec = $r.timings.playSec; fullSec = $base.durationSec }
+    # G2-5: the reloaded Tick ran in the interpreter: its calls (every frame of the play, more than the measured ones) and time.
+    $it = $r.hot.interpreted
+    $tick = @($it.methods | Where-Object { $_.method -eq 'SmokeModule.Tick' })
+    Test-Check 'hot: the interpreted Tick''s calls and time reported (G2-5)' ($tick.Count -eq 1 -and [int64]$tick[0].calls -ge [int]$r.play.frames -and [int]$tick[0].frames -gt 0 -and [double]$tick[0].ms -gt 0 -and [double]$it.msPerFrame -gt 0 -and [double]$it.frameShare -gt 0 -and -not $it.error) "frames=$($r.play.frames) interpreted=$($it | ConvertTo-Json -Compress -Depth 4)"
+    $state.item['hot'] = [ordered]@{ sec = $r.durationSec; hotSec = $r.timings.hotSec; playSec = $r.timings.playSec; fullSec = $base.durationSec; fps = $r.fps.avg; fullFps = $base.fps.avg
+        interpretedMsPerFrame = $it.msPerFrame; frameShare = $it.frameShare }
+    $inlineShots = @($r.shots)
+    # G2-5: the same change through new methods the Tick calls (an instance one reading a private field, a static one, both
+    # without [CodeReload]): still hot - the Pipeline compiles them with the reloaded Tick - and the shots are the inline edit's.
+    Restore-EditorFiles
+    Protect-EditorFile $SmokeCs
+    $report.lines['hotHelper'] = Edit-Line (Get-Abs $root $SmokeCs) $HotMarker $HotHelperCall
+    [void](Edit-Line (Get-Abs $root $SmokeCs) $HotHelperAnchor $HotHelperAdded)
+    $r = Invoke-Loop '3-hot-helper' @('-Hot', '-Golden', $hg)
+    $reloaded = @($r.hot.reloaded | ForEach-Object { @($_.methods) })
+    $added = @($r.hot.reloaded | ForEach-Object { @($_.newMethods) })
+    Test-Check 'hot: a Tick calling new methods (instance, static) reloaded with them, no compile, no build (G2-5)' ([bool]$r.ok -and [bool]$r.hot.applied -and ($reloaded -join ',') -eq 'SmokeModule.Tick' -and ($added -join ',') -eq 'SmokeModule.SelftestBob,SmokeModule.SelftestWave' -and -not $r.timings.compileSec -and [bool]$r.build.skipped -and (& $reloads) -eq $reloads0) "$(Get-Summary $r) hot=$($r.hot | ConvertTo-Json -Compress -Depth 5)"
+    $cmp = Invoke-CompareShots @($r.shots) $inlineShots (Join-Path $outAbs 'hot-helper-vs-inline')
+    $cmpDetail = @($cmp.results | ForEach-Object { "$($_.name) $($_.status) mean=$($_.meanDiff) max=$($_.maxDiff)" }) -join ' | '
+    Test-Check 'hot: its shots are the inline edit''s, same events' ([int]$cmp.same -eq $inlineShots.Count -and $inlineShots.Count -gt 0 -and [int]$cmp.changed -eq 0 -and (Get-Events $r) -eq (Get-Events $base)) "$cmpDetail events=$(Get-Events $r)"
+    $state.item['hotHelper'] = [ordered]@{ sec = $r.durationSec; vsInline = $cmpDetail; interpreted = $(if ($r.hot.interpreted) { $r.hot.interpreted.msPerFrame }) }
+    Restore-EditorFiles
+    # What the hot loop does not take, judged without a loop (harness_hot check compiles nothing): a generic new method (the Pipeline
+    # takes non-generic ones) and an overload of a compiled method (calls bind to the compiled one). A new method nothing calls yet is fine.
+    Protect-EditorFile $SmokeCs
+    $line = Edit-Line (Get-Abs $root $SmokeCs) $HotHelperAnchor 'T SelftestPick<T>(T v) => v; void Reverse()'
+    $c = Invoke-HotCheck
+    Test-Check "hot check: a generic new method -> not hot, named at line $line" (-not $c.hot -and "$($c.reason)" -like "*SelftestPick<T> (line $line) is generic*") "$($c.reason)"
+    Restore-EditorFiles
+    Protect-EditorFile $SmokeCs
+    $line = Edit-Line (Get-Abs $root $SmokeCs) $HotHelperAnchor 'void Reverse(int selftest) { } void Reverse()'
+    $c = Invoke-HotCheck
+    Test-Check "hot check: an overload of a compiled method -> not hot, at line $line" (-not $c.hot -and "$($c.reason)" -like "*(line $line): method Reverse(int selftest) (an overload*") "$($c.reason)"
+    Restore-EditorFiles
+    Protect-EditorFile $SmokeCs
+    [void](Edit-Line (Get-Abs $root $SmokeCs) $HotHelperAnchor 'int SelftestUnused(int x) => x * 2; void Reverse()')
+    $c = Invoke-HotCheck
+    $ch = @($c.changes)
+    Test-Check 'hot check: a new method nothing calls -> hot, nothing to reload' ([bool]$c.hot -and $ch.Count -eq 1 -and @($ch[0].methods).Count -eq 0 -and (@($ch[0].newMethods) -join ',') -eq 'SmokeModule.SelftestUnused') "hot=$($c.hot) $($c.reason) changes=$($ch | ConvertTo-Json -Compress -Depth 4)"
     Restore-EditorFiles
     $r = Invoke-Loop '3-hot-revert' @('-Hot', '-Golden', $hg)
     $notSame = @(Get-Golden $r | Where-Object { $_ -notlike '*:same' })
-    Test-Check 'hot: reverted -> the override cleared, nothing reloaded, goldens same' ([bool]$r.ok -and [bool]$r.hot.applied -and @($r.hot.reloaded).Count -eq 0 -and [int]$r.hot.overridesCleared -eq 1 -and $notSame.Count -eq 0) "$(Get-Summary $r) hot=$($r.hot | ConvertTo-Json -Compress -Depth 5) golden=[$((Get-Golden $r) -join ',')]"
+    Test-Check 'hot: reverted -> the override cleared, nothing reloaded, goldens same' ([bool]$r.ok -and [bool]$r.hot.applied -and @($r.hot.reloaded).Count -eq 0 -and [int]$r.hot.overridesCleared -eq 1 -and -not $r.hot.interpreted -and $notSame.Count -eq 0) "$(Get-Summary $r) hot=$($r.hot | ConvertTo-Json -Compress -Depth 5) golden=[$((Get-Golden $r) -join ',')]"
     Protect-EditorFile $SmokeCs
     $line = Edit-Line (Get-Abs $root $SmokeCs) $HotFieldMarker $HotFieldAdded
     $r = Invoke-Loop '3-hot-field' @('-Hot', '-Golden', $hg)
-    Test-Check "hot: a new field -> the full loop, the fallback names line $line" ([bool]$r.ok -and -not $r.hot.applied -and "$($r.hot.fallback)" -like "*(line $line)*" -and [double]$r.timings.compileSec -gt 0) "$(Get-Summary $r) fallback=$($r.hot.fallback)"
+    Test-Check "hot: a new field -> the full loop, the fallback names line $line and the field" ([bool]$r.ok -and -not $r.hot.applied -and "$($r.hot.fallback)" -like "*(line $line): field m_SelftestField*" -and [double]$r.timings.compileSec -gt 0) "$(Get-Summary $r) fallback=$($r.hot.fallback)"
     Restore-EditorFiles
     [void](Test-GreenAgain '3-hot-field-restored')
     Protect-EditorFile $SmokeCs

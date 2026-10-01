@@ -37,10 +37,12 @@ powershell -ExecutionPolicy Bypass -File tools/quit.ps1   # 끝낼 때: 락을 �
 - `timings.playEnterSec`: 플레이 진입 시간. 이 프로젝트가 Domain Reload를 켜 두었으면 여기에 리로드 시간이 들어간다.
 - 옵션: `-Scenario tools/scenarios/x.json`, `-NoPlay`(편집 모드 캡처만), `-Out HarnessOut/x`, `-UpdateGolden`(녹색일 때 샷을 기준 이미지로),
   `-Hot`(아래).
-- **핫 루프 `tools/loop.ps1 -Hot`**: 마지막 전체 루프가 컴파일한 뒤 바뀐 것이 `[CodeReload]`(`using Unity.Pipeline.CodeReload;`) 메서드의 **본문뿐**이면
-  컴파일·도메인 리로드 없이 그 본문을 Pipeline 인터프리터로 바꿔 넣고 같은 시나리오를 돈다(`report.hot.applied`, 컴파일+리로드만큼 빠름).
-  필드·시그니처·다른 메서드·새 파일·에셋이 바뀌었거나, 인터프리터가 못 돌리는 구문(`try/catch` 등)이거나, 바꾼 본문이 플레이 중 예외를 던지면
-  전체 루프를 돌고 이유를 `hot.fallback`에 적는다(예외는 전체 루프가 정확한 줄로 보고). 조건: Domain Reload가 꺼져 있을 것
+- **핫 루프 `tools/loop.ps1 -Hot`**: 마지막 전체 루프가 컴파일한 뒤 바뀐 것이 `[CodeReload]`(`using Unity.Pipeline.CodeReload;`) 메서드의 **본문**과 그 본문이
+  부르는 **새 메서드**(그 파일의 `[CodeReload]` 클래스에 더한, 컴파일된 타입에 없는 이름의 비제네릭 메서드 — 인스턴스·static)뿐이면 컴파일·도메인 리로드 없이
+  Pipeline 인터프리터로 바꿔 넣고 같은 시나리오를 돈다(`report.hot.applied`, 함께 들어간 새 메서드는 `hot.reloaded[].newMethods`, 컴파일+리로드만큼 빠름).
+  필드·속성·시그니처·표식 없는 기존 메서드의 본문·오버로드·제네릭 새 메서드·새 파일·에셋이 바뀌었거나, 인터프리터가 못 돌리는 구문(`try/catch` 등)이거나, 바꾼 본문이
+  플레이 중 예외를 던지면 전체 루프를 돌고 이유(그 줄과 무엇인지)를 `hot.fallback`에 적는다(예외는 전체 루프가 정확한 줄로 보고). 교체된 메서드는 인터프리터로 돌아
+  느리다 — `hot.interpreted`(호출 수·시간·`msPerFrame`·한 프레임에 대한 비율 `frameShare`)로 핫 루프의 `fps`에서 그 몫을 본다. 조건: Domain Reload가 꺼져 있을 것
   (`harness_setup {"apply":"domainReload"}`), 메서드가 public이고 void·`IEnumerator`일 것, 그 코드의 어셈블리가 `Unity.Pipeline`을 참조할 것
   (`Assembly-CSharp`는 자동, asmdef는 `"Unity.Pipeline"`, `"Unity.Pipeline.Attributes"`를 references에). 바뀐 게 무엇이고 핫으로 되는지만 보려면
   `& ./tools/uc.ps1 harness_hot '{"mode":"check"}'`.
