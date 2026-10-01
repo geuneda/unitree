@@ -79,7 +79,10 @@
     already landed; refusals (uncommitted, missing .meta, conflict, a foreign edit in the Editor tree); a compile error
     land is undone; a land killed after its merge is undone by the next loop; the last land is kept. Contracts (G5-4): a
     branch declaring an event name that landed and one changing a landed type are refused; an event appended to a module's
-    landed file is submitted, landed (a merge) and released. The TagManager.asset submit copied back lands with the module
+    landed file is submitted, landed (a merge) and released. The TagManager.asset submit copied back lands with the module.
+    Two worktrees' layers in one TagManager.asset (G5-6), landed in both orders: the Editor tree ends clean with both
+    committed (the land that leaves no other un-landed submit commits what the settings steps wrote); a hand edit in it is
+    foreign even after a loop saved it; a red land puts back the layer its loop wrote
   Stops at the first red item (-KeepGoing: runs the rest too). Every item puts back what it changed. 6-8 need tools/, the harness package and
   Assets/Game/ committed (the worktrees run the committed code); they create temporary worktrees next to the
   repository, branches selftest/*, and commits, and reset the Editor tree's branch to where it was. A final loop
@@ -327,6 +330,19 @@ function Get-CommittedVersion {
     if ($m.Success) { $m.Groups[1].Value } else { $null }
 }
 function Get-Head([string]$Dir) { (Invoke-HarnessGit $Dir @('rev-parse', 'HEAD') -Check).out.Trim() }
+# A project file as the Editor tree's HEAD has it.
+function Get-CommittedText([string]$Rel) { (Invoke-HarnessGit $root @('show', "HEAD:./$Rel") -Check).out }
+# The named user layers from 10 on of a TagManager.asset's text: "<index>:<name>,...".
+function Get-TagLayers([string]$Text) {
+    $m = [regex]::Match($Text.Replace("`r`n", "`n"), '(?m)^  layers:\n((?:  - .*\n)+)')
+    $names = @([regex]::Matches($m.Groups[1].Value, '(?m)^  - (.*)$') | ForEach-Object { $_.Groups[1].Value.Trim() })
+    (@(for ($i = 10; $i -lt $names.Count; $i++) { if ($names[$i]) { "${i}:$($names[$i])" } }) -join ',')
+}
+# A layer settings step's text ($ProbeSettingsText, $SmokeSettingsText) declaring these layers ("20=Probe", ...) instead.
+function Get-LayerStepText([string]$Text, [string[]]$Layers) {
+    $body = @($Layers | ForEach-Object { $i, $n = $_.Split('='); "ctx.Layer($i, `"$n`");" }) -join ' '
+    [regex]::Replace($Text, '=> ctx\.Layer\([^;]*\);', "{ $body }")
+}
 function Invoke-Git([string]$Dir, [string[]]$Arguments) { [void](Invoke-HarnessGit $Dir $Arguments -Check) }
 
 # A reverted change must leave the Editor tree green again.
@@ -964,7 +980,9 @@ return new System.Collections.Generic.Dictionary<string, object> { { "levels", s
 $ProjectStateText = @'
 UnityEditor.AssetDatabase.Refresh();
 var level = UnityEngine.QualitySettings.GetQualityLevel();
-return new System.Collections.Generic.Dictionary<string, object> { { "levels", string.Join(",", UnityEngine.QualitySettings.names) }, { "level", UnityEngine.QualitySettings.names[level] }, { "vSync", UnityEngine.QualitySettings.vSyncCount }, { "ground", UnityEngine.LayerMask.NameToLayer("Ground") }, { "layer9", UnityEngine.LayerMask.LayerToName(9) }, { "layer10", UnityEngine.LayerMask.LayerToName(10) }, { "layer20", UnityEngine.LayerMask.LayerToName(20) }, { "layer21", UnityEngine.LayerMask.LayerToName(21) } };
+var user = new System.Collections.Generic.List<string>();
+for (var i = 20; i < 26; i++) user.Add(i + ":" + UnityEngine.LayerMask.LayerToName(i));
+return new System.Collections.Generic.Dictionary<string, object> { { "levels", string.Join(",", UnityEngine.QualitySettings.names) }, { "level", UnityEngine.QualitySettings.names[level] }, { "vSync", UnityEngine.QualitySettings.vSyncCount }, { "ground", UnityEngine.LayerMask.NameToLayer("Ground") }, { "layer9", UnityEngine.LayerMask.LayerToName(9) }, { "layer10", UnityEngine.LayerMask.LayerToName(10) }, { "layer20", UnityEngine.LayerMask.LayerToName(20) }, { "layer21", UnityEngine.LayerMask.LayerToName(21) }, { "layers20to25", string.Join(",", user) } };
 '@
 
 # The sky lighting of the built scene (P-4, G4-2) and material setup (G4-3), in edit mode; materials go to a scratch folder.
@@ -2203,7 +2221,7 @@ function Invoke-Item7 {
     $tmRoot = [IO.File]::ReadAllText((Get-Abs $root $TagManager))
     $tmB = [IO.File]::ReadAllText((Get-Abs $B $TagManager))
     $projB = @($rb.build.settings.project.changed)
-    Test-Check 'new module: its settings step''s layer in the Editor tree''s TagManager.asset, copied back to B' ($projB -contains 'Layer[20]: "" -> Probe' -and @($rb.submit.settingsWrittenBack) -contains $TagManager -and $tmB -eq $tmRoot -and $tmRoot.Contains("  - Probe`n")) "changed=[$($projB -join '; ')] back=[$(@($rb.submit.settingsWrittenBack) -join ',')] notBack=[$(@($rb.submit['settingsNotWrittenBack']) -join ',')] same=$($tmB -eq $tmRoot)"
+    Test-Check 'new module: its settings step''s layer in the Editor tree''s TagManager.asset, copied back to B' ($projB -contains 'Layer[20]: "" -> Probe' -and @($rb.submit.settingsWrittenBack) -contains $TagManager -and $tmB -eq $tmRoot -and $tmRoot.Contains("  - Probe`n")) "changed=[$($projB -join '; ')] back=[$(@($rb.submit.settingsWrittenBack) -join ',')] notBack=[$(@($rb.submit.settingsNotWrittenBack) -join ',')] same=$($tmB -eq $tmRoot)"
     $state.item['newModuleCheck'] = @($rb.submit.check.targets)
     # The new contracts file is B's until it lands (G5-4), and the gate checked the modules that use the contracts (G5-3).
     $co = Get-HarnessContractOwners
@@ -2399,6 +2417,64 @@ function Invoke-Item8 {
     $r = Invoke-Tool $A 'land.ps1' '8l-append-land'
     $co = Get-HarnessContractOwners
     Test-Check 'appended event: land green (a merge), SmokeEvents.cs released, Editor tree clean' ($r.ok -and $r.land.kept -and -not $r.land.fastForward -and @($r.land.releasedContracts) -contains $SmokeContracts -and -not $co[$SmokeContracts] -and @(Get-NewStatus).Count -eq 0) "$(Get-Summary $r) released=$(@($r.land.releasedContracts) -join ',') new=$(@(Get-NewStatus) -join '; ')"
+
+    # 8m-8o. Both worktrees' modules declare layers (G5-6): one TagManager.asset. Whatever order they land in, the Editor tree
+    # ends clean with both layers committed - the land that leaves no other un-landed submit commits what the settings steps
+    # wrote. A hand edit in the file stays foreign; a red land puts back what its loop wrote there.
+    $se = (Join-Path $outAbs 'project-state.cs').Replace('\', '/')
+    Write-TextFile $se $ProjectStateText
+    $backOf = { param($r) "back=[$(@($r.submit.settingsWrittenBack) -join ',')] notBack=[$(@($r.submit.settingsNotWrittenBack) -join ',')]" }
+    $settingsOf = { param($r) "$(Get-Summary $r) settings=$($r.land.settings | ConvertTo-Json -Compress) editor=$(Get-TagLayers ([IO.File]::ReadAllText((Get-Abs $root $TagManager)))) HEAD=$(Get-TagLayers (Get-CommittedText $TagManager)) new=$(@(Get-NewStatus) -join '; ')" }
+    # 8m. A's layer first (copied back: the Editor tree's file was the landed one), then B's (not copied back: A's is in it). A lands first.
+    foreach ($w in @($A, $B)) { Invoke-Git $w @('merge', '--quiet', '--ff-only', $wt.branch) }
+    Write-TextFile (Get-Abs $A $SmokeSettingsCs) $SmokeSettingsText
+    $ra = Invoke-Tool $A 'submit.ps1' '8m-submit-a' @('-Module', 'Smoke')
+    Write-TextFile (Get-Abs $B $ProbeSettingsCs) (Get-LayerStepText $ProbeSettingsText @('20=Probe', '22=ProbeTwo'))
+    $rb = Invoke-Tool $B 'submit.ps1' '8m-submit-b' @('-Module', 'Probe')
+    Test-Check 'two layers: A''s submit copies TagManager.asset back, B''s does not (A''s un-landed layer is in it)' ($ra.ok -and @($ra.submit.settingsWrittenBack) -contains $TagManager -and $rb.ok -and @($rb.submit.settingsNotWrittenBack) -contains $TagManager -and "$($rb.submit.settingsNote)" -like '*land.ps1*') "$(Get-Summary $ra) $(& $backOf $ra) | $(Get-Summary $rb) $(& $backOf $rb)"
+    foreach ($w in @($A, $B)) { Invoke-Git $w @('add', '-A'); Invoke-Git $w ($gitId + @('commit', '--quiet', '-m', 'selftest: a layer')) }
+    $r = Invoke-Tool $A 'land.ps1' '8m-land-a'
+    Test-Check 'A lands first: its TagManager.asset replaces the Editor tree''s (the settings steps'' output), the loop writes B''s layer again, nothing committed while B''s submit is un-landed' ($r.ok -and $r.land.kept -and @($r.land.settings.regenerated) -contains $TagManager -and -not $r.land.settings.commit -and @($r.land.settings.waitingFor | Where-Object { $_ -like 'Assets/Game/Probe/*' }).Count -gt 0 -and (Get-TagLayers ([IO.File]::ReadAllText((Get-Abs $root $TagManager)))) -eq '20:Probe,21:SmokeSelftest,22:ProbeTwo' -and (Get-TagLayers (Get-CommittedText $TagManager)) -eq '20:Probe,21:SmokeSelftest') (& $settingsOf $r)
+    $r = Invoke-Tool $B 'land.ps1' '8m-land-b'
+    Test-Check 'B lands: the settings commit on top (TagManager.asset alone) has both layers, Editor tree clean' ($r.ok -and $r.land.kept -and $r.land.settings.commit -and $r.land.settings.commit -eq (Get-Head $top) -and (@($r.land.settings.derived) -join ',') -eq $TagManager -and @(Get-NewStatus).Count -eq 0 -and (Get-TagLayers (Get-CommittedText $TagManager)) -eq '20:Probe,21:SmokeSelftest,22:ProbeTwo') (& $settingsOf $r)
+
+    # 8n. The other order: B's land leaves A's un-landed submit (nothing committed). A hand edit no settings step owns (the Default
+    # sorting layer locked), saved again by a loop, makes A's land foreign; discarded and looped, it is the settings steps' output again.
+    foreach ($w in @($A, $B)) { Invoke-Git $w @('merge', '--quiet', '--ff-only', $wt.branch) }
+    Write-TextFile (Get-Abs $A $SmokeSettingsCs) (Get-LayerStepText $SmokeSettingsText @('21=SmokeSelftest', '23=SmokeTwo'))
+    $ra = Invoke-Tool $A 'submit.ps1' '8n-submit-a' @('-Module', 'Smoke')
+    Write-TextFile (Get-Abs $B $ProbeSettingsCs) (Get-LayerStepText $ProbeSettingsText @('20=Probe', '22=ProbeTwo', '24=ProbeThree'))
+    $rb = Invoke-Tool $B 'submit.ps1' '8n-submit-b' @('-Module', 'Probe')
+    Test-Check 'two more layers: A''s submit copies TagManager.asset back, B''s does not' ($ra.ok -and @($ra.submit.settingsWrittenBack) -contains $TagManager -and $rb.ok -and @($rb.submit.settingsNotWrittenBack) -contains $TagManager) "$(Get-Summary $ra) $(& $backOf $ra) | $(Get-Summary $rb) $(& $backOf $rb)"
+    foreach ($w in @($A, $B)) { Invoke-Git $w @('add', '-A'); Invoke-Git $w ($gitId + @('commit', '--quiet', '-m', 'selftest: another layer')) }
+    $r = Invoke-Tool $B 'land.ps1' '8n-land-b'
+    Test-Check 'B lands first: TagManager.asset not committed while A''s submit is un-landed' ($r.ok -and $r.land.kept -and -not $r.land.settings.commit -and (@($r.land.settings.derived) -join ',') -eq $TagManager -and @($r.land.settings.waitingFor | Where-Object { $_ -like 'Assets/Game/Smoke/*' }).Count -gt 0 -and (Get-TagLayers (Get-CommittedText $TagManager)) -eq '20:Probe,21:SmokeSelftest,22:ProbeTwo') (& $settingsOf $r)
+    $headBefore = Get-Head $top
+    [void](Edit-Line (Get-Abs $root $TagManager) '    locked: 0' '    locked: 1')
+    $rl = Invoke-Loop '8n-hand-edit-loop'
+    $statusHand = Get-EditorStatus
+    $r = Invoke-Tool $A 'land.ps1' '8n-land-a-foreign'
+    Test-Check 'hand edit in TagManager.asset (a loop saved it since): A''s land stage=land, land.foreign names it' ($rl.ok -and $r.stage -eq 'land' -and @($r.land.foreign | Where-Object { $_ -like "*$TagManager" }).Count -eq 1 -and "$($r.error)" -like '*git checkout*') "loop: $(Get-Summary $rl) land: $(Get-Summary $r) foreign=$(@($r.land.foreign) -join ',')"
+    Test-Check 'hand edit: nothing touched' ((Get-Head $top) -eq $headBefore -and (Get-EditorStatus) -eq $statusHand) (Get-EditorStatus)
+    Invoke-Git $root @('checkout', '--', $TagManager)
+    $rl = Invoke-Loop '8n-discarded-loop'
+    $r = Invoke-Tool $A 'land.ps1' '8n-land-a'
+    $tmHead = Get-CommittedText $TagManager
+    Test-Check 'discarded, looped: A lands (a merge), the settings commit has all four layers and not the hand edit, Editor tree clean' ($rl.ok -and $r.ok -and $r.land.kept -and -not $r.land.fastForward -and @($r.land.settings.regenerated) -contains $TagManager -and (@($r.land.settings.derived) -join ',') -eq $TagManager -and $r.land.settings.commit -and $r.land.settings.commit -eq (Get-Head $top) -and @(Get-NewStatus).Count -eq 0 -and (Get-TagLayers $tmHead) -eq '20:Probe,21:SmokeSelftest,22:ProbeTwo,23:SmokeTwo,24:ProbeThree' -and $tmHead -notmatch 'locked: 1') (& $settingsOf $r)
+
+    # 8o. A red land (runtime error) whose branch declares a layer no submit wrote: the loop writes it into TagManager.asset (a file the
+    # merge does not touch), the undo puts the file back as it was, and the Editor loads it again.
+    $headBefore = Get-Head $top
+    $statusBefore = Get-EditorStatus
+    $tmBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Get-Abs $root $TagManager)))
+    Write-TextFile (Get-Abs $B $ProbeSettingsCs) (Get-LayerStepText $ProbeSettingsText @('20=Probe', '22=ProbeTwo', '24=ProbeThree', '25=ProbeRed'))
+    [void](Edit-Line (Get-Abs $B $ProbeCs) '// selftest-probe (landed)' 'throw new InvalidOperationException("selftest: runtime error");')
+    Invoke-Git $B ($gitId + @('commit', '--quiet', '-am', 'selftest: a layer and a runtime error'))
+    $r = Invoke-Tool $B 'land.ps1' '8o-red'
+    $s = Invoke-Eval $se
+    Test-Check 'red land: stage=runtime after its loop wrote layer 25, undone with TagManager.asset restored' ($r.stage -eq 'runtime' -and @($r.build.settings.project.changed) -contains 'Layer[25]: "" -> ProbeRed' -and $r.land.reverted -and $r.land.restore.ok -and @($r.land.undo | Where-Object { "$_" -like "restored*$TagManager*" }).Count -eq 1) "$(Get-Summary $r) changed=[$(@($r.build.settings.project.changed) -join '; ')] undo=$(@($r.land.undo) -join '; ')"
+    Test-Check 'red land: TagManager.asset byte for byte and in the Editor as before, HEAD and git status as before' ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Get-Abs $root $TagManager))) -eq $tmBefore -and $s.layers20to25 -eq '20:Probe,21:SmokeSelftest,22:ProbeTwo,23:SmokeTwo,24:ProbeThree,25:' -and (Get-Head $top) -eq $headBefore -and (Get-EditorStatus) -eq $statusBefore) "editor=$($s.layers20to25) status=$(Get-EditorStatus)"
+    Invoke-Git $B @('reset', '--quiet', '--hard', 'HEAD~1')
     Complete-Item
 }
 

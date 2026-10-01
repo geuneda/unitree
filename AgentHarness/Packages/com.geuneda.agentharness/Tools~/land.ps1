@@ -14,14 +14,20 @@
      a landed type changed or removed (land.contractChanged: add-only per type), a type name the contracts already declare,
      un-landed submits included (land.contractConflicts); or when it would replace any other uncommitted change that
      differs from what lands (land.foreign; e.g. an edit made directly in the Editor tree). So the only uncommitted files
-     a land replaces are identical ones and this branch's own (superseded) submits.
-  3. Journal (Library/Harness/land/pending.json), then 'git stash' exactly the uncommitted paths the merge touches,
-     plus leftovers in the modules it touches (files submitted earlier and deleted since), moved out of the stash list
-     shared by all worktrees to refs/agentharness/land/<runId>. Then 'git merge'.
+     a land replaces are identical ones, this branch's own (superseded) submits, and ProjectSettings files that are the
+     committed file plus what the settings steps wrote (G5-6: the loop writes them again from the merged code; one edited
+     by hand or in a settings window is foreign).
+  3. Journal (Library/Harness/land/pending.json), a copy of the ProjectSettings files (harness projects), then 'git stash'
+     exactly the uncommitted paths the merge touches, plus leftovers in the modules it touches (files submitted earlier
+     and deleted since), moved out of the stash list shared by all worktrees to refs/agentharness/land/<runId>. Then
+     'git merge'.
   4. The normal loop on the Editor tree. Green -> keep the merge, drop the stash, release the branch's module
-     and contracts-file ownership. Red -> undo: 'reset --keep' to the pre-land commit (only the merged paths; other uncommitted work
-     stays), re-apply the stash, recompile. -KeepOnFail keeps non-compile failures. If land dies half-way, the next
-     lock holder (loop/uc/submit/land) undoes it from the journal (report: recoveredLand).
+     and contracts-file ownership; then the ProjectSettings files the settings steps wrote on top of the landed ones are
+     committed on top of the land when no un-landed submit or code edit is left in the project (they are the landed code's
+     output then; otherwise land.settings.waitingFor - the land that leaves none commits them). Red -> undo: 'reset --keep' to
+     the pre-land commit (only the merged paths; other uncommitted work stays), re-apply the stash, put back the
+     ProjectSettings files, recompile. -KeepOnFail keeps non-compile failures. If land dies half-way, the next lock holder
+     (loop/uc/submit/land) undoes it from the journal (report: recoveredLand).
 
 .EXAMPLE
   # from the agent worktree, once submit.ps1 was green and everything is committed:
@@ -62,6 +68,8 @@ $script:Journal = $null
 # Contracts paths (repo-relative) whose uncommitted Editor-tree copies are this branch's submits (or taken over): replaceable.
 $script:ContractsMine = New-Object 'System.Collections.Generic.HashSet[string]'
 $script:ContractTakeovers = @()   # project-relative
+# Repo-relative ProjectSettings files that were the committed file plus what the settings steps wrote (G5-6): replaceable.
+$script:Derived = New-Object 'System.Collections.Generic.HashSet[string]'
 
 function New-FailReport([string]$stage, [string]$message) {
     [ordered]@{ ok = $false; stage = $stage; compileErrors = @(); runtimeErrors = @(); fps = $null; shots = @(); durationSec = 0
@@ -176,6 +184,50 @@ function Clear-BranchOwners([string[]]$TakenOver = @()) {
     $released
 }
 
+# After a kept land (G5-6): the ProjectSettings files the settings steps wrote on top of the committed ones are the landed
+# code's output when no other worktree's un-landed submit and no code edited in the Editor tree is left: one commit on top
+# of the land. Otherwise they stay uncommitted (land.settings.waitingFor) and the land that leaves none commits them.
+function Save-LandedSettings {
+    if ($cfg.setup -ne 'harness') { return }
+    $status = Get-HarnessGitStatus $repo
+    $derived = @(Get-HarnessDerivedSettings @(Get-HarnessModifiedSettings $status $prefix) 'HEAD')
+    if ($derived.Count -eq 0) { return }
+    if (-not $land['settings']) { $land['settings'] = [ordered]@{} }
+    $s = $land['settings']
+    $s['derived'] = $derived
+    $s['commit'] = $null
+    # What may hold settings steps that are not committed: anything in a module or the contracts folder (an un-landed submit)
+    # and code elsewhere (e.g. edited in the Editor tree). Other files do not (ProjectVersion.txt of another Unity version, ...).
+    $other = @($status.Keys | Where-Object {
+            if (-not $_.StartsWith($prefix)) { return $false }
+            $rel = $_.Substring($prefix.Length)
+            $derived -notcontains $rel -and ((Get-HarnessModuleOf $rel $cfg).name -or $rel -match '\.(cs|asmdef|asmref|rsp|dll)$' -or $rel -eq 'Packages/manifest.json')
+        } | Sort-Object)
+    if ($other.Count -gt 0) {
+        $s['waitingFor'] = @($other | Select-Object -First 10 | ForEach-Object { $_.Substring($prefix.Length) })
+        $s['note'] = "not committed: $($other.Count) uncommitted files in modules or code (waitingFor: another worktree's un-landed submit, an edit in the Editor tree) may hold settings steps that are not committed. The land that leaves none commits them (or commit them yourself then)."
+        return
+    }
+    $short = (RepoGit @('rev-parse', '--short', 'HEAD') -Check).out.Trim()
+    $msg = "Project settings the landed code's settings steps write (after landing $Branch)`n`n" +
+        "tools/land.ps1 (G5-6): $($derived -join ', ') as the loop on $short left them. No un-landed submit or`n" +
+        "code edit was left in the project, so they are the committed code's output.`n"
+    $dir = Join-Path $root 'Library/Harness/land'
+    $ps = Join-Path $dir "$runId.commit.paths"
+    $mf = Join-Path $dir "$runId.commit.txt"
+    Write-HarnessPathspec $ps @($derived | ForEach-Object { "$prefix$_" })
+    [IO.File]::WriteAllText($mf, $msg, (New-Object Text.UTF8Encoding($false)))
+    $c = RepoGit @('commit', '--quiet', '-F', $mf, "--pathspec-from-file=$ps", '--pathspec-file-nul')
+    Remove-Item -LiteralPath $ps, $mf -Force
+    if ($c.code -ne 0) {
+        $s['error'] = "git commit failed ($($c.code)): $($c.err) $($c.out.Trim())"
+        $land['warning'] = "the ProjectSettings files the settings steps wrote ($($derived -join ', ')) could not be committed: $($s.error)"
+        return
+    }
+    $s.commit = (RepoGit @('rev-parse', 'HEAD') -Check).out.Trim()
+    $land.head.after = $s.commit
+}
+
 # ---- 1-4. Under the Editor lock --------------------------------------------------------------------------
 function Invoke-Land {
     $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -211,7 +263,9 @@ function Invoke-Land {
     $tok = @(Split-HarnessZ $mt.out)
     if ($mt.code -eq 1) {
         $land['conflicts'] = @($tok | Select-Object -Skip 1 | Sort-Object -Unique)
-        return New-FailReport 'land' "merging $Branch into $($land.into) conflicts in $(@($land.conflicts).Count) files (land.conflicts); nothing was touched. In the worktree: git merge $($land.into), resolve, commit, submit.ps1 again, then land."
+        $psConflicts = @($land.conflicts | Where-Object { $_.StartsWith("${prefix}ProjectSettings/") })
+        $hint = if ($psConflicts.Count -and $cfg.setup -eq 'harness') { " ProjectSettings files are where the settings steps write: take $($land.into)'s side of those (git checkout --theirs -- <file>); the loop writes this branch's settings into them again and land commits that (G5-6)." } else { '' }
+        return New-FailReport 'land' "merging $Branch into $($land.into) conflicts in $(@($land.conflicts).Count) files (land.conflicts); nothing was touched. In the worktree: git merge $($land.into), resolve, commit, submit.ps1 again, then land.$hint"
     }
     $mergedTree = $tok[0]
     $paths = @(Split-HarnessZ (RepoGit @('diff', '--name-only', '-z', '--no-renames', $preHead, $mergedTree) -Check).out)
@@ -324,25 +378,35 @@ function Invoke-Land {
             $false
         } | Sort-Object)
     $before = Get-HarnessContentIds $repo $stashPaths
+    # ProjectSettings files that are the committed file plus what the settings steps wrote (G5-6): the loop after the merge
+    # writes them again from the merged code (other worktrees' un-landed settings included), so they may be replaced.
+    if ($cfg.setup -eq 'harness') {
+        foreach ($p in @(Get-HarnessDerivedSettings @(Get-HarnessModifiedSettings $status $prefix) $preHead)) { [void]$script:Derived.Add("$prefix$p") }
+    }
     # Anything else the land would replace is somebody's uncommitted work (e.g. an edit made in the Editor tree):
     # never moved away silently.
     $foreign = @($stashPaths | Where-Object {
             $p = $_
             $landed = if ($pathSet.Contains($p)) { $mergedIds[$p] } else { $baseIds[$p] }
-            $before[$p] -ne $landed -and -not @($mine | Where-Object { Test-InModule $p $_ }).Count -and -not $script:ContractsMine.Contains($p)
+            $before[$p] -ne $landed -and -not @($mine | Where-Object { Test-InModule $p $_ }).Count -and -not $script:ContractsMine.Contains($p) -and -not $script:Derived.Contains($p)
         })
     if ($foreign.Count -gt 0) {
         $land['foreign'] = $foreign
-        return New-FailReport 'land' "the Editor tree has uncommitted changes that are not this branch's submits and differ from what would land (land.foreign). Landing would replace them; nothing was touched. Commit or stash them first (git stash push -- <paths>), or submit them from their worktree."
+        $psForeign = @($foreign | Where-Object { $_.StartsWith("${prefix}ProjectSettings/") } | ForEach-Object { $_.Substring($prefix.Length) })
+        $hint = if ($psForeign.Count -and $cfg.setup -eq 'harness') { " $($psForeign -join ', ') holds more than the committed file plus what the settings steps wrote (edited by hand or in a settings window): commit that edit, or discard it (git checkout -- <file>) and run tools/loop.ps1 - the settings steps write their values again." } else { '' }
+        return New-FailReport 'land' "the Editor tree has uncommitted changes that are not this branch's submits and differ from what would land (land.foreign). Landing would replace them; nothing was touched. Commit or stash them first (git stash push -- <paths>), or submit them from their worktree.$hint"
     }
+    $regenerated = @($stashPaths | Where-Object { $script:Derived.Contains($_) -and $before[$_] -ne $mergedIds[$_] } | ForEach-Object { $_.Substring($prefix.Length) })
+    if ($regenerated.Count) { $land['settings'] = [ordered]@{ regenerated = $regenerated } }
     $timings['checkSec'] = [math]::Round($sw.Elapsed.TotalSeconds, 2)
 
     # ---- stash + merge, under a journal ----
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $land.phase = 'stash'
+    $settingsBackup = if ($cfg.setup -eq 'harness') { Backup-HarnessLandSettings $runId } else { $null }
     $script:Journal = [ordered]@{ runId = $runId; repo = $repo; branch = $Branch; branchSha = $branchSha; preHead = $preHead; mergedTree = $mergedTree
-        mergedHead = $null; paths = $paths; added = $added; newDirs = @($newDirs); stashSha = $null; stashPaths = $stashPaths; pid = $PID
-        startedAt = (Get-Date).ToString('o') }
+        mergedHead = $null; paths = $paths; added = $added; newDirs = @($newDirs); stashSha = $null; stashPaths = $stashPaths; settings = $settingsBackup
+        pid = $PID; startedAt = (Get-Date).ToString('o') }
     Save-HarnessLandJournal $script:Journal
     $land['stash'] = [ordered]@{ sha = $null; paths = $stashPaths; dropped = $false; kept = $false; differs = @() }
     if ($stashPaths.Count -gt 0) {
@@ -386,7 +450,7 @@ function Invoke-Land {
         # that differs now changed during the land (e.g. rewritten on import): keep the stash for a human then.
         $after = Get-HarnessContentIds $repo $stashPaths
         $differs = @($stashPaths | Where-Object { $after[$_] -ne $before[$_] })
-        $unexpected = @($differs | Where-Object { $p = $_; -not @($mine | Where-Object { Test-InModule $p $_ }).Count -and -not $script:ContractsMine.Contains($p) })
+        $unexpected = @($differs | Where-Object { $p = $_; -not @($mine | Where-Object { Test-InModule $p $_ }).Count -and -not $script:ContractsMine.Contains($p) -and -not $script:Derived.Contains($p) })
         $land.stash.differs = $differs
         if ($land.stash.sha) {
             if ($unexpected.Count -eq 0) {
@@ -398,10 +462,11 @@ function Invoke-Land {
             }
             [void](RepoGit @('update-ref', '-d', (Get-HarnessLandStashRef $runId)))
         }
-        Complete-HarnessLand
+        Complete-HarnessLand $script:Journal
         $script:Journal = $null
         $land.kept = $true
         $land['releasedOwners'] = @(Clear-BranchOwners @($takeovers | ForEach-Object { $_.module }))
+        Save-LandedSettings
     } else {
         $sw = [Diagnostics.Stopwatch]::StartNew()
         $land['undo'] = @(Undo-HarnessLand $script:Journal)

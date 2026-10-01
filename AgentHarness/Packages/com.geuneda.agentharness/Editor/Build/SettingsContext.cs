@@ -419,6 +419,7 @@ namespace Harness.Editor
                 return result;
             }
             var before = GraphicsSettings.currentRenderPipeline;
+            var files = ProjectFileIds();
             foreach (var (step, info) in steps)
             {
                 result.ctx.Module = info.module;
@@ -431,7 +432,7 @@ namespace Harness.Editor
                 }
                 info.ms = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
             }
-            // ProjectSettings the steps own: clear undeclared layers and tags, save, remember (only when every step ran).
+            // ProjectSettings the steps own: clear undeclared layers and tags, save (only when every step ran).
             if (!result.failed)
             {
                 var (_, last) = steps[steps.Count - 1];
@@ -443,6 +444,12 @@ namespace Harness.Editor
                 }
             }
             if (result.ctx.Assigned.Count > 0) AssetDatabase.SaveAssets();
+            // Remember what the owned settings are now and how each ProjectSettings file came to be (Library/Harness/project-settings.json).
+            if (!result.failed)
+            {
+                try { result.ctx.SaveSnapshot(files); }
+                catch (Exception e) { result.ctx.Warnings.Add($"[harness] could not save {SnapshotPath}: {e.Message}"); }
+            }
             var after = GraphicsSettings.currentRenderPipeline;
             if (before != after)
             {

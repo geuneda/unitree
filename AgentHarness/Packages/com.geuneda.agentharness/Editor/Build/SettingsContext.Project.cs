@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEditor;
@@ -511,9 +512,24 @@ namespace Harness.Editor
         {
             public List<string> keys = new List<string>();
             public List<string> values = new List<string>();
+            public List<FileRun> files = new List<FileRun>();
+        }
+
+        /// <summary>The contents of a ProjectSettings file from which only builds led to it (git blob ids, the current one last).</summary>
+        [Serializable]
+        sealed class FileRun
+        {
+            public string path;
+            public List<string> ids = new List<string>();
         }
 
         static string SnapshotPath => HarnessPaths.Combine(HarnessPaths.StateDir, "project-settings.json");
+
+        static Snapshot ReadSnapshot()
+        {
+            try { return File.Exists(SnapshotPath) ? JsonUtility.FromJson<Snapshot>(File.ReadAllText(SnapshotPath)) : null; }
+            catch (Exception) { return null; }
+        }
 
         /// <summary>What the previous build left in each owned setting.</summary>
         Dictionary<string, string> Last
@@ -522,22 +538,14 @@ namespace Harness.Editor
             {
                 if (m_Last != null) return m_Last;
                 m_Last = new Dictionary<string, string>(StringComparer.Ordinal);
-                try
-                {
-                    if (File.Exists(SnapshotPath))
-                    {
-                        var s = JsonUtility.FromJson<Snapshot>(File.ReadAllText(SnapshotPath));
-                        for (var i = 0; s != null && i < s.keys.Count && i < s.values.Count; i++) m_Last[s.keys[i]] = s.values[i];
-                    }
-                }
-                catch (Exception) { }
+                var s = ReadSnapshot();
+                for (var i = 0; s != null && i < s.keys.Count && i < s.values.Count; i++) m_Last[s.keys[i]] = s.values[i];
                 return m_Last;
             }
         }
 
         /// <summary>
-        /// After every settings step succeeded: clear the layers and tags nobody declared, save the settings this run changed and
-        /// remember what each owned setting is now (the next build tells a change outside the code from a change of the code).
+        /// After every settings step succeeded: clear the layers and tags nobody declared and save the settings this run changed.
         /// </summary>
         internal void FinishProject()
         {
@@ -557,7 +565,76 @@ namespace Harness.Editor
                 foreach (var o in m_ToSave) EditorUtility.SetDirty(o);
                 AssetDatabase.SaveAssets();
             }
-            if (m_Owned.Count == 0 && !File.Exists(SnapshotPath)) return;
+        }
+
+        // ---- Which file contents are the settings steps' output (G5-6) --------------------------------------------------
+        //
+        // A ProjectSettings file holds the settings of every module's step, and parallel worktrees land into one Editor tree. So
+        // that tools/land.ps1 can tell what the settings steps wrote on top of the committed file (the loop after a merge writes it
+        // again from the merged code) from somebody's edit, each run records per ProjectSettings/*.asset the contents from which
+        // only builds led to the file as it is. Changed any other way - the YAML edited, a settings window's unsaved change that
+        // this run's save would write - the record starts again from the file as the run found it.
+
+        const int MaxRun = 64;
+
+        // Blob ids by path for a file length and write time (opening ~25 files twice per build cost ~5 ms).
+        static readonly Dictionary<string, (long length, long ticks, string id)> s_Ids = new Dictionary<string, (long, long, string)>(StringComparer.Ordinal);
+
+        /// <summary>Git blob id of each ProjectSettings/*.asset now; null when the Editor holds unsaved changes to it.</summary>
+        internal static Dictionary<string, string> ProjectFileIds()
+        {
+            var ids = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var f in new DirectoryInfo(HarnessPaths.Combine(HarnessPaths.ProjectRoot, "ProjectSettings")).GetFiles("*.asset"))
+            {
+                var path = "ProjectSettings/" + f.Name;
+                if (Unsaved(path)) { ids[path] = null; continue; }
+                var ticks = f.LastWriteTimeUtc.Ticks;
+                if (!s_Ids.TryGetValue(path, out var c) || c.length != f.Length || c.ticks != ticks)
+                    s_Ids[path] = c = (f.Length, ticks, BlobId(File.ReadAllBytes(f.FullName)));
+                ids[path] = c.id;
+            }
+            return ids;
+        }
+
+        static bool Unsaved(string path)
+        {
+            foreach (var o in AssetDatabase.LoadAllAssetsAtPath(path))
+                if (o != null && EditorUtility.IsDirty(o)) return true;
+            return false;
+        }
+
+        /// <summary>The id git gives the file's content: text (no NUL in the first 8000 bytes) with LF line ends, as text=auto stores it.</summary>
+        static string BlobId(byte[] bytes)
+        {
+            if (Array.IndexOf(bytes, (byte)0, 0, Math.Min(bytes.Length, 8000)) < 0 && Array.IndexOf(bytes, (byte)'\r') >= 0)
+            {
+                var lf = new List<byte>(bytes.Length);
+                for (var i = 0; i < bytes.Length; i++)
+                    if (bytes[i] != '\r' || i + 1 >= bytes.Length || bytes[i + 1] != '\n') lf.Add(bytes[i]);
+                bytes = lf.ToArray();
+            }
+            using (var sha = SHA1.Create())
+            {
+                var header = Encoding.ASCII.GetBytes("blob " + bytes.Length.ToString(CultureInfo.InvariantCulture) + "\0");
+                sha.TransformBlock(header, 0, header.Length, null, 0);
+                sha.TransformFinalBlock(bytes, 0, bytes.Length);
+                return BitConverter.ToString(sha.Hash).Replace("-", "").ToLowerInvariant();
+            }
+        }
+
+        /// <summary>
+        /// After every settings step succeeded and the settings were saved: remember what each owned setting is now (the next build
+        /// tells a change outside the code from a change of the code) and, per ProjectSettings file, the contents from which only
+        /// builds led to it. <paramref name="before"/>: <see cref="ProjectFileIds"/> before the first step.
+        /// </summary>
+        internal void SaveSnapshot(Dictionary<string, string> before)
+        {
+            var previous = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            var last = ReadSnapshot();
+            if (last?.files != null)
+                foreach (var r in last.files)
+                    if (r?.path != null && r.ids != null && r.ids.Count > 0) previous[r.path] = r.ids;
+
             var snapshot = new Snapshot();
             var keys = new List<string>(m_Owned.Keys);
             keys.Sort(StringComparer.Ordinal);
@@ -565,6 +642,25 @@ namespace Harness.Editor
             {
                 snapshot.keys.Add(k);
                 snapshot.values.Add(m_Owned[k].actual);
+            }
+            var now = ProjectFileIds();
+            var paths = new List<string>(now.Keys);
+            paths.Sort(StringComparer.Ordinal);
+            foreach (var path in paths)
+            {
+                var id = now[path];
+                if (id == null) continue;   // unsaved changes after the save: nothing to tell
+                before.TryGetValue(path, out var start);
+                previous.TryGetValue(path, out var run);
+                var ids = new List<string>();
+                // The file was as the previous run left it, or this run made it that again (it undid whatever changed it in
+                // between): the earlier contents still led here only through builds, and so did the one this run started from.
+                if (run != null && (start == run[run.Count - 1] || id == run[run.Count - 1])) ids.AddRange(run);
+                if (start != null && !ids.Contains(start)) ids.Add(start);
+                ids.Remove(id);
+                ids.Add(id);
+                if (ids.Count > MaxRun) ids.RemoveRange(0, ids.Count - MaxRun);
+                snapshot.files.Add(new FileRun { path = path, ids = ids });
             }
             Directory.CreateDirectory(HarnessPaths.StateDir);
             HarnessPaths.WriteStateFile(SnapshotPath, JsonUtility.ToJson(snapshot, true));

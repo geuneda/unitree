@@ -17,8 +17,8 @@
 - 공통 마무리: 매트릭스 1–10 녹색 + 샷 PNG 확인 → 항목을 "해결됨"으로 옮기고 측정값 기록 → 이 표의 상태·워크플로우 절 갱신 → 새로 드러난 항목 추가 →
   **저장소 루트 `README.md`와 `AgentHarness/CLAUDE.md`(필요하면 `Tools~/templates/AgentHarness.md`)에 바뀐 기능·측정값 반영** → 커밋(메시지에 항목 ID).
   README·ROADMAP 갱신은 워크플로우마다 빠뜨리지 않는다(W2 커밋은 README를 건드리지 않았고, W4 뒤에도 README "요구 사항"에 6.6의 옛 상태가 남아 있었다).
-- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W13은 모두 끝났다(2026-10-01). 남은 항목은 W14–W16으로 묶었다
-  (2026-10-01): G5-6(여러 worktree의 ProjectSettings) → G4-5(하늘·반사), G3-8의 사내 프로젝트 확인(타깃 전환 허락받음 — 언제든).
+- 하네스 변경은 에디터 트리에서 selftest로 검증하므로 워크플로우는 한 번에 하나씩 진행한다. W1–W14는 모두 끝났다(2026-10-01). 남은 항목은 W15–W16이다:
+  G4-5(하늘·반사), G3-8의 사내 프로젝트 확인(타깃 전환 허락받음 — 언제든).
   그 뒤에 남는 것은 상시(업스트림 — G2-4의 남은 Unity 쪽 비용, W13의 URP 데칼 신고 포함)와 마지막(macOS)이다.
 - 크기: S = 파일 1–2개 · M = 여러 파일 또는 새 커맨드 · L = 조사가 필요하거나 새 하위 시스템.
 
@@ -33,11 +33,11 @@
 | W7 | 에디터 밖·여러 에디터 | G2-2, G2-4, G1-2, G5-1 | L | — | 완료 (2026-09-30; G2-4는 Unity 쪽 리로드만 남음) |
 | W8 | 플레이어에서 돌리기(성능·실제 화면) | G3-2, G3-8 (+G3-12, G3-13) | L | W1 | 완료 (2026-09-30; G3-8은 사내 프로젝트 A 확인만 남음 — Android 타깃) |
 | W9 | 병렬 작업의 공유 지점 | G5-4, G5-3 | M | — | 완료 (2026-09-30) |
-| W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 완료 (2026-09-30; 여러 worktree가 같은 ProjectSettings 파일을 바꾸는 경우는 G5-6) |
+| W10 | 렌더 밖의 프로젝트 설정도 코드로 | G1-5 | M | W4 | 완료 (2026-09-30; 여러 worktree가 같은 ProjectSettings 파일을 바꾸는 경우는 G5-6 → W14) |
 | W11 | 백그라운드 에디터의 실제 입력 격리 | G3-9 (+G3-14, G1-6) | S | — | 완료 (2026-10-01) |
 | W12 | 핫 루프 넓히기 | G2-5 | M | W5 | 완료 (2026-10-01; `try/catch`·예외 줄·새 필드는 Pipeline — 상시) |
 | W13 | 같은 코드면 픽셀까지 같은 샷 | G3-15 | M | — | 완료 (2026-10-01; URP DBuffer 데칼의 흔들림·ScreenSpace 데칼의 NRE는 신고 — 상시) |
-| W14 | 여러 worktree의 ProjectSettings | G5-6 | M | — | 대기 |
+| W14 | 여러 worktree의 ProjectSettings | G5-6 | M | — | 완료 (2026-10-01) |
 | W15 | 하늘과 씬 반사 | G4-5 | L | W13 | 대기 |
 | W16 | 사내 프로젝트 A의 플레이어 화면 | G3-8 | S | — | 대기 (타깃 전환 허락받음, 2026-10-01) |
 | 상시 | 업스트림·외부 의존 | O-1, O-5, O-6, O-9, O-10, O-11, O-12, O-13, P-4·G2-5·W13(URP 데칼) 신고, G2-4 재측정 | S | 새 버전이 나올 때 | — |
@@ -186,16 +186,20 @@
   렌더 횟수가 바뀌어 디더링 순번이 밀려 모든 샷이 ±4 바뀌었다. 렌더 그래프 풀·`UNITY_HDR_ON`·`GL.sRGBWrite`·SSAO·`copyDepthMode`·`intermediateTextureMode`는 원인이 아니었다.
 - 매트릭스 1이 루프 2·3의 maxDiff 0과, 모든 창을 매 업데이트마다 다시 그리는 루프의 maxDiff 0을 본다(수정 전 DBuffer에서는 그 루프가 3번 모두 47).
 
-### W14 여러 worktree의 ProjectSettings (G5-6)
-- 왜: 병렬 작업(성질 5)에서 남은 공유 지점. 두 worktree의 미병합 모듈이 같은 ProjectSettings 파일을 바꾸면(둘 다 레이어 추가) 두 번째 submit은 되복사되지 않고
-  (`settingsNotWrittenBack`) 에디터 트리에 미커밋 변경이 남아, 그 파일을 다르게 바꾼 브랜치의 land가 `foreign`으로 거부된다.
-- 먼저 정할 것: 항목 절의 두 방향 중 land 쪽(하네스가 쓴 ProjectSettings = 마지막 빌드가 남긴 내용과 같은 파일을 다시 만들 수 있는 산출물로 보고, 병합 뒤 루프의
-  결과로 맞춘다)을 먼저 본다 — 완료 기준이 "순서 무관"이라 submit 순서에 기대는 쪽보다 맞는다. 사람이 손으로 고친 파일(드리프트)은 산출물로 덮지 않는다.
-- 고치는 곳: `Tools~/submit.ps1`(되복사 판정), `Tools~/land.ps1`(`foreign` 판정, 병합 뒤 루프), `Tools~/Harness.psm1`,
-  `Editor/Build/SettingsContext.Project.cs`·`ProjectValues.cs`(마지막 빌드가 남긴 값 `Library/Harness/project-settings.json`).
-- 주의: 줄 단위 YAML 병합 충돌을 git에 맡기지 않는다. 빨간 land의 되돌림이 루프가 쓴 ProjectSettings도 되돌리는지 같이 본다.
-- 추가 검증: 매트릭스 7·8에 두 worktree가 각자 레이어를 더한 모듈 → submit → 커밋 → land를 두 순서로 → 에디터 트리 깨끗, 두 레이어 모두 커밋됨(항목의 완료 기준).
-  손으로 고친 TagManager가 섞인 land는 여전히 거부.
+### W14 여러 worktree의 ProjectSettings (G5-6) — 완료 (2026-10-01, 아래 "해결됨")
+- 결과: land 쪽 방향. "하네스가 쓴 파일"을 "마지막 빌드가 남긴 내용과 같은 파일"로 정하면 그 빌드 전에 손으로 고친 값(이름 붙이지 않은 값)도 산출물이 되므로,
+  매 설정 실행이 ProjectSettings 파일마다 **빌드만 거쳐 지금 내용에 이른 내용들**(git blob id)을 기록한다(`project-settings.json`의 `files`). 커밋된 내용이 그 안에
+  있는 미커밋 파일 = 커밋된 파일 + 설정 스텝이 쓴 것 → land가 `foreign` 대신 산출물로 본다(병합이 바꾸면 stash로 비키고 병합 뒤 루프가 다시 씀,
+  `land.settings.regenerated`). 녹색 land 뒤 모듈·계약 폴더에 다른 미병합 submit이 없고 에디터 트리에서 고친 코드도 없으면 그 파일들을 land 위에 커밋한다
+  (`land.settings.commit`), 있으면 그 submit까지 land한 마지막 land가 커밋한다(`waitingFor`) → 순서 무관하게 에디터 트리 깨끗·모든 값 커밋. 빨간 land는 루프가 쓴
+  ProjectSettings와 그 기록도 되돌린다(병합이 건드리지 않은 파일 포함 — W10에서 남긴 구멍).
+- 줄 단위 YAML 병합은 git에 맡기지 않았다: 병합 커밋에는 브랜치의 파일이 들어가고(충돌 없는 경우), 그 위의 값은 루프가 쓴다. 두 브랜치가 같은 파일을 각자
+  커밋해 충돌하면(예: `-Own` 에디터의 루프가 쓴 파일) 여전히 `land.conflicts` — 메시지가 master 쪽을 받으라고 알린다(자동으로 풀지 않음: 브랜치의 파일에 사람의
+  편집이 있을 수 있다).
+- 하다가 찾은 것: 손 편집을 가리는 데 "파일 내용 = 마지막 빌드가 남긴 것"으로는 모자랐다 — 손으로 고친 뒤 루프가 한 번 돌면 그 내용이 빌드의 출력이 된다. 그래서 기록은
+  빌드 바깥의 변경(디스크의 다른 내용, 에디터가 저장하지 않은 변경)에서 다시 시작하고, 빌드가 그 변경을 통째로 되돌렸으면(소유한 값만 고친 드리프트) 이어진다.
+  selftest의 진단 문자열 두 곳이 JSON 객체를 `['키']`로 읽어 늘 비어 있었다(판정은 맞았음) → 고침.
+- 매트릭스 7(submit의 진단·되복사), 8(두 순서의 land, 손 편집 거부, 빨간 land의 TagManager 복원).
 
 ### W15 하늘과 씬 반사 (G4-5)
 - 왜 W13 뒤: 완료 기준이 "구름 하늘 샷이 루프 2·3 픽셀까지 같음"이다. 샘플의 모든 샷이 바뀌므로 기준 이미지를 버전별(6.0·6.3·6.6)로 다시 만든다.
@@ -392,14 +396,9 @@ W6c: GPU 베이크 지형·소품, W7: `open.ps1`의 `-automated` 창 에디터 
 - **G5-4 `Assets/Game/Contracts`가 공유 지점이다** → 2026-09-30 해결(W9, 아래 "해결됨"): 발행 모듈별 파일·이름 한 번(lint), 타입 단위 add-only·이름 충돌·미병합
   계약 파일의 소유(submit·land).
 
-- [ ] **G5-6 ProjectSettings 파일은 여러 모듈의 설정 스텝이 같이 쓴다** (2026-09-30, W10에서 드러남)
-  - 현상: 설정 스텝의 값은 모듈 코드에 있지만 그 값이 적히는 YAML(`TagManager.asset`, `QualitySettings.asset`, …)은 파일 하나다. submit은 에디터 트리 사본과 worktree
-    사본이 둘 다 올라간 내용일 때만 루프가 바꾼 파일을 되복사하므로, 두 worktree의 미병합 모듈이 같은 파일을 바꾸면(둘 다 레이어 추가) 두 번째는 되복사되지 않고
-    (`settingsNotWrittenBack`) 에디터 트리에 미커밋 변경이 남는다. 그 파일을 다르게 바꾼 브랜치의 land는 `foreign`으로 거부되고, 줄 단위 YAML 병합도 충돌하기 쉽다.
-    빨간 land의 되돌림은 루프가 쓴 ProjectSettings를 되돌리지 않는다(다음 루프가 그때 코드의 값으로 다시 쓰고, 선언이 사라진 레이어는 비운다).
-  - 방향: land가 "하네스가 쓴" ProjectSettings(마지막 빌드가 남긴 내용과 같은 파일)를 다시 만들 수 있는 산출물로 보고 병합 뒤 루프의 결과로 맞추기, 또는 submit이
-    남의 미병합 설정이 섞인 파일 대신 이 worktree의 코드만으로 만든 파일을 되복사(worktree 전용 에디터 `-Own`이 있으면 그 루프가 쓴 것 — 지금은 안내만).
-  - 완료 기준: 두 worktree가 각자 레이어를 더한 모듈을 submit → 커밋 → land(순서 무관) → 에디터 트리 깨끗, 두 레이어 모두 커밋됨.
+- **G5-6 ProjectSettings 파일은 여러 모듈의 설정 스텝이 같이 쓴다** → 2026-10-01 해결(W14, 아래 "해결됨"): 빌드가 파일마다 "빌드만 거쳐 지금 내용에 이른
+  내용들"을 기록하고, land가 커밋된 파일 + 설정 스텝이 쓴 것을 산출물로 다시 쓰고 마지막 land가 커밋한다(순서 무관). 같은 파일을 각자 커밋한 두 브랜치의 git 충돌은
+  여전히 사람(또는 에이전트)이 master 쪽으로 푼다.
 
 ## 이식성 — `npm install three`처럼 어디에나 붙는다
 
@@ -576,14 +575,19 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
    `contractConflicts`(상대가 미병합임을 보고), 에디터 트리 무변경; A가 B의 미병합 `ProbeEvents.cs`를 자기 내용으로 → `contractOwner` B;
    A가 `Light`를 덧붙임 → 게이트가 `StageModule.cs`의 CS0104(모듈 Stage)로 `stage=compile`; B가 자기 미병합 계약에 필드를 더해 다시 submit → 녹색·`contractsUpdated`.
    프로젝트 설정(W10): B의 새 모듈 설정 스텝이 레이어 20을 선언 → 에디터 트리 `TagManager.asset`이 바뀌고 `settingsWrittenBack`으로 B에 같은 파일; A의 런타임 에러 submit에
-   넣은 설정 스텝(레이어 21) → 되돌리며 TagManager 바이트 그대로, 에디터에서도 레이어 21 없음
+   넣은 설정 스텝(레이어 21) → 되돌리며 TagManager 바이트 그대로(설정 기록 `project-settings.json`도), 에디터에서도 레이어 21 없음
 8. land(G5-5): 새 모듈을 submit → 커밋 → `land.ps1` 녹색(에디터 트리 `git status` 깨끗, stash 버림, 소유 해제), 그 사이 다른 worktree의
    submit은 락 대기 후 녹색. 컴파일 에러 커밋 land → `stage=compile` + `land.reverted` + `restore.ok`, HEAD·`git status` 동일.
    land를 병합 직후 kill → 다음 `loop.ps1`에 `recoveredLand`, 녹색, HEAD·`git status` 동일. `.meta` 미커밋·충돌 → `stage=land` 거부, 무변경.
    (selftest는 이미 병합됨·미커밋·에디터 트리 직접 수정 거부까지 보고, 끝나면 worktree·`selftest/*` 브랜치·테스트 커밋을 스스로 걷어낸다)
    계약(W9): 첫 land가 모듈과 함께 계약 파일 소유도 해제(`releasedContracts`); A의 브랜치가 올라간 `ProbeEcho`와 같은 이름을 선언 → `stage=land` +
    `contractConflicts`(landed), 올라간 타입을 바꿈 → `contractChanged`, 둘 다 HEAD·`git status` 무변경; A가 Smoke 파일에 새 이벤트를 덧붙여 submit(A 소유) →
-   커밋 → land(병합 커밋) 녹색, 소유 해제, 에디터 트리 깨끗. 프로젝트 설정(W10): 되복사한 `TagManager.asset`이 모듈과 함께 land(에디터 트리의 미커밋 사본은 stash로 버려짐)
+   커밋 → land(병합 커밋) 녹색, 소유 해제, 에디터 트리 깨끗. 프로젝트 설정(W10): 되복사한 `TagManager.asset`이 모듈과 함께 land(에디터 트리의 미커밋 사본은 stash로 버려짐).
+   여러 worktree의 ProjectSettings(W14, G5-6): A·B가 각자 레이어를 더한 모듈을 submit(A만 되복사, B는 `settingsNotWrittenBack`) → 커밋 → A가 먼저 land(`regenerated`,
+   커밋 안 함 — `waitingFor`에 B의 파일, 에디터 트리에 세 레이어·HEAD에 두 레이어) → B land(설정 커밋이 HEAD, 세 레이어, 에디터 트리 깨끗); 레이어를 하나씩 더 해 반대
+   순서(B 먼저: 커밋 안 함 → A: 다섯 레이어 커밋); 그 사이 손으로 고친 TagManager(정렬 레이어 `locked`, 루프가 저장한 뒤) → `foreign`(메시지에 `git checkout`), 무변경 →
+   `git checkout` + 루프 → A land 녹색·손 편집 없음; 레이어 25를 더한 런타임 에러 브랜치의 land → 루프가 쓴 레이어, `stage=runtime`, `land.undo`에 TagManager·기록 복원,
+   TagManager 바이트·에디터의 레이어 20–25·HEAD·`git status` 그대로
 9. 새 클론(O-8): `tools/`·`ProjectSettings/`·`Packages/`·`.gitignore`·에디터 시작 코드를 바꿨으면 임시 커밋 후
    `tools/fresh-clone-test.ps1 -SelfTest -ExpectFingerprint <1의 fingerprint>` 녹색(클론이 메인 트리와 같은 fingerprint), `shots/`를 Read로 확인.
    루프 요약의 `golden`: 샘플 버전(6000.3.11f1)은 커밋된 기준 이미지와 `same=3`(새 Library의 첫 임포트도 같은 픽셀), 다른 버전은 `missing`.
@@ -603,6 +607,50 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
 ## 해결됨
 
 (해결한 항목을 여기로 옮기고 날짜, 방법, 검증 결과, 측정값을 적는다.)
+
+- [x] **G5-6 ProjectSettings 파일은 여러 모듈의 설정 스텝이 같이 쓴다** (2026-10-01, W14)
+  - 현상(전): 설정 스텝의 값은 모듈 코드에 있지만 그 값이 적히는 YAML(`TagManager.asset` 등)은 파일 하나다. submit은 에디터 트리 사본과 worktree 사본이 둘 다
+    올라간 내용일 때만 되복사하므로, 두 worktree의 미병합 모듈이 같은 파일을 바꾸면(둘 다 레이어 추가) 둘째는 되복사되지 않고(`settingsNotWrittenBack`) 에디터 트리에
+    미커밋 변경이 남았다 → 그 파일을 바꾼 브랜치의 land는 `foreign`으로 거부, 아니면 마지막 land 뒤에도 미커밋으로 남았다(안내는 "merge 뒤 다시 submit하거나 `-Own`").
+    빨간 land의 되돌림은 루프가 쓴 ProjectSettings를 되돌리지 않았다.
+  - 방향 정하기: ROADMAP의 첫 안("마지막 빌드가 남긴 내용과 같은 파일 = 하네스가 쓴 것")은 손 편집을 가리지 못한다 — 이름 붙이지 않은 값을 손으로 고친 뒤 루프가 한 번
+    돌면 그 내용이 곧 빌드의 출력이다. 그래서 내용 하나가 아니라 **빌드만 거쳐 지금 내용에 이른 내용들**을 기록하고, 커밋된 내용이 그 안에 있는지로 판정했다.
+    submit 쪽 안(이 worktree의 코드만으로 만든 파일을 되복사)은 `-Own` 에디터가 있어야 하고 submit 순서에 기대서 하지 않았다.
+  - 방법:
+    - 기록(`SettingsContext.SaveSnapshot`, `Library/Harness/project-settings.json`의 `files`): 설정 실행(빌드·`harness_setup`)마다 ProjectSettings/*.asset 각각의 git
+      blob id 목록(텍스트는 LF로 — `git hash-object`와 같은 값, 끝이 지금 내용, 최대 64개). 실행이 찾은 내용이 앞 실행이 남긴 것이면 이어 붙이고, 아니면(YAML 손 편집,
+      다른 도구) 찾은 내용부터 다시 시작한다 — 단 이번 실행이 앞 실행이 남긴 내용으로 되돌렸으면(소유한 값만 고친 드리프트) 이어진다. 에디터가 저장하지 않은 변경을
+      가진 파일(`EditorUtility.IsDirty`)은 찾은 내용을 모르는 것으로 친다(이번 실행의 저장이 그 변경을 같이 쓰므로). id는 파일 길이·수정 시각이 같으면 다시 읽지 않는다
+      (25개 파일을 두 번 읽는 데 ~5 ms였다).
+    - land(`Get-HarnessDerivedSettings`, `Get-HarnessModifiedSettings`): 미커밋 ProjectSettings 파일의 지금 내용이 기록의 끝이고 병합 전 커밋의 내용이 기록 안에 있으면
+      = 커밋된 파일 + 설정 스텝이 쓴 것 → `foreign`이 아니다. 병합이 그 파일을 바꾸면 stash에 넣고(`land.settings.regenerated`) 병합 뒤 루프가 병합된 코드와 아직
+      미병합인 submit으로 다시 쓴다(stash 버리기의 "예상 밖 변경"에서도 뺀다).
+    - 녹색 land 뒤(`Save-LandedSettings`): HEAD 기준으로 다시 판정한 산출물 파일(`land.settings.derived`)을, 모듈·계약 폴더에 다른 미커밋 파일이 없고 그 밖의 코드
+      (`.cs`·asmdef·asmref·rsp·dll·`Packages/manifest.json`)도 미커밋이 아니면 land 위에 커밋한다("Project settings the landed code's settings steps write (after landing
+      <branch>)", `land.settings.commit`, `land.head.after`). 아니면 미커밋으로 두고 `waitingFor`(최대 10개)·`note` — 그 submit까지 land한 마지막 land가 커밋한다.
+      다른 Unity 버전의 `ProjectVersion.txt`·`packages-lock.json`이나 그 버전이 다시 쓴 ProjectSettings(6.6: ProjectSettings 4개 + 새 파일 2개)는 막지 않는다(그 파일들은 산출물로도 안 잡힘).
+    - 빨간 land: 저널에 ProjectSettings/*.asset과 기록의 사본(`Library/Harness/land/<runId>.settings`) → 되돌림이 stash 복원 뒤 바뀐 파일을 돌려놓는다(`land.undo`의
+      `restored …`, 죽은 land의 복구도 같은 경로). submit의 백업에도 기록 파일을 더했다(빨간 submit이 파일과 기록을 같이 되돌림 — 기록이 앞서 가 있으면 다음 land에서
+      산출물을 손 편집으로 오판했을 것).
+    - 안내: submit `settingsNote`("Nothing to do: commit the code; land.ps1 …"), land의 `foreign`·`conflicts` 메시지에 ProjectSettings 파일이면 할 일(`git checkout` + 루프,
+      master 쪽 받기).
+  - 하지 않은 것: 두 브랜치가 같은 ProjectSettings 파일을 각자 커밋한 git 충돌(예: `-Own` 에디터의 루프가 쓴 파일을 커밋)은 자동으로 풀지 않는다 — 브랜치 파일에 사람의
+    편집이 섞였는지 에디터 트리의 기록으로는 모른다. "그 파일에 값을 둔 모듈만 미병합이면 기다림"까지 좁히지 않았다(미병합 버전이 선언을 지운 경우 커밋된 코드의 값과
+    달라진다) → 모듈·코드에 미병합이 하나라도 있으면 기다린다.
+  - 검증(이 머신, 6.3 창 에디터):
+    - 기록의 id = `git ls-tree`의 blob id(TagManager·QualitySettings·ProjectSettings 확인). 루프의 `settings` 단계 20.5–20.7 ms(id 캐시 전 26.7 ms, W10 16–17.5 ms),
+      코드 변경 없는 루프 3.68–3.89 s(기준선과 같음), fingerprint 그대로(`896e67fc`).
+    - selftest 7·8만(첫 시도 녹색, 312.5 s): 8m–8o의 submit 11.8–13.6 s(A `settingsWrittenBack`, B `settingsNotWrittenBack`), land 5.7–6.4 s(검사 0.7–1.3 s, 병합 0.4–0.6 s),
+      손 편집 거부 1.4 s, 빨간 land 30.8 s(복원 18.2 s — 컴파일 에러 land 8e의 18.9 s와 같은 재컴파일).
+    - 매트릭스(커밋 `W14 wip`): 샘플 selftest 1–8 녹색 694.6 s(`896e67fc`, 줄 64/71/77/87; 1번 127.5 s — `goldenMaxDiff` 0·다시 그리기 루프 181회 maxDiff 0·커밋된 기준 이미지
+      3/3 같음, 7번 75.6 s, 8번 178.3 s).
+      9: 새 클론 6.3 녹색 804.5 s(selftest 711.1 s, 8번 172.2 s; 루프 3회 `896e67fc`·기준 이미지 same=3, `git status` 깨끗), 6.0 녹색 631.9 s(selftest 544.3 s, 8번 164.3 s;
+      `8acf308c`), 6.6 녹색 840.9 s(selftest 732.1 s, 8번 164.4 s; `6b943b54`) — 두 버전 모두 `git status`는 버전 전환 파일뿐이고 그 미커밋 파일들이 있는 채로 8번의 설정
+      커밋이 녹색이었고, land 보고에서 산출물로 잡힌 파일은 `TagManager.asset` 하나뿐이었다(그 뒤 selftest가 이것을 "정확히 하나"로 검사 — 그 검사로 에디터 트리에서 7·8 다시 녹색 234.5 s, 8번 158.3 s).
+      10: BagelGame 녹색 46.5 s(루프 3회 `619be553`, 출시 빌드 `Managed/` 132개·`Harness.*` 0개), Fluid-Sim 녹색 26.4 s(`54880f05`, 103개·0개), 사내 프로젝트 A 녹색
+      75.9 s(`brd-attach.json`, `6664b723`) — 셋 다 W13과 같은 fingerprint(attach 프로젝트는 설정 스텝이 돌지 않아 기록도 없음), 제거 뒤 `git status` 비어 있음.
+  - 남은 것: 미병합 submit을 land하지 않고 버리면 그 submit의 코드처럼 그동안 다시 쓴 설정도 에디터 트리에 미커밋으로 남는다(그 submit을 걷어낼 때 같이 정리).
+    같은 파일을 각자 커밋한 두 브랜치의 충돌은 사람(에이전트)이 master 쪽으로 푼다.
 
 - [x] **G3-15 같은 코드의 루프끼리 closeup 샷의 픽셀 6–7개가 두 값 중 하나였다** (2026-10-01, W13 — 원인은 URP DBuffer 데칼, 신고는 상시)
   - 현상(W12): 기본 시나리오 `shot0_closeup`의 받침대 오른쪽 아래 — 룬 데칼 원이 받침대 모서리 너머 지면에 닿는 곳, x 907–950·y 666–676 — 의 픽셀 6–7개가 실행마다
@@ -774,7 +822,7 @@ Unity는 6.0 LTS 이상(6000.0.84f1·6000.3.11f1·6000.6.3f1에서 매트릭스 
       (`brd-attach.json`, 86 s, `6664b723`) — 셋 다 W9와 같은 fingerprint(설정 스텝이 없고 attach라 돌지도 않음), 제거 뒤 `git status` 비어 있음.
   - 남은 것: 코드가 이름 붙이지 않은 값은 여전히 커밋된 YAML(ProjectSettings 전체를 코드로 두지는 않았다 — 버전마다 필드가 다르고, 새 필드는 그 버전의 기본값이 맞다).
     정렬 레이어·렌더링 레이어 이름은 `ProjectSetting` 경로로만. URP 전역 설정(`UniversalRenderPipelineGlobalSettings`)은 여전히 URP가 관리하는 커밋 에셋이다.
-    여러 worktree가 같은 ProjectSettings 파일을 바꾸는 경우 → G5-6. `harness_setup`이 적용하는 값(runInBackground 등)을 설정 스텝도 정하면 둘이 번갈아 쓴다(샘플은 안 씀).
+    여러 worktree가 같은 ProjectSettings 파일을 바꾸는 경우 → G5-6(W14에서 해결). `harness_setup`이 적용하는 값(runInBackground 등)을 설정 스텝도 정하면 둘이 번갈아 쓴다(샘플은 안 씀).
 
 - [x] **G5-4 `Assets/Game/Contracts`가 공유 지점이다** · **G5-3 compile-check는 다른 모듈의 최신 변경을 모른다** (2026-09-30, W9)
   - 현상(전): 계약 폴더는 "추가만" 규칙과 주석("One file per publishing module")으로 버텼다. submit은 에디터 트리에 있는 계약 **파일**이 달라지면 거부했고(자기가 막

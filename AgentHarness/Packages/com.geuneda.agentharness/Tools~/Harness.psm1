@@ -707,6 +707,39 @@ function Get-HarnessTreeFiles([string]$Dir, [string]$Rev, [string]$RelDir) {
 
 function Get-HarnessBlobText([string]$Dir, [string]$Id) { (Invoke-HarnessGit $Dir @('cat-file', 'blob', $Id) -Check).out }
 
+# ---- ProjectSettings the settings steps write (G5-6) --------------------------------------------------------------
+# A ProjectSettings file holds the settings of every module's step, and parallel worktrees land into one Editor tree. Every
+# settings run of a harness project records, per ProjectSettings/*.asset, the contents from which only builds led to the file
+# as it is (Library/Harness/project-settings.json "files": git blob ids, the current one last). A file whose committed content
+# is one of them is that file plus what the settings steps wrote - the output of code, which the loop after a merge writes
+# again from the merged code - and not somebody's edit (the YAML edited by hand, a settings window).
+$script:SettingsRecord = 'Library/Harness/project-settings.json'
+
+# Project-relative path -> blob ids (the current content last), from the Editor tree's last settings run.
+function Get-HarnessSettingsRuns {
+    $h = @{}
+    $f = Join-Path $script:ProjectRoot $script:SettingsRecord
+    if (-not (Test-Path -LiteralPath $f)) { return $h }
+    try { foreach ($r in @(([IO.File]::ReadAllText($f) | ConvertFrom-Json).files)) { $h[$r.path] = @($r.ids) } } catch { }
+    $h
+}
+
+# Of the Editor tree's ProjectSettings files <Paths> (project-relative): those that are their content in commit <Rev> plus
+# what the settings steps wrote.
+function Get-HarnessDerivedSettings([string[]]$Paths, [string]$Rev = 'HEAD') {
+    if (@($Paths).Count -eq 0) { return @() }
+    $runs = Get-HarnessSettingsRuns
+    $now = Get-HarnessContentIds $script:ProjectRoot $Paths
+    $committed = Get-HarnessTreeFiles $script:ProjectRoot $Rev 'ProjectSettings'
+    @($Paths | Where-Object { $ids = $runs[$_]; $ids -and $now[$_] -and $ids[-1] -eq $now[$_] -and $committed[$_] -and $ids -contains $committed[$_] })
+}
+
+# Uncommitted (modified) ProjectSettings/*.asset in a git status table (Get-HarnessGitStatus) of the repository whose
+# project is at <Prefix> (rev-parse --show-prefix): project-relative paths.
+function Get-HarnessModifiedSettings([hashtable]$Status, [string]$Prefix) {
+    @($Status.Keys | Where-Object { $Status[$_] -eq ' M' -and $_.StartsWith("${Prefix}ProjectSettings/") -and $_.EndsWith('.asset') } | ForEach-Object { $_.Substring($Prefix.Length) } | Sort-Object)
+}
+
 # Top-level types that C# sources declare, read by the Editor with Roslyn (harness_contracts; nothing is compiled).
 # Sources: hashtables @{ id; path } (absolute, or from the Editor project) or @{ id; text }. Returns id -> @(types {name, ns, full,
 # kind, line, hash}).
@@ -768,7 +801,8 @@ function Format-HarnessContractConflicts($Conflicts) {
 # land.ps1 merges an agent branch into the Editor tree's branch under the lock. The Editor tree holds uncommitted
 # copies of what was submitted, which make git refuse the merge, so it stashes exactly the paths the merge touches
 # (plus leftovers in the merged modules), merges, and runs the loop. A journal (Library/Harness/land/pending.json)
-# lives from before the stash until the land is kept or undone; the next lock holder undoes a land that died.
+# lives from before the stash until the land is kept or undone; the next lock holder undoes a land that died. Harness
+# projects also back up the ProjectSettings files (the loop writes the merged code's settings into them, G5-6).
 # ($script:LandDir, $script:LandJournalPath: Set-HarnessEditorRoot.)
 
 function Save-HarnessLandJournal {
@@ -780,7 +814,48 @@ function Save-HarnessLandJournal {
 }
 
 function Complete-HarnessLand {
+    param($Journal = $null)
     if (Test-Path -LiteralPath $script:LandJournalPath) { Remove-Item -LiteralPath $script:LandJournalPath -Force }
+    $s = if ($Journal) { Get-HarnessJournalValue $Journal 'settings' } else { $null }
+    if ($s -and (Test-Path -LiteralPath $s.backup)) { Remove-Item -LiteralPath $s.backup -Recurse -Force }
+}
+
+# A journal field that may be absent (in memory an ordered dictionary, read back from its file an object; older journals lack newer fields).
+function Get-HarnessJournalValue($Journal, [string]$Name) {
+    if ($Journal -is [System.Collections.IDictionary]) { return $Journal[$Name] }
+    $p = $Journal.PSObject.Properties[$Name]
+    if ($p) { $p.Value } else { $null }
+}
+
+# The ProjectSettings files and the settings record as they are before a land (harness projects, G5-6): the loop on the
+# merged tree writes the merged code's settings into them, also into files the merge does not touch, so an undone land puts
+# them back (Undo-HarnessLand). @{ backup; files } for the journal.
+function Backup-HarnessLandSettings([string]$RunId) {
+    $backup = Join-Path $script:LandDir "$RunId.settings"
+    $dir = Join-Path $script:ProjectRoot 'ProjectSettings'
+    $files = @(@(Get-ChildItem -LiteralPath $dir -File -Filter '*.asset' | ForEach-Object { "ProjectSettings/$($_.Name)" }) + @($script:SettingsRecord) |
+        Where-Object { [IO.File]::Exists([IO.Path]::Combine($script:ProjectRoot, $_)) })
+    foreach ($rel in $files) {
+        $b = [IO.Path]::Combine($backup, $rel)
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($b))
+        [IO.File]::Copy([IO.Path]::Combine($script:ProjectRoot, $rel), $b, $true)
+    }
+    [ordered]@{ backup = $backup.Replace('\', '/'); files = $files }
+}
+
+# Put back the files Backup-HarnessLandSettings saved whose content changed since (Unity reads a changed settings file again).
+function Restore-HarnessLandSettings($Settings) {
+    $restored = @()
+    foreach ($rel in @($Settings.files)) {
+        $abs = [IO.Path]::Combine($script:ProjectRoot, $rel)
+        $b = [IO.Path]::Combine($Settings.backup, $rel)
+        if (-not [IO.File]::Exists($b)) { continue }
+        if ([IO.File]::Exists($abs) -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($abs)) -eq [Convert]::ToBase64String([IO.File]::ReadAllBytes($b))) { continue }
+        [IO.File]::Copy($b, $abs, $true)
+        [IO.File]::SetLastWriteTimeUtc($abs, [DateTime]::UtcNow)
+        $restored += $rel
+    }
+    $restored
 }
 
 # refs/stash is shared by every worktree of the repository: an agent's 'git stash pop' could take the land's entry.
@@ -806,8 +881,9 @@ function Test-HarnessLandMerge([string]$Repo, [string]$Head, $Journal) {
 }
 
 # Undo a land: abort a half-done merge, reset HEAD to the pre-land commit touching only the merged paths (other
-# uncommitted work in the tree stays), drop .meta files Unity generated for what the merge added, re-apply the stash.
-# Returns the steps taken. Throws when the tree is not in a state it can undo safely.
+# uncommitted work in the tree stays), drop .meta files Unity generated for what the merge added, re-apply the stash,
+# put back the ProjectSettings files the loop changed. Returns the steps taken. Throws when the tree is not in a state it
+# can undo safely.
 function Undo-HarnessLand {
     param([Parameter(Mandatory)]$Journal)
     $repo = $Journal.repo
@@ -865,7 +941,13 @@ function Undo-HarnessLand {
         [void](Invoke-HarnessGit $repo @('update-ref', '-d', (Get-HarnessLandStashRef $Journal.runId)))
         $steps += "stash apply $sha"
     }
-    Complete-HarnessLand
+    # ProjectSettings the loop wrote from the merged code, also where the merge touched nothing (G5-6).
+    $settings = Get-HarnessJournalValue $Journal 'settings'
+    if ($settings) {
+        $restored = @(Restore-HarnessLandSettings $settings)
+        if ($restored.Count) { $steps += "restored $($restored -join ', ')" }
+    }
+    Complete-HarnessLand $Journal
     $steps
 }
 
@@ -1410,4 +1492,6 @@ Export-ModuleMember -Function Get-HarnessProjectRoot, Get-HarnessWorkRoot, Test-
     Test-HarnessSamePath, Get-HarnessRepoRoot, Write-HarnessPathspec, Get-HarnessContentIds, Get-HarnessOwners, Save-HarnessOwners,
     Get-HarnessModuleChanges, Save-HarnessLandJournal, Complete-HarnessLand, Get-HarnessLandStashRef, Find-HarnessLandStash,
     Undo-HarnessLand, Get-HarnessContractOwners, Save-HarnessContractOwners, Get-HarnessTreeFiles, Get-HarnessBlobText,
-    Get-HarnessDeclaredTypes, Test-HarnessContracts, Format-HarnessContractChanges, Format-HarnessContractConflicts
+    Get-HarnessDeclaredTypes, Test-HarnessContracts, Format-HarnessContractChanges, Format-HarnessContractConflicts,
+    Get-HarnessSettingsRuns, Get-HarnessDerivedSettings, Get-HarnessModifiedSettings, Backup-HarnessLandSettings, Restore-HarnessLandSettings,
+    Get-HarnessJournalValue

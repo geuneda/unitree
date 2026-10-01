@@ -126,6 +126,7 @@ Pipeline 서버가 뜨기 전의 다이얼로그(새로 설치한 버전의 이�
   "land": {"branch","into","phase","head":{"before","after"},"merged","fastForward","kept","reverted",  // land.ps1만.
            "modules","files","stash":{"sha","paths","dropped"},"releasedOwners","releasedContracts","errorModules","undo","restore",
            "conflicts","missingMeta","owner","foreign","uncommitted","contractOwner","contractChanged","contractConflicts",
+           "settings":{"regenerated","derived","commit","waitingFor","note","error"},   // 설정 스텝이 쓴 ProjectSettings(아래 "프로젝트 설정", G5-6)
            "note","warning","stillPending"},   // 거부 사유는 해당 필드에. timings에 checkSec/mergeSec/restoreSec
   "recoveredSubmit": {"runId","workRoot","modules","files"},     // 도중에 죽은 submit을 이번 실행이 되돌렸을 때만
   "recoveredLand": {"runId","branch","steps"}                    // 도중에 죽은 land를 이번 실행이 되돌렸을 때만
@@ -497,8 +498,19 @@ public sealed class FooProjectSettings : ISettingsStep       // 렌더 설정과
 - 소유한 값은 `build.fingerprint`에 들어간다(`fingerprint.txt`의 `--project--`). `setup: attach` 프로젝트에서는 설정 스텝이 돌지 않는다(렌더 설정과 같음).
 - **worktree에서**: 설정 스텝을 고친 모듈을 submit하면 에디터 트리의 루프가 ProjectSettings 파일을 바꾼다. submit은 그 파일들을 먼저 백업하고(빨간·중단된 submit은
   바뀐 파일만 복원), 녹색이면 `.meta`처럼 worktree로 되복사한다(`submit.settingsWrittenBack` — **모듈과 함께 커밋할 것**, land 때 에디터 트리 사본과 같아서 깨끗하게
-  병합된다). 에디터 트리 사본이나 worktree 사본이 이미 올라간 것과 달랐으면(다른 worktree의 미병합 설정, 이 worktree에 없는 병합된 설정) 되복사하지 않고
-  `settingsNotWrittenBack` + `settingsNote` → `git merge master` 뒤 다시 submit하거나, `open.ps1 -Own` 에디터의 루프가 쓴 파일을 커밋한다(ROADMAP G5-6).
+  병합된다). 에디터 트리 사본이나 worktree 사본이 이미 올라간 것과 달랐으면(다른 worktree의 미병합 설정, 이 worktree에 없는 병합된 설정) 되복사하지 않는다
+  (`settingsNotWrittenBack`) — **할 일 없음**: 코드만 커밋하고 land한다.
+- **여러 worktree가 같은 파일을 바꿀 때(G5-6)**: 레이어처럼 한 파일(`TagManager.asset`)을 여러 모듈의 설정 스텝이 같이 쓴다. 매 빌드가 ProjectSettings 파일마다
+  "빌드만 거쳐 지금 내용에 이른 내용들"을 남기므로(`project-settings.json`의 `files`, git blob id), land는 **커밋된 파일 + 설정 스텝이 쓴 것**인 미커밋 파일을 남의
+  편집이 아니라 산출물로 본다: 병합이 그 파일을 바꾸면 stash로 비켜 두고, 병합 뒤 루프가 병합된 코드(와 아직 미병합인 다른 submit)로 다시 쓴다(`land.settings.regenerated`).
+  녹색 land 뒤 모듈·계약 폴더에 다른 미병합 submit이 없고 에디터 트리에서 고친 코드도 없으면 그 파일들을 land 위에 커밋한다(`land.settings.commit` —
+  "Project settings the landed code's settings steps write"). 있으면 미커밋으로 두고(`land.settings.waitingFor`) 그것들까지 land한 마지막 land가 커밋한다 →
+  **순서와 상관없이** 마지막 land 뒤 에디터 트리가 깨끗하고 모든 모듈의 값이 커밋돼 있다. 빨간 land는 루프가 쓴 ProjectSettings(병합이 건드리지 않은 파일 포함)와
+  그 기록도 되돌린다(`land.undo`의 `restored ...`).
+  - 손으로(또는 Project Settings 창에서) 고친 내용이 섞인 파일은 산출물이 아니다 — 그 뒤 루프가 저장했어도 기록이 그 내용부터 다시 시작한다. 병합이 그 파일을 바꾸면
+    전처럼 `land.foreign`(메시지에 그 파일): 그 편집을 커밋하거나 `git checkout -- <파일>` 뒤 `loop.ps1`(설정 스텝이 값을 다시 쓴다)로 산출물로 되돌린다.
+  - 두 브랜치가 같은 ProjectSettings 파일을 각자 커밋해 `land.conflicts`가 나면(예: `-Own` 에디터의 루프가 쓴 파일을 커밋) worktree에서 `git merge master` 때 그 파일은
+    master 쪽(`git checkout --theirs -- <파일>`)을 받는다 — 브랜치의 값은 land 뒤 루프가 다시 쓴다.
 
 ## 에디터 커맨드 (모두 JSON 반환)
 
@@ -797,10 +809,12 @@ worktree에서 인자 없이 돌리면 그 worktree의 브랜치, 에디터 트�
    브랜치가 `Assets/`에 추가하는 파일·폴더의 `.meta`가 커밋 안 됨(`land.missingMeta`) · 건드리는 모듈에 다른 worktree의 미병합 submit(`land.owner`, `-Takeover`) ·
    계약: 바꾸는 계약 파일에 다른 worktree의 미병합 submit(`land.contractOwner`), 올라간 타입 변경(`land.contractChanged`), 에디터 트리의 계약(미병합 포함)과 이름 중복
    (`land.contractConflicts`) · 덮어쓸 미커밋 변경이 이 브랜치의 submit 사본(또는 같은 내용)이 아님(`land.foreign`, 예: 에디터 트리를 직접 고친 것 — 사람이 커밋·stash).
-3. 저널(`Library/Harness/land/pending.json`) → 병합이 건드리는 경로와 그 모듈의 미커밋 사본만 `git stash`
+   커밋된 파일 + 설정 스텝이 쓴 것인 ProjectSettings 파일은 덮어써도 된다(루프가 다시 씀, 위 "프로젝트 설정"의 G5-6).
+3. 저널(`Library/Harness/land/pending.json`) + ProjectSettings 파일 사본(harness 프로젝트) → 병합이 건드리는 경로와 그 모듈의 미커밋 사본만 `git stash`
    (stash 목록은 모든 worktree가 공유하므로 바로 `refs/agentharness/land/<runId>`로 옮긴다) → `git merge`.
-4. 에디터 트리에서 평소 루프. 녹색이면 병합 유지 + stash 버림 + 소유 해제(`land.releasedOwners`, `land.releasedContracts`). 빨가면 `git reset --keep`으로 병합 전 커밋
-   (병합한 경로만; 다른 에이전트의 미커밋 submit은 그대로) → stash 복원 → 재컴파일(`land.undo`, `land.restore`). `-KeepOnFail`은 submit과 같다.
+4. 에디터 트리에서 평소 루프. 녹색이면 병합 유지 + stash 버림 + 소유 해제(`land.releasedOwners`, `land.releasedContracts`) + 다른 미병합 submit이 남지 않았으면 설정 스텝이
+   쓴 ProjectSettings를 커밋(`land.settings.commit`, 위 "프로젝트 설정"). 빨가면 `git reset --keep`으로 병합 전 커밋
+   (병합한 경로만; 다른 에이전트의 미커밋 submit은 그대로) → stash 복원 → ProjectSettings 복원 → 재컴파일(`land.undo`, `land.restore`). `-KeepOnFail`은 submit과 같다.
 
 - land가 도중에 죽어도 다음에 락을 잡는 loop/uc/submit/land가 저널로 되돌린다 → report에 `recoveredLand`.
 - 이미 병합된 브랜치는 아무것도 안 하고 녹색(`land.note`). submit했지만 브랜치에 없는 변경이 남은 모듈은 소유를 유지하고 `land.warning`.
@@ -894,7 +908,9 @@ powershell -ExecutionPolicy Bypass -File tools/fresh-clone-test.ps1 -UnityVersio
   `TagManager.asset`이 바뀌고 submit이 worktree로 되복사, 런타임 에러 submit에 넣은 설정 스텝의 레이어는 되돌리며 TagManager도 복원) ·
   8 land(fast-forward + 그 사이 submit 락 대기, 모듈·계약 파일 소유 해제, 이미 병합됨, 미커밋·`.meta` 누락·충돌·에디터 트리 직접 수정 거부, 컴파일 에러 되돌림,
   병합 직후 kill → `recoveredLand`; 계약: 올라간 이름과 같은 이름·올라간 타입 변경 거부, Smoke 파일에 덧붙인 이벤트의 submit → land(병합 커밋) → 소유 해제;
-  되복사한 `TagManager.asset`이 모듈과 함께 land돼 에디터 트리 깨끗).
+  되복사한 `TagManager.asset`이 모듈과 함께 land돼 에디터 트리 깨끗; G5-6: 두 worktree가 각자 레이어를 더한 모듈을 submit(첫째만 되복사) → 커밋 → land를 두 순서로 —
+  먼저 land한 쪽은 설정을 커밋하지 않고(`waitingFor`) 나중 쪽이 두 레이어를 커밋, 에디터 트리 깨끗; 손으로 고친 TagManager(루프가 저장한 뒤에도)는 `foreign`,
+  `git checkout` + 루프 뒤 녹색이고 그 편집은 커밋되지 않음; 레이어를 더한 런타임 에러 land는 TagManager를 바이트까지·에디터에서도 되돌림).
   에러는 **주입한 줄 그대로**(file/line/module) 보고돼야 녹색이다.
   1번 끝에는 플레이어 실행(W8): `player.ps1`이 기본 시나리오 + 게임 카메라 캡처를 개발 빌드 플레이어에서 돌린다 — 녹색, 1280x720 창·vSync 0, 에디터와 같은
   `play.events`, 플레이어의 프레임·렌더 통계, 샷이 에디터 것과 파티클 차이 안(바뀐 픽셀 ≤ 1%, 평균 ≤ 2), 그 프레임의 화면 = 캡처(`screen.vsShot` same),
